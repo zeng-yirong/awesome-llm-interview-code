@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, BookOpen, Lightbulb, ExternalLink } from 'lucide-react';
+import { ChevronDown, BookOpen, Lightbulb, ExternalLink, Flame, Star, Code2, GitBranch } from 'lucide-react';
 import CodeBlock from './CodeBlock';
 import { Problem, sources } from '../data/problems';
 
@@ -8,29 +8,9 @@ interface ProblemCardProps {
   problem: Problem;
 }
 
-const difficultyColors = {
-  Easy: 'bg-green-500/20 text-green-400 border-green-500/30',
-  Medium: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-  Hard: 'bg-red-500/20 text-red-400 border-red-500/30',
-};
-
-const categoryColors: Record<string, string> = {
-  Attention: 'bg-purple-500/20 text-purple-400',
-  Normalization: 'bg-blue-500/20 text-blue-400',
-  Position: 'bg-emerald-500/20 text-emerald-400',
-  FFN: 'bg-orange-500/20 text-orange-400',
-  Loss: 'bg-red-500/20 text-red-400',
-  PEFT: 'bg-cyan-500/20 text-cyan-400',
-  RL: 'bg-pink-500/20 text-pink-400',
-  Inference: 'bg-indigo-500/20 text-indigo-400',
-  Basics: 'bg-amber-500/20 text-amber-400',
-  Sampling: 'bg-teal-500/20 text-teal-400',
-  Optimizer: 'bg-rose-500/20 text-rose-400',
-};
-
 const sourceLabels: Record<string, { label: string; color: string }> = {
   ckd0817: { label: 'LLM-Interview-Code', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
-  cdhx: { label: 'LLM-Code-Hot-100', color: 'bg-green-500/20 text-green-400 border-green-500/30' },
+  cdhx: { label: 'LLM-Code-Hot-100', color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
   both: { label: 'Both Repos', color: 'bg-purple-500/20 text-purple-400 border-purple-500/30' },
 };
 
@@ -44,57 +24,52 @@ export default function ProblemCard({ problem }: ProblemCardProps) {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -20 }}
-      className="bg-gray-900/50 backdrop-blur-sm border border-gray-800 rounded-xl overflow-hidden hover:border-gray-700 transition-colors"
+      className="bg-gray-900/60 backdrop-blur-sm border border-gray-800 rounded-xl overflow-hidden hover:border-gray-700 transition-colors"
     >
       {/* Header */}
-      <div
-        className="p-5 cursor-pointer"
-        onClick={() => setIsExpanded(!isExpanded)}
-      >
+      <div className="p-5 cursor-pointer" onClick={() => setIsExpanded(!isExpanded)}>
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
+            {/* Badges row */}
             <div className="flex items-center gap-2 mb-2 flex-wrap">
-              <span className={`text-xs px-2 py-0.5 rounded-full border ${difficultyColors[problem.difficulty]}`}>
-                {problem.difficulty}
+              {/* Hot */}
+              <span className="inline-flex items-center gap-0.5 text-xs px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-400 border border-orange-500/25">
+                {Array.from({ length: problem.hot }).map((_, i) => (
+                  <Flame key={i} size={10} fill="currentColor" />
+                ))}
               </span>
-              <span className={`text-xs px-2 py-0.5 rounded-full ${categoryColors[problem.category] || 'bg-gray-500/20 text-gray-400'}`}>
+              {/* Difficulty */}
+              <span className="inline-flex items-center gap-0.5 text-xs px-2 py-0.5 rounded-full bg-yellow-500/15 text-yellow-400 border border-yellow-500/25">
+                {Array.from({ length: problem.difficulty }).map((_, i) => (
+                  <Star key={i} size={10} fill="currentColor" />
+                ))}
+                {Array.from({ length: 5 - problem.difficulty }).map((_, i) => (
+                  <Star key={`e${i}`} size={10} />
+                ))}
+              </span>
+              {/* Category */}
+              <span className="text-xs px-2 py-0.5 rounded-full bg-gray-800 text-gray-400 border border-gray-700">
                 {problem.category}
               </span>
+              {/* Source */}
               <span className={`text-xs px-2 py-0.5 rounded-full border ${sourceInfo.color}`}>
                 {sourceInfo.label}
               </span>
             </div>
-            <h3 className="text-lg font-semibold text-white mb-1">
-              {problem.titleCn}
-            </h3>
-            <p className="text-sm text-gray-400">
-              {problem.title}
-            </p>
+            {/* Title */}
+            <h3 className="text-lg font-semibold text-white mb-0.5">{problem.titleCn}</h3>
+            <p className="text-sm text-gray-500">{problem.title}</p>
           </div>
           <motion.div
             animate={{ rotate: isExpanded ? 180 : 0 }}
             transition={{ duration: 0.2 }}
-            className="text-gray-400 mt-1 flex-shrink-0"
+            className="text-gray-500 mt-1 flex-shrink-0"
           >
             <ChevronDown size={20} />
           </motion.div>
         </div>
-
-        <p className="text-sm text-gray-400 mt-3 line-clamp-2">
-          {problem.description}
-        </p>
-
-        {/* Tags */}
-        <div className="flex flex-wrap gap-1.5 mt-3">
-          {problem.tags.map((tag) => (
-            <span
-              key={tag}
-              className="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-400 border border-gray-700"
-            >
-              #{tag}
-            </span>
-          ))}
-        </div>
+        {/* One-liner */}
+        <p className="text-sm text-gray-300 mt-3 font-medium">{problem.oneLiner}</p>
       </div>
 
       {/* Expanded Content */}
@@ -108,47 +83,85 @@ export default function ProblemCard({ problem }: ProblemCardProps) {
             className="overflow-hidden"
           >
             <div className="px-5 pb-5 space-y-4 border-t border-gray-800 pt-4">
-              {/* Key Points */}
-              <div className="bg-gray-800/50 rounded-lg p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <Lightbulb size={16} className="text-yellow-400" />
-                  <h4 className="text-sm font-semibold text-yellow-400">面试要点</h4>
+              {/* Principle */}
+              <div className="bg-gray-800/40 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Lightbulb size={15} className="text-amber-400" />
+                  <h4 className="text-sm font-semibold text-amber-400">原理 & 思想</h4>
                 </div>
-                <ul className="space-y-2">
+                <p className="text-sm text-gray-300 leading-relaxed">{problem.principle}</p>
+              </div>
+
+              {/* Formula */}
+              <div className="bg-gray-800/40 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-sm">📐</span>
+                  <h4 className="text-sm font-semibold text-cyan-400">核心公式</h4>
+                </div>
+                <pre className="text-sm text-cyan-300 font-mono whitespace-pre-wrap leading-relaxed overflow-x-auto">
+                  {problem.formula}
+                </pre>
+              </div>
+
+              {/* Flow Diagram */}
+              <div className="bg-gray-800/40 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <GitBranch size={15} className="text-green-400" />
+                  <h4 className="text-sm font-semibold text-green-400">张量流程图</h4>
+                </div>
+                <pre className="text-xs text-green-300/90 font-mono whitespace-pre overflow-x-auto leading-relaxed">
+                  {problem.flowDiagram}
+                </pre>
+              </div>
+
+              {/* Code */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Code2 size={15} className="text-blue-400" />
+                  <h4 className="text-sm font-semibold text-blue-400">代码实现</h4>
+                </div>
+                <CodeBlock code={problem.code} language="python" />
+              </div>
+
+              {/* Key Points */}
+              <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <BookOpen size={15} className="text-amber-400" />
+                  <h4 className="text-sm font-semibold text-amber-400">面试要点</h4>
+                </div>
+                <ul className="space-y-1.5">
                   {problem.keyPoints.map((point, idx) => (
                     <li key={idx} className="flex items-start gap-2 text-sm text-gray-300">
-                      <span className="text-yellow-400 mt-0.5 flex-shrink-0">•</span>
+                      <span className="text-amber-500 mt-0.5 flex-shrink-0">▸</span>
                       <span>{point}</span>
                     </li>
                   ))}
                 </ul>
               </div>
 
-              {/* Code */}
-              <div>
-                <div className="flex items-center gap-2 mb-3">
-                  <BookOpen size={16} className="text-blue-400" />
-                  <h4 className="text-sm font-semibold text-blue-400">参考实现</h4>
-                </div>
-                <CodeBlock code={problem.code} language={problem.language} />
-              </div>
-
-              {/* Source Attribution */}
-              {problem.source !== 'both' && sources[problem.source] && (
-                <div className="flex items-center gap-2 text-xs text-gray-500 pt-2">
-                  <ExternalLink size={12} />
-                  <span>来源：</span>
-                  <a
-                    href={sources[problem.source].url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-400 hover:text-blue-300 transition-colors"
-                    onClick={(e) => e.stopPropagation()}
-                  >
+              {/* Source link */}
+              <div className="flex items-center gap-2 text-xs text-gray-500 pt-1">
+                <ExternalLink size={11} />
+                <span>来源：</span>
+                {problem.source === 'both' ? (
+                  <>
+                    <a href={sources.ckd0817.url} target="_blank" rel="noopener noreferrer"
+                      className="text-blue-400 hover:text-blue-300" onClick={e => e.stopPropagation()}>
+                      {sources.ckd0817.name}
+                    </a>
+                    <span>+</span>
+                    <a href={sources.cdhx.url} target="_blank" rel="noopener noreferrer"
+                      className="text-emerald-400 hover:text-emerald-300" onClick={e => e.stopPropagation()}>
+                      {sources.cdhx.name}
+                    </a>
+                  </>
+                ) : (
+                  <a href={sources[problem.source].url} target="_blank" rel="noopener noreferrer"
+                    className="text-blue-400 hover:text-blue-300" onClick={e => e.stopPropagation()}>
                     {sources[problem.source].name}
                   </a>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </motion.div>
         )}
