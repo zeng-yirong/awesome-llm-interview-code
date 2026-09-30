@@ -1,9 +1,9 @@
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Brain, Code2, Zap, BookOpen, Github, Sparkles } from 'lucide-react';
+import { Brain, Code2, Zap, BookOpen, ExternalLink, Sparkles, Github, Star } from 'lucide-react';
 import ProblemCard from './components/ProblemCard';
 import SearchFilter from './components/SearchFilter';
-import { problems, categories, Category, Difficulty } from './data/problems';
+import { problems, categories, sources, Category, Difficulty } from './data/problems';
 
 export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -12,7 +12,6 @@ export default function App() {
 
   const filteredProblems = useMemo(() => {
     return problems.filter((problem) => {
-      // Search filter
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
         const matchesSearch =
@@ -23,17 +22,8 @@ export default function App() {
           problem.keyPoints.some((point) => point.includes(query));
         if (!matchesSearch) return false;
       }
-
-      // Category filter
-      if (selectedCategory && problem.category !== selectedCategory) {
-        return false;
-      }
-
-      // Difficulty filter
-      if (selectedDifficulty && problem.difficulty !== selectedDifficulty) {
-        return false;
-      }
-
+      if (selectedCategory && problem.category !== selectedCategory) return false;
+      if (selectedDifficulty && problem.difficulty !== selectedDifficulty) return false;
       return true;
     });
   }, [searchQuery, selectedCategory, selectedDifficulty]);
@@ -54,9 +44,8 @@ export default function App() {
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-cyan-500/3 rounded-full blur-3xl" />
       </div>
 
-      {/* Content */}
       <div className="relative z-10">
-        {/* Header / Hero */}
+        {/* Header */}
         <header className="border-b border-gray-800/50">
           <div className="max-w-6xl mx-auto px-4 py-8 sm:py-12">
             <motion.div
@@ -65,7 +54,6 @@ export default function App() {
               transition={{ duration: 0.5 }}
               className="text-center"
             >
-              {/* Logo */}
               <div className="flex items-center justify-center gap-3 mb-4">
                 <div className="relative">
                   <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20">
@@ -79,7 +67,7 @@ export default function App() {
                 Hand-torn Code for LLM Interviews
               </h1>
               <p className="text-gray-400 text-lg max-w-2xl mx-auto mb-6">
-                大模型面试手撕代码总结 — 涵盖 Transformer、注意力机制、分词器、训练优化、推理加速等核心主题
+                大模型面试手撕代码总结 — 整合多个优质开源仓库，涵盖注意力机制、归一化、位置编码、FFN、损失函数、参数高效微调等核心主题
               </p>
 
               {/* Stats */}
@@ -110,13 +98,46 @@ export default function App() {
           </div>
         </header>
 
+        {/* Source Repos */}
+        <div className="max-w-6xl mx-auto px-4 pt-6">
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8"
+          >
+            {Object.entries(sources).map(([key, source]) => (
+              <a
+                key={key}
+                href={source.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 p-3 rounded-xl bg-gray-900/50 border border-gray-800 hover:border-gray-600 transition-all group"
+              >
+                <div className="w-8 h-8 rounded-lg bg-gray-800 flex items-center justify-center flex-shrink-0">
+                  <Github size={16} className="text-gray-400 group-hover:text-white transition-colors" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-white truncate">{source.name}</p>
+                  <p className="text-xs text-gray-500 truncate">{source.description}</p>
+                </div>
+                <div className="flex items-center gap-1 text-xs text-yellow-500 flex-shrink-0">
+                  <Star size={12} fill="currentColor" />
+                  <span>{source.stars}</span>
+                </div>
+                <ExternalLink size={14} className="text-gray-600 group-hover:text-gray-400 transition-colors flex-shrink-0" />
+              </a>
+            ))}
+          </motion.div>
+        </div>
+
         {/* Main Content */}
-        <main className="max-w-6xl mx-auto px-4 py-8">
+        <main className="max-w-6xl mx-auto px-4 pb-8">
           {/* Search & Filter */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.1 }}
+            transition={{ duration: 0.5, delay: 0.15 }}
             className="mb-8"
           >
             <SearchFilter
@@ -135,10 +156,11 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.5, delay: 0.2 }}
-            className="mb-8 grid grid-cols-2 sm:grid-cols-4 gap-3"
+            className="mb-8 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3"
           >
-            {categories.slice(0, 4).map((cat) => {
+            {categories.slice(0, 6).map((cat) => {
               const count = problems.filter((p) => p.category === cat.name).length;
+              if (count === 0) return null;
               return (
                 <button
                   key={cat.name}
@@ -185,10 +207,26 @@ export default function App() {
             <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
               <div className="flex items-center gap-2 text-gray-500 text-sm">
                 <Zap size={14} className="text-yellow-400" />
-                <span>持续更新中 · 面试加油 💪</span>
+                <span>整合自多个优质开源仓库 · 持续更新中 · 面试加油 💪</span>
               </div>
               <div className="flex items-center gap-4 text-sm text-gray-500">
-                <span>Built with React + TypeScript + Tailwind</span>
+                <a
+                  href={sources.ckd0817.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-gray-300 transition-colors"
+                >
+                  ckd0817/LLM-Interview-Code
+                </a>
+                <span>·</span>
+                <a
+                  href={sources.cdhx.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-gray-300 transition-colors"
+                >
+                  cdhx/LLM-Code-Hot-100
+                </a>
               </div>
             </div>
           </div>

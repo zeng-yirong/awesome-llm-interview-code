@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, BookOpen, Lightbulb } from 'lucide-react';
+import { ChevronDown, BookOpen, Lightbulb, ExternalLink } from 'lucide-react';
 import CodeBlock from './CodeBlock';
-import { Problem } from '../data/problems';
+import { Problem, sources } from '../data/problems';
 
 interface ProblemCardProps {
   problem: Problem;
@@ -15,18 +15,28 @@ const difficultyColors = {
 };
 
 const categoryColors: Record<string, string> = {
-  Transformer: 'bg-blue-500/20 text-blue-400',
   Attention: 'bg-purple-500/20 text-purple-400',
-  Tokenizer: 'bg-emerald-500/20 text-emerald-400',
-  Training: 'bg-orange-500/20 text-orange-400',
-  Inference: 'bg-cyan-500/20 text-cyan-400',
-  'Data Structures': 'bg-pink-500/20 text-pink-400',
-  Algorithms: 'bg-indigo-500/20 text-indigo-400',
-  'System Design': 'bg-rose-500/20 text-rose-400',
+  Normalization: 'bg-blue-500/20 text-blue-400',
+  Position: 'bg-emerald-500/20 text-emerald-400',
+  FFN: 'bg-orange-500/20 text-orange-400',
+  Loss: 'bg-red-500/20 text-red-400',
+  PEFT: 'bg-cyan-500/20 text-cyan-400',
+  RL: 'bg-pink-500/20 text-pink-400',
+  Inference: 'bg-indigo-500/20 text-indigo-400',
+  Basics: 'bg-amber-500/20 text-amber-400',
+  Sampling: 'bg-teal-500/20 text-teal-400',
+  Optimizer: 'bg-rose-500/20 text-rose-400',
+};
+
+const sourceLabels: Record<string, { label: string; color: string }> = {
+  ckd0817: { label: 'LLM-Interview-Code', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
+  cdhx: { label: 'LLM-Code-Hot-100', color: 'bg-green-500/20 text-green-400 border-green-500/30' },
+  both: { label: 'Both Repos', color: 'bg-purple-500/20 text-purple-400 border-purple-500/30' },
 };
 
 export default function ProblemCard({ problem }: ProblemCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const sourceInfo = sourceLabels[problem.source];
 
   return (
     <motion.div
@@ -49,6 +59,9 @@ export default function ProblemCard({ problem }: ProblemCardProps) {
               </span>
               <span className={`text-xs px-2 py-0.5 rounded-full ${categoryColors[problem.category] || 'bg-gray-500/20 text-gray-400'}`}>
                 {problem.category}
+              </span>
+              <span className={`text-xs px-2 py-0.5 rounded-full border ${sourceInfo.color}`}>
+                {sourceInfo.label}
               </span>
             </div>
             <h3 className="text-lg font-semibold text-white mb-1">
@@ -119,6 +132,23 @@ export default function ProblemCard({ problem }: ProblemCardProps) {
                 </div>
                 <CodeBlock code={problem.code} language={problem.language} />
               </div>
+
+              {/* Source Attribution */}
+              {problem.source !== 'both' && sources[problem.source] && (
+                <div className="flex items-center gap-2 text-xs text-gray-500 pt-2">
+                  <ExternalLink size={12} />
+                  <span>来源：</span>
+                  <a
+                    href={sources[problem.source].url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-400 hover:text-blue-300 transition-colors"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {sources[problem.source].name}
+                  </a>
+                </div>
+              )}
             </div>
           </motion.div>
         )}
