@@ -150,15 +150,15 @@ ASCII 流程图展示数据变换过程
 
 ### 在线浏览
 
-- 🌐 **GitHub Pages**: [在线网站](https://你的用户名.github.io/你的仓库名/)
+- 🌐 **GitHub Pages**: [在线网站](https://zeng-yirong.github.io/awesome-llm-interview-code/)
 - 📖 **直接阅读**: 点击上方表格中的题目链接
 
 ### 本地运行
 
 ```bash
 # 克隆仓库
-git clone https://github.com/你的用户名/你的仓库名.git
-cd 你的仓库名
+git clone https://github.com/zeng-yirong/awesome-llm-interview-code.git
+cd awesome-llm-interview-code
 
 # 安装依赖 & 启动
 npm install

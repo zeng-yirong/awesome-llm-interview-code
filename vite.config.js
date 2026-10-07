@@ -5,8 +5,7 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   // GitHub Pages 部署配置
-  // 项目站点使用仓库名，例如: '/your-repo-name/'
-  // 如果部署到根域名，使用 '/'
+  // 项目站点: https://zeng-yirong.github.io/awesome-llm-interview-code/
   base: './',
   server: {
     host: "0.0.0.0",

@@ -46,13 +46,13 @@ git push origin main
 部署成功后，你的网站地址是：
 
 ```
-https://你的用户名.github.io/你的仓库名/
+https://zeng-yirong.github.io/awesome-llm-interview-code/
 ```
 
-例如：
-- 用户名：`zhangsan`
-- 仓库名：`llm-interview-code`
-- 访问地址：`https://zhangsan.github.io/llm-interview-code/`
+仓库信息：
+- 用户名：`zeng-yirong`
+- 仓库名：`awesome-llm-interview-code`
+- 访问地址：`https://zeng-yirong.github.io/awesome-llm-interview-code/`
 
 ---
 
