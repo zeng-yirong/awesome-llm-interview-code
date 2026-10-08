@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, BookOpen, Lightbulb, Flame, Star, Code2, GitBranch } from 'lucide-react';
+import { ChevronDown, Lightbulb, Code2, GitBranch, BookOpen } from 'lucide-react';
 import CodeBlock from './CodeBlock';
 import { Problem } from '../data/problems';
 
@@ -17,48 +17,86 @@ export default function ProblemCard({ problem }: ProblemCardProps) {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -20 }}
-      className="bg-gray-900/60 backdrop-blur-sm border border-gray-800 rounded-xl overflow-hidden hover:border-gray-700 transition-colors"
+      className="rounded-xl border overflow-hidden transition-all hover:shadow-lg"
+      style={{
+        backgroundColor: 'var(--bg-secondary)',
+        borderColor: 'var(--border-color)'
+      }}
     >
       {/* Header */}
-      <div className="p-5 cursor-pointer" onClick={() => setIsExpanded(!isExpanded)}>
+      <div 
+        className="p-6 cursor-pointer"
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
         <div className="flex items-start justify-between gap-4">
-          <div className="flex-1 min-w-0">
-            {/* Badges row */}
-            <div className="flex items-center gap-2 mb-2 flex-wrap">
+          <div className="flex-1">
+            {/* Badges */}
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
               {/* Hot */}
-              <span className="inline-flex items-center gap-0.5 text-xs px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-400 border border-orange-500/25">
-                {Array.from({ length: problem.hot }).map((_, i) => (
-                  <Flame key={i} size={10} fill="currentColor" />
-                ))}
+              <span 
+                className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full font-medium"
+                style={{
+                  backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                  color: '#ef4444'
+                }}
+              >
+                {'🔥'.repeat(problem.hot)}
               </span>
+              
               {/* Difficulty */}
-              <span className="inline-flex items-center gap-0.5 text-xs px-2 py-0.5 rounded-full bg-yellow-500/15 text-yellow-400 border border-yellow-500/25">
-                {Array.from({ length: problem.difficulty }).map((_, i) => (
-                  <Star key={i} size={10} fill="currentColor" />
-                ))}
-                {Array.from({ length: 5 - problem.difficulty }).map((_, i) => (
-                  <Star key={`e${i}`} size={10} />
-                ))}
+              <span 
+                className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full font-medium"
+                style={{
+                  backgroundColor: 'rgba(234, 179, 8, 0.1)',
+                  color: '#eab308'
+                }}
+              >
+                {'⭐'.repeat(problem.difficulty)}
               </span>
+              
               {/* Category */}
-              <span className="text-xs px-2 py-0.5 rounded-full bg-gray-800 text-gray-400 border border-gray-700">
+              <span 
+                className="text-xs px-2 py-1 rounded-full font-medium"
+                style={{
+                  backgroundColor: 'var(--bg-tertiary)',
+                  color: 'var(--text-secondary)'
+                }}
+              >
                 {problem.category}
               </span>
             </div>
+
             {/* Title */}
-            <h3 className="text-lg font-semibold text-white mb-0.5">{problem.titleCn}</h3>
-            <p className="text-sm text-gray-500">{problem.title}</p>
+            <h3 
+              className="text-xl font-bold mb-1"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              {problem.titleCn}
+            </h3>
+            <p 
+              className="text-sm mb-3"
+              style={{ color: 'var(--text-tertiary)' }}
+            >
+              {problem.title}
+            </p>
+
+            {/* One-liner */}
+            <p 
+              className="text-sm font-medium"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              {problem.oneLiner}
+            </p>
           </div>
+
           <motion.div
             animate={{ rotate: isExpanded ? 180 : 0 }}
             transition={{ duration: 0.2 }}
-            className="text-gray-500 mt-1 flex-shrink-0"
+            style={{ color: 'var(--text-tertiary)' }}
           >
-            <ChevronDown size={20} />
+            <ChevronDown size={24} />
           </motion.div>
         </div>
-        {/* One-liner */}
-        <p className="text-sm text-gray-300 mt-3 font-medium">{problem.oneLiner}</p>
       </div>
 
       {/* Expanded Content */}
@@ -71,34 +109,69 @@ export default function ProblemCard({ problem }: ProblemCardProps) {
             transition={{ duration: 0.3 }}
             className="overflow-hidden"
           >
-            <div className="px-5 pb-5 space-y-4 border-t border-gray-800 pt-4">
+            <div 
+              className="px-6 pb-6 space-y-6 border-t"
+              style={{ borderColor: 'var(--border-color)' }}
+            >
               {/* Principle */}
-              <div className="bg-gray-800/40 rounded-lg p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <Lightbulb size={15} className="text-amber-400" />
-                  <h4 className="text-sm font-semibold text-amber-400">原理 & 思想</h4>
+              <div className="pt-6">
+                <div className="flex items-center gap-2 mb-3">
+                  <Lightbulb size={18} style={{ color: '#f59e0b' }} />
+                  <h4 
+                    className="text-sm font-semibold"
+                    style={{ color: 'var(--text-primary)' }}
+                  >
+                    原理 & 思想
+                  </h4>
                 </div>
-                <p className="text-sm text-gray-300 leading-relaxed">{problem.principle}</p>
+                <p 
+                  className="text-sm leading-relaxed"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  {problem.principle}
+                </p>
               </div>
 
               {/* Formula */}
-              <div className="bg-gray-800/40 rounded-lg p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-sm">📐</span>
-                  <h4 className="text-sm font-semibold text-cyan-400">核心公式</h4>
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-lg">📐</span>
+                  <h4 
+                    className="text-sm font-semibold"
+                    style={{ color: 'var(--text-primary)' }}
+                  >
+                    核心公式
+                  </h4>
                 </div>
-                <pre className="text-sm text-cyan-300 font-mono whitespace-pre-wrap leading-relaxed overflow-x-auto">
+                <pre 
+                  className="text-sm font-mono whitespace-pre-wrap p-4 rounded-lg overflow-x-auto"
+                  style={{
+                    backgroundColor: 'var(--bg-tertiary)',
+                    color: 'var(--text-primary)'
+                  }}
+                >
                   {problem.formula}
                 </pre>
               </div>
 
               {/* Flow Diagram */}
-              <div className="bg-gray-800/40 rounded-lg p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <GitBranch size={15} className="text-green-400" />
-                  <h4 className="text-sm font-semibold text-green-400">张量流程图</h4>
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <GitBranch size={18} style={{ color: '#10b981' }} />
+                  <h4 
+                    className="text-sm font-semibold"
+                    style={{ color: 'var(--text-primary)' }}
+                  >
+                    张量流程图
+                  </h4>
                 </div>
-                <pre className="text-xs text-green-300/90 font-mono whitespace-pre overflow-x-auto leading-relaxed">
+                <pre 
+                  className="text-xs font-mono whitespace-pre p-4 rounded-lg overflow-x-auto"
+                  style={{
+                    backgroundColor: 'var(--bg-tertiary)',
+                    color: 'var(--text-secondary)'
+                  }}
+                >
                   {problem.flowDiagram}
                 </pre>
               </div>
@@ -106,22 +179,36 @@ export default function ProblemCard({ problem }: ProblemCardProps) {
               {/* Code */}
               <div>
                 <div className="flex items-center gap-2 mb-3">
-                  <Code2 size={15} className="text-blue-400" />
-                  <h4 className="text-sm font-semibold text-blue-400">代码实现</h4>
+                  <Code2 size={18} style={{ color: 'var(--accent-color)' }} />
+                  <h4 
+                    className="text-sm font-semibold"
+                    style={{ color: 'var(--text-primary)' }}
+                  >
+                    代码实现
+                  </h4>
                 </div>
                 <CodeBlock code={problem.code} language="python" />
               </div>
 
               {/* Key Points */}
-              <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-4">
+              <div>
                 <div className="flex items-center gap-2 mb-3">
-                  <BookOpen size={15} className="text-amber-400" />
-                  <h4 className="text-sm font-semibold text-amber-400">面试要点</h4>
+                  <BookOpen size={18} style={{ color: '#f59e0b' }} />
+                  <h4 
+                    className="text-sm font-semibold"
+                    style={{ color: 'var(--text-primary)' }}
+                  >
+                    面试要点
+                  </h4>
                 </div>
-                <ul className="space-y-1.5">
+                <ul className="space-y-2">
                   {problem.keyPoints.map((point, idx) => (
-                    <li key={idx} className="flex items-start gap-2 text-sm text-gray-300">
-                      <span className="text-amber-500 mt-0.5 flex-shrink-0">▸</span>
+                    <li 
+                      key={idx}
+                      className="flex items-start gap-2 text-sm"
+                      style={{ color: 'var(--text-secondary)' }}
+                    >
+                      <span style={{ color: '#f59e0b' }}>▸</span>
                       <span>{point}</span>
                     </li>
                   ))}
