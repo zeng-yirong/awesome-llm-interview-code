@@ -22,23 +22,36 @@ export default function CodeBlock({ code, language }: CodeBlockProps) {
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
     
-    // 第二步：使用正则表达式字面量（避免字符串转义问题）
-    // 组1: 注释, 组2: 三引号字符串, 组3: 单引号字符串, 组4: 双引号字符串
-    // 组5: 装饰器, 组6: 关键字, 组7: 类型, 组8: 数字, 组9: torch相关
-    const combinedPattern = /(#[^\n]*)|("""[\s\S]*?""")|('[^']*')|("[^"]*")|(@\w+)|(\b(?:import|from|class|def|return|if|else|elif|for|while|in|not|and|or|is|None|True|False|self|super|with|as|try|except|raise|pass|break|continue|lambda|yield|assert|global|nonlocal)\b)|(\b(?:int|float|str|bool|list|dict|tuple|Optional|List|Dict|Tuple|Callable|Any|Union)\b)|(\b\d+\.?\d*\b)|(\b(?:torch|nn|F|math)\b)/gm;
+    // 第二步：使用占位符方法，避免多次替换导致的嵌套问题
+    const placeholders: Map<string, string> = new Map();
+    let placeholderId = 0;
     
-    // 第三步：一次性替换所有匹配
-    escaped = escaped.replace(combinedPattern, (match, p1, p2, p3, p4, p5, p6, p7, p8, p9) => {
-      if (p1 !== undefined) return `<span class="text-gray-500 italic">${p1}</span>`;
-      if (p2 !== undefined) return `<span class="text-gray-500">${p2}</span>`;
-      if (p3 !== undefined) return `<span class="text-emerald-400">${p3}</span>`;
-      if (p4 !== undefined) return `<span class="text-emerald-400">${p4}</span>`;
-      if (p5 !== undefined) return `<span class="text-yellow-400">${p5}</span>`;
-      if (p6 !== undefined) return `<span class="text-purple-400 font-medium">${p6}</span>`;
-      if (p7 !== undefined) return `<span class="text-cyan-400">${p7}</span>`;
-      if (p8 !== undefined) return `<span class="text-orange-400">${p8}</span>`;
-      if (p9 !== undefined) return `<span class="text-rose-400">${p9}</span>`;
-      return match;
+    // 定义高亮规则（按优先级排序）
+    const rules = [
+      { pattern: /#[^\n]*/g, className: 'text-gray-500 italic' },
+      { pattern: /"""[\s\S]*?"""/g, className: 'text-gray-500' },
+      { pattern: /'[^']*'/g, className: 'text-emerald-400' },
+      { pattern: /"[^"]*"/g, className: 'text-emerald-400' },
+      { pattern: /@\w+/g, className: 'text-yellow-400' },
+      { pattern: /\b(import|from|class|def|return|if|else|elif|for|while|in|not|and|or|is|None|True|False|self|super|with|as|try|except|raise|pass|break|continue|lambda|yield|assert|global|nonlocal)\b/g, className: 'text-purple-400 font-medium' },
+      { pattern: /\b(int|float|str|bool|list|dict|tuple|Optional|List|Dict|Tuple|Callable|Any|Union)\b/g, className: 'text-cyan-400' },
+      { pattern: /\b\d+\.?\d*\b/g, className: 'text-orange-400' },
+      { pattern: /\b(torch|nn|F|math)\b/g, className: 'text-rose-400' },
+    ];
+    
+    // 按优先级应用每个规则，使用占位符
+    for (const rule of rules) {
+      escaped = escaped.replace(rule.pattern, (match) => {
+        const placeholder = `\u0000${placeholderId}\u0000`;
+        placeholders.set(placeholder, `<span class="${rule.className}">${match}</span>`);
+        placeholderId++;
+        return placeholder;
+      });
+    }
+    
+    // 第三步：恢复占位符
+    placeholders.forEach((value, key) => {
+      escaped = escaped.replace(key, value);
     });
     
     return escaped;
