@@ -153,6 +153,4 @@ if __name__ == "__main__":
 - **面试常问**: 各激活函数的梯度和使用场景？
 - **对比**: ReLU vs GELU vs SiLU 的优缺点？
 
----
 
-**来源**: [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)

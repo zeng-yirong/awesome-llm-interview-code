@@ -109,6 +109,4 @@ def ppo_step(model, data, gamma=0.99, lam=0.95):
 - **GRPO 不需要 GAE** (用组内归一化代替)
 - **面试常问**: GAE 的 λ 参数有什么作用？
 
----
 
-**来源**: [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)

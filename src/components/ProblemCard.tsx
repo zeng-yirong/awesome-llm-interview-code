@@ -1,22 +1,15 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, BookOpen, Lightbulb, ExternalLink, Flame, Star, Code2, GitBranch } from 'lucide-react';
+import { ChevronDown, BookOpen, Lightbulb, Flame, Star, Code2, GitBranch } from 'lucide-react';
 import CodeBlock from './CodeBlock';
-import { Problem, sources } from '../data/problems';
+import { Problem } from '../data/problems';
 
 interface ProblemCardProps {
   problem: Problem;
 }
 
-const sourceLabels: Record<string, { label: string; color: string }> = {
-  ckd0817: { label: 'LLM-Interview-Code', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
-  cdhx: { label: 'LLM-Code-Hot-100', color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
-  both: { label: 'Both Repos', color: 'bg-purple-500/20 text-purple-400 border-purple-500/30' },
-};
-
 export default function ProblemCard({ problem }: ProblemCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const sourceInfo = sourceLabels[problem.source];
 
   return (
     <motion.div
@@ -50,10 +43,6 @@ export default function ProblemCard({ problem }: ProblemCardProps) {
               {/* Category */}
               <span className="text-xs px-2 py-0.5 rounded-full bg-gray-800 text-gray-400 border border-gray-700">
                 {problem.category}
-              </span>
-              {/* Source */}
-              <span className={`text-xs px-2 py-0.5 rounded-full border ${sourceInfo.color}`}>
-                {sourceInfo.label}
               </span>
             </div>
             {/* Title */}
@@ -137,30 +126,6 @@ export default function ProblemCard({ problem }: ProblemCardProps) {
                     </li>
                   ))}
                 </ul>
-              </div>
-
-              {/* Source link */}
-              <div className="flex items-center gap-2 text-xs text-gray-500 pt-1">
-                <ExternalLink size={11} />
-                <span>来源：</span>
-                {problem.source === 'both' ? (
-                  <>
-                    <a href={sources.ckd0817.url} target="_blank" rel="noopener noreferrer"
-                      className="text-blue-400 hover:text-blue-300" onClick={e => e.stopPropagation()}>
-                      {sources.ckd0817.name}
-                    </a>
-                    <span>+</span>
-                    <a href={sources.cdhx.url} target="_blank" rel="noopener noreferrer"
-                      className="text-emerald-400 hover:text-emerald-300" onClick={e => e.stopPropagation()}>
-                      {sources.cdhx.name}
-                    </a>
-                  </>
-                ) : (
-                  <a href={sources[problem.source].url} target="_blank" rel="noopener noreferrer"
-                    className="text-blue-400 hover:text-blue-300" onClick={e => e.stopPropagation()}>
-                    {sources[problem.source].name}
-                  </a>
-                )}
               </div>
             </div>
           </motion.div>

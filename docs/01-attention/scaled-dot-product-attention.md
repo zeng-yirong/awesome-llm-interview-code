@@ -94,6 +94,4 @@ if __name__ == "__main__":
 - **时间复杂度**: O(n²d)，空间复杂度 O(n²)
 - **面试常问**: 为什么要缩放？不缩放会怎样？
 
----
 
-**来源**: [ckd0817/LLM-Interview-Code](https://github.com/ckd0817/LLM-Interview-Code) + [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)

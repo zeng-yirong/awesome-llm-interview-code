@@ -87,6 +87,4 @@ def sft_loss(logits, labels, prompt_lengths):
 - **SFT**: prompt 部分 label 设为 -100，只算 response
 - **面试常问**: Pretrain Loss 和 SFT Loss 的区别？
 
----
 
-**来源**: [ckd0817/LLM-Interview-Code](https://github.com/ckd0817/LLM-Interview-Code) + [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)

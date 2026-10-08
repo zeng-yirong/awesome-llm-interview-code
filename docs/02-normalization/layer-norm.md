@@ -84,6 +84,4 @@ if __name__ == "__main__":
 - **Post-Norm**: `x = LN(x + SubLayer(x))` — 原始 Transformer
 - **对比 BatchNorm**: BN 沿 batch 维度归一化，LN 沿特征维度
 
----
 
-**来源**: [ckd0817/LLM-Interview-Code](https://github.com/ckd0817/LLM-Interview-Code) + [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)

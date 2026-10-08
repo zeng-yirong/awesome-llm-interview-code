@@ -103,6 +103,4 @@ if __name__ == "__main__":
 - **PagedAttention (vLLM)** 用分页管理 KV Cache 减少碎片
 - **面试常问**: KV Cache 有多大？如何优化？
 
----
 
-**来源**: [ckd0817/LLM-Interview-Code](https://github.com/ckd0817/LLM-Interview-Code) + [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)

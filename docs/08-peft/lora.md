@@ -118,6 +118,4 @@ if __name__ == "__main__":
 - **QLoRA = LoRA + 4bit 量化**，进一步降低显存
 - **面试常问**: LoRA 的初始化策略？为什么 B 初始化为零？
 
----
 
-**来源**: [ckd0817/LLM-Interview-Code](https://github.com/ckd0817/LLM-Interview-Code) + [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)

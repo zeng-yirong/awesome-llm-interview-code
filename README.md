@@ -1,11 +1,9 @@
 # 🧠 Hand-torn Code for LLM Interviews
 
-> **大模型面试手撕代码大全** — 整合两大优质开源仓库，去重统一风格
+> **大模型面试手撕代码大全** — 去重统一风格
 >
 > 每题含 **原理 · 公式 · 流程图 · 代码 · 面试要点**，助你高效备战 LLM 面试
 
-[![Stars](https://img.shields.io/github/stars/ckd0817/LLM-Interview-Code?style=social)](https://github.com/ckd0817/LLM-Interview-Code)
-[![Stars](https://img.shields.io/github/stars/cdhx/LLM-Code-Hot-100?style=social)](https://github.com/cdhx/LLM-Code-Hot-100)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
 ---

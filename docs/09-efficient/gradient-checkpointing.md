@@ -119,6 +119,4 @@ print(f"\nMemory saved: {(mem1 - mem2):.2f} GB ({(1 - mem2/mem1)*100:.1f}%)")
 - **use_reentrant=False** 是新版推荐设置
 - **面试常问**: 梯度检查点的原理？代价是什么？
 
----
 
-**来源**: [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)

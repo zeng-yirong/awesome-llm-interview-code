@@ -120,6 +120,4 @@ if __name__ == "__main__":
 - **Softmax + CE 的梯度特别简洁**: y - one_hot
 - **面试常问**: 反向传播的原理？链式法则如何应用？
 
----
 
-**来源**: [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)
