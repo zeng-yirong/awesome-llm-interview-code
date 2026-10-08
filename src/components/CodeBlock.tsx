@@ -22,20 +22,10 @@ export default function CodeBlock({ code, language }: CodeBlockProps) {
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
     
-    // 第二步：构建综合正则表达式，一次性匹配所有模式
-    // 使用捕获组来识别匹配的类型
-    const combinedPattern = new RegExp(
-      '(#[^\\n]*)' +                    // 组1: 注释
-      '|("""[\\s\\S]*?""")' +           // 组2: 三引号字符串
-      "|('[^']*')" +                    // 组3: 单引号字符串
-      '|("[^"]*")' +                    // 组4: 双引号字符串
-      '|(@\\w+)' +                      // 组5: 装饰器
-      '|\\b(import|from|class|def|return|if|else|elif|for|while|in|not|and|or|is|None|True|False|self|super|with|as|try|except|raise|pass|break|continue|lambda|yield|assert|global|nonlocal)\\b' + // 组6: 关键字
-      '|\\b(int|float|str|bool|list|dict|tuple|Optional|List|Dict|Tuple|Callable|Any|Union)\\b' + // 组7: 类型
-      '|\\b(\\d+\\.?\\d*)\\b' +         // 组8: 数字
-      '|\\b(torch|nn|F|math)\\b',       // 组9: torch相关
-      'gm'
-    );
+    // 第二步：使用正则表达式字面量（避免字符串转义问题）
+    // 组1: 注释, 组2: 三引号字符串, 组3: 单引号字符串, 组4: 双引号字符串
+    // 组5: 装饰器, 组6: 关键字, 组7: 类型, 组8: 数字, 组9: torch相关
+    const combinedPattern = /(#[^\n]*)|("""[\s\S]*?""")|('[^']*')|("[^"]*")|(@\w+)|(\b(?:import|from|class|def|return|if|else|elif|for|while|in|not|and|or|is|None|True|False|self|super|with|as|try|except|raise|pass|break|continue|lambda|yield|assert|global|nonlocal)\b)|(\b(?:int|float|str|bool|list|dict|tuple|Optional|List|Dict|Tuple|Callable|Any|Union)\b)|(\b\d+\.?\d*\b)|(\b(?:torch|nn|F|math)\b)/gm;
     
     // 第三步：一次性替换所有匹配
     escaped = escaped.replace(combinedPattern, (match, p1, p2, p3, p4, p5, p6, p7, p8, p9) => {
