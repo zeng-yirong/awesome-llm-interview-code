@@ -58,18 +58,44 @@ export default function CodeBlock({ code, language }: CodeBlockProps) {
   };
 
   return (
-    <div className="rounded-lg overflow-hidden bg-gray-950 border border-gray-800">
-      <div className="flex items-center justify-between px-3 py-1.5 bg-gray-900/80 border-b border-gray-800">
-        <span className="text-[10px] text-gray-500 font-mono uppercase">{language}</span>
-        <button onClick={handleCopy}
-          className="flex items-center gap-1 text-[10px] text-gray-500 hover:text-white transition-colors px-1.5 py-0.5 rounded hover:bg-gray-800">
-          {copied ? <><Check size={11} className="text-green-400" /><span className="text-green-400">OK</span></>
-                  : <><Copy size={11} /><span>Copy</span></>}
+    <div className="rounded-lg overflow-hidden border" style={{
+      backgroundColor: '#1e293b',
+      borderColor: 'var(--border-color)'
+    }}>
+      {/* Header */}
+      <div 
+        className="flex items-center justify-between px-4 py-2 border-b"
+        style={{
+          backgroundColor: '#0f172a',
+          borderColor: 'var(--border-color)'
+        }}
+      >
+        <span className="text-xs font-mono text-gray-400">{language}</span>
+        <button
+          onClick={handleCopy}
+          className="flex items-center gap-1 text-xs text-gray-400 hover:text-white transition-colors px-2 py-1 rounded hover:bg-gray-700"
+        >
+          {copied ? (
+            <>
+              <Check size={14} className="text-green-400" />
+              <span className="text-green-400">已复制</span>
+            </>
+          ) : (
+            <>
+              <Copy size={14} />
+              <span>复制</span>
+            </>
+          )}
         </button>
       </div>
-      <div className="overflow-x-auto p-3">
-        <pre className="text-[13px] leading-relaxed">
-          <code className="text-gray-300 font-mono" dangerouslySetInnerHTML={{ __html: highlight(code) }} />
+
+      {/* Code */}
+      <div className="overflow-x-auto p-4">
+        <pre className="text-sm leading-relaxed">
+          <code
+            className="text-gray-300 font-mono"
+            dangerouslySetInnerHTML={{ __html: highlight(code) }}
+          />
         </pre>
       </div>
     </div>
