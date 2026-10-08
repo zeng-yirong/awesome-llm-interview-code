@@ -139,6 +139,4 @@ if __name__ == "__main__":
 - **典型加速: 2-3x** (取决于任务和 draft model 质量)
 - **面试常问**: 投机解码的原理？为什么无损？
 
----
 
-**来源**: [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)

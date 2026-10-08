@@ -105,6 +105,4 @@ if __name__ == "__main__":
 - **LLaMA 2 70B 用 GQA(8 groups)**，推理内存降 75%
 - **训练速度几乎不受影响，推理速度显著提升**
 
----
 
-**来源**: [ckd0817/LLM-Interview-Code](https://github.com/ckd0817/LLM-Interview-Code) + [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)

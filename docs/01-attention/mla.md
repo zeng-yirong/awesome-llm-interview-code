@@ -111,6 +111,4 @@ if __name__ == "__main__":
 - **DeepSeek-V2 用 MLA + MoE** 实现极高效率
 - **面试重点**: 理解低秩压缩的思想，不要求完整实现
 
----
 
-**来源**: [ckd0817/LLM-Interview-Code](https://github.com/ckd0817/LLM-Interview-Code)

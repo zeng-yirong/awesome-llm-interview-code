@@ -146,6 +146,4 @@ if __name__ == "__main__":
 - **支持 copy-on-write** 实现 beam search 的 KV 共享
 - **面试常问**: PagedAttention 的原理？如何提高内存利用率？
 
----
 
-**来源**: [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)

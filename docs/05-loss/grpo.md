@@ -122,6 +122,4 @@ if __name__ == "__main__":
 - **DeepSeek-R1 使用 GRPO** 进行强化学习
 - **面试常问**: GRPO 和 PPO 的区别？为什么不需要 Critic？
 
----
 
-**来源**: [ckd0817/LLM-Interview-Code](https://github.com/ckd0817/LLM-Interview-Code) + [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)

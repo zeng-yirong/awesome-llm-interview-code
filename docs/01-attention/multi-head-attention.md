@@ -103,6 +103,4 @@ if __name__ == "__main__":
 - **head_dim = d_model / n_heads**，通常 64 或 128
 - **参数量**: 4 × d_model² (Wq, Wk, Wv, Wo)
 
----
 
-**来源**: [ckd0817/LLM-Interview-Code](https://github.com/ckd0817/LLM-Interview-Code) + [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)

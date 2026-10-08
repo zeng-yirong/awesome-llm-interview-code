@@ -79,6 +79,4 @@ if __name__ == "__main__":
 - **MoE 本质上是对 FFN 层的稀疏化**
 - **面试常问**: FFN 的作用是什么？为什么参数量这么大？
 
----
 
-**来源**: [ckd0817/LLM-Interview-Code](https://github.com/ckd0817/LLM-Interview-Code) + [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)

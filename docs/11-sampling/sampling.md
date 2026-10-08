@@ -146,6 +146,4 @@ if __name__ == "__main__":
 - **Greedy (T→0)** 可复现，sampling 不可复现
 - **面试常问**: Temperature 的作用？Top-k 和 Top-p 的区别？
 
----
 
-**来源**: [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)

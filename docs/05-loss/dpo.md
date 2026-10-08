@@ -92,6 +92,4 @@ if __name__ == "__main__":
 - **变体**: IPO, KTO, ORPO, SimPO 等
 - **面试常问**: DPO 和 PPO 的区别？为什么 DPO 更简单？
 
----
 
-**来源**: [ckd0817/LLM-Interview-Code](https://github.com/ckd0817/LLM-Interview-Code) + [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)

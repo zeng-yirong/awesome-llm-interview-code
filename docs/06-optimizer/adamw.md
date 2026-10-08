@@ -107,6 +107,4 @@ if __name__ == "__main__":
 - **配合 cosine schedule with warmup** 使用
 - **面试常问**: AdamW 和 Adam 的区别？为什么要解耦权重衰减？
 
----
 
-**来源**: [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)

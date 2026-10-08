@@ -1,9 +1,9 @@
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Brain, Code2, Zap, BookOpen, ExternalLink, Sparkles, Github, Star, Flame } from 'lucide-react';
+import { Brain, Code2, Zap, BookOpen, Sparkles, Star, Flame } from 'lucide-react';
 import ProblemCard from './components/ProblemCard';
 import SearchFilter from './components/SearchFilter';
-import { problems, categories, sources, Category } from './data/problems';
+import { problems, categories, Category } from './data/problems';
 
 export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -72,7 +72,7 @@ export default function App() {
                 Hand-torn Code for LLM Interviews
               </h1>
               <p className="text-gray-400 text-base max-w-2xl mx-auto mb-5">
-                整合两大优质开源仓库，去重统一风格 — 每题含原理、公式、流程图、代码、面试要点
+                去重统一风格 — 每题含原理、公式、流程图、代码、面试要点
               </p>
 
               {/* Stats bar */}
@@ -106,22 +106,7 @@ export default function App() {
           </div>
         </header>
 
-        {/* Source Repos */}
-        <div className="max-w-6xl mx-auto px-4 pt-5">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-6">
-            {Object.entries(sources).map(([key, source]) => (
-              <a key={key} href={source.url} target="_blank" rel="noopener noreferrer"
-                className="flex items-center gap-3 p-2.5 rounded-lg bg-gray-900/50 border border-gray-800 hover:border-gray-600 transition-all group">
-                <Github size={16} className="text-gray-400 group-hover:text-white flex-shrink-0" />
-                <span className="text-sm text-gray-300 truncate flex-1">{source.name}</span>
-                <div className="flex items-center gap-1 text-xs text-yellow-500 flex-shrink-0">
-                  <Star size={11} fill="currentColor" />{source.stars}
-                </div>
-                <ExternalLink size={12} className="text-gray-600 group-hover:text-gray-400 flex-shrink-0" />
-              </a>
-            ))}
-          </div>
-        </div>
+
 
         {/* Main */}
         <main className="max-w-6xl mx-auto px-4 pb-8">
@@ -190,15 +175,10 @@ export default function App() {
 
         {/* Footer */}
         <footer className="border-t border-gray-800/50 mt-12">
-          <div className="max-w-6xl mx-auto px-4 py-6 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="max-w-6xl mx-auto px-4 py-6 flex items-center justify-center">
             <div className="flex items-center gap-2 text-gray-500 text-xs">
               <Zap size={12} className="text-yellow-400" />
-              <span>整合自两个优质开源仓库 · 去重统一风格 · 持续更新</span>
-            </div>
-            <div className="flex items-center gap-3 text-xs text-gray-600">
-              <a href={sources.ckd0817.url} target="_blank" rel="noopener noreferrer" className="hover:text-gray-400">ckd0817</a>
-              <span>·</span>
-              <a href={sources.cdhx.url} target="_blank" rel="noopener noreferrer" className="hover:text-gray-400">cdhx</a>
+              <span>去重统一风格 · 持续更新</span>
             </div>
           </div>
         </footer>

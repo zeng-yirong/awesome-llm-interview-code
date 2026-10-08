@@ -112,6 +112,4 @@ if __name__ == "__main__":
 - **需要 reward model + critic model + reference model**
 - **面试常问**: PPO 的 clip 机制是如何工作的？
 
----
 
-**来源**: [ckd0817/LLM-Interview-Code](https://github.com/ckd0817/LLM-Interview-Code)

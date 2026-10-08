@@ -97,6 +97,4 @@ if __name__ == "__main__":
 - **theta=10000 是标准值**，调整可实现长度外推 (NTK/YaRN)
 - **LLaMA, Mistral, Qwen 等主流模型都使用 RoPE**
 
----
 
-**来源**: [ckd0817/LLM-Interview-Code](https://github.com/ckd0817/LLM-Interview-Code) + [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)

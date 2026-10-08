@@ -78,6 +78,4 @@ if __name__ == "__main__":
 - **LLaMA, PaLM, Mistral, Qwen 等主流模型都使用**
 - **面试常问**: SwiGLU 和标准 FFN 的区别？为什么效果更好？
 
----
 
-**来源**: [ckd0817/LLM-Interview-Code](https://github.com/ckd0817/LLM-Interview-Code) + [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)

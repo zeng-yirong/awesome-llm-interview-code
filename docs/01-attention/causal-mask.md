@@ -73,6 +73,4 @@ if __name__ == "__main__":
 - **训练时可用 causal mask 并行计算所有位置的 loss**
 - **面试常问**: 为什么训练时可以并行？因为 causal mask 保证了每个位置只能看到之前的 token
 
----
 
-**来源**: [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)

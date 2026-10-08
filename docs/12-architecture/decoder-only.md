@@ -134,6 +134,4 @@ if __name__ == "__main__":
 - **GPT/LLaMA/Mistral/Qwen 都是 decoder-only**
 - **面试常问**: Decoder-only 和 Encoder-Decoder 的区别？为什么现代 LLM 都用 Decoder-only？
 
----
 
-**来源**: [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)

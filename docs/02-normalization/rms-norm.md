@@ -76,6 +76,4 @@ if __name__ == "__main__":
 - **LLaMA, Mistral, PaLM, Gemma 等都用 RMSNorm**
 - **对比 LayerNorm**: 计算更快，参数更少，效果相当
 
----
 
-**来源**: [ckd0817/LLM-Interview-Code](https://github.com/ckd0817/LLM-Interview-Code) + [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)

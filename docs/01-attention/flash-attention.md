@@ -97,6 +97,4 @@ if __name__ == "__main__":
 - **Flash Attention 2/3** 进一步优化了并行度和 warp 级别操作
 - **面试重点**: 理解分块计算和 Online Softmax 的思想
 
----
 
-**来源**: [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)

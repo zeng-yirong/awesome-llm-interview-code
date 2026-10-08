@@ -92,6 +92,4 @@ def check_mixed_precision(model):
 - **主权重始终 FP32** 保证精度
 - **面试常问**: FP16 和 BF16 的区别？为什么 BF16 不需要 loss scaling？
 
----
 
-**来源**: [cdhx/LLM-Code-Hot-100](https://github.com/cdhx/LLM-Code-Hot-100)
