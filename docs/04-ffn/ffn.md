@@ -28,16 +28,20 @@
 
 ## 📐 核心公式
 
-```
-FFN(x) = W₂ · ReLU(W₁ · x + b₁) + b₂
+$$
+\operatorname{FFN}(x)=W_2\operatorname{ReLU}(W_1x+b_1)+b_2
+$$
 
-参数量: D × 4D + 4D × D = 8D² (vs Attention: 4D²)
+$$
+W_1\in\mathbb{R}^{D\times 4D},\qquad W_2\in\mathbb{R}^{4D\times D}
+$$
 
-其中:
-- W₁: [D, 4D] 上投影
-- W₂: [4D, D] 下投影
-- 中间维度通常是 d_model 的 4 倍
-```
+$$
+\begin{aligned}
+\text{FFN}: &\quad D\cdot 4D+4D\cdot D=8D^{2}\\[2pt]
+\text{Attention}: &\quad 4D^{2}
+\end{aligned}
+$$
 
 ## 📊 张量流程图
 

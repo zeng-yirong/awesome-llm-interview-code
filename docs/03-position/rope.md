@@ -29,16 +29,23 @@
 
 ## 📐 核心公式
 
-```
-f(q, m) = q × cos(mθ) + rotate_half(q) × sin(mθ)
+$$
+f(q,m)=q\odot\cos(m\theta)+\operatorname{rotate\_half}(q)\odot\sin(m\theta)
+$$
 
-rotate_half([x₁, x₂]) = [-x₂, x₁]
+$$
+\operatorname{rotate\_half}([x_1,x_2])=[-x_2,\ x_1],
+\qquad
+R(m\theta)=\begin{pmatrix}\cos m\theta & -\sin m\theta\\[2pt] \sin m\theta & \cos m\theta\end{pmatrix}
+$$
 
-等价旋转矩阵: [cos(mθ), -sin(mθ)] [x₁]
-              [sin(mθ),  cos(mθ)] [x₂]
+$$
+(R_mq)\cdot(R_nk)=q^{\top}R_{n-m}\,k
+$$
 
-θᵢ = 1/10000^(2i/d)
-```
+$$
+\theta_i=10000^{-2i/d},\qquad i=0,\dots,\frac{d}{2}-1
+$$
 
 ## 📊 张量流程图
 

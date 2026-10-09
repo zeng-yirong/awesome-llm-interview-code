@@ -29,23 +29,20 @@ GRPO 的重要性比率是 token 级的，每个 token 各自 clip。当奖励�
 
 ## 📐 核心公式
 
-```
-组内优势 (同 GRPO):
-  Â_i = (r_i - mean(r)) / (std(r) + ε)
+$$
+\hat{A}_i=\frac{r_i-\operatorname{mean}(r)}{\operatorname{std}(r)+\epsilon}
+$$
 
-序列级重要性比率 (长度归一化):
-  s_i(θ) = ( π_θ(y_i|x) / π_old(y_i|x) ) ^ (1/|y_i|)
-         = exp( (1/|y_i|) · Σ_t log( π_θ(y_{i,t}|x, y_{i,<t}) / π_old(y_{i,t}|x, y_{i,<t}) ) )
+$$
+s_i(\theta)=\left(\frac{\pi_\theta(y_i\mid x)}{\pi_{\text{old}}(y_i\mid x)}\right)^{1/|y_i|}
+=\exp\!\left(\frac{1}{|y_i|}\sum_t\log\frac{\pi_\theta(y_{i,t}\mid x,y_{i,<t})}{\pi_{\text{old}}(y_{i,t}\mid x,y_{i,<t})}\right)
+$$
 
-目标函数:
-  J_GSPO(θ) = E[ min( s_i(θ)·Â_i , clip(s_i(θ), 1-ε, 1+ε)·Â_i ) ]
-```
-
-其中:
-- `y_i`: 组内第 i 条完整回答，`|y_i|`: 它的 token 数
-- `s_i`: **整条序列共享一个标量比率**，只 clip 一次
-- 指数上的 `1/|y_i|` 是长度归一化，让不同长度的序列可比
-- 与 GRPO 的差别只有比率和 clip 的粒度；`ε` 是典型取值 `3e-4`——比率已经做过长度归一化（几何平均），偏离 1 的幅度远小于 token 级比率，所以裁剪区间要比 PPO 的几个数量级更紧
+$$
+\mathcal{L}_{\text{GSPO}}=-\mathbb{E}\left[\min\!\left(s_i\hat{A}_i,\ \operatorname{clip}(s_i,\,1-\epsilon,\,1+\epsilon)\,\hat{A}_i\right)\right],
+\qquad
+\epsilon=3\times10^{-4}
+$$
 
 ## 📊 张量流程图
 

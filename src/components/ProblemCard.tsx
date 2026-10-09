@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, Lightbulb, Code2, GitBranch, BookOpen } from 'lucide-react';
 import CodeBlock from './CodeBlock';
 import FlowDiagram from './FlowDiagram';
+import MathFormula from './MathFormula';
 import { Problem } from '../data/problems';
 
 interface ProblemCardProps {
@@ -172,15 +173,7 @@ export default function ProblemCard({ problem }: ProblemCardProps) {
                     核心公式
                   </h4>
                 </div>
-                <pre 
-                  className="text-sm font-mono whitespace-pre-wrap p-4 rounded-lg overflow-x-auto"
-                  style={{
-                    backgroundColor: 'var(--bg-tertiary)',
-                    color: 'var(--text-primary)'
-                  }}
-                >
-                  {problem.formula}
-                </pre>
+                <MathFormula source={problem.formula} />
               </div>
 
               {/* Flow Diagram */}

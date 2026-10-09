@@ -29,18 +29,19 @@
 
 ## 📐 核心公式
 
-```
-L_DPO = -E[log σ(β · (log πθ(yw|x)/πref(yw|x) - log πθ(yl|x)/πref(yl|x)))]
+$$
+\mathcal{L}_{\text{DPO}}=-\mathbb{E}_{(x,y_w,y_l)\sim\mathcal{D}}\left[\log\sigma\!\left(\beta\left(\log\frac{\pi_\theta(y_w\mid x)}{\pi_{\text{ref}}(y_w\mid x)}-\log\frac{\pi_\theta(y_l\mid x)}{\pi_{\text{ref}}(y_l\mid x)}\right)\right)\right]
+$$
 
-简化:
-logits = (logp_chosen - ref_logp_chosen) - (logp_rejected - ref_logp_rejected)
-loss = -logsigmoid(β · logits)
+$$
+\text{logits}=\left(\log p_\theta^{w}-\log p_{\text{ref}}^{w}\right)-\left(\log p_\theta^{l}-\log p_{\text{ref}}^{l}\right),
+\qquad
+\mathcal{L}=-\log\sigma\!\left(\beta\cdot\text{logits}\right)
+$$
 
-其中:
-- yw: chosen（优选）回答
-- yl: rejected（拒绝）回答
-- β: 控制偏离参考模型的程度，通常 0.1-0.5
-```
+$$
+y_w:\ \text{chosen},\qquad y_l:\ \text{rejected},\qquad \beta\in[0.1,\ 0.5]
+$$
 
 ## 📊 张量流程图
 

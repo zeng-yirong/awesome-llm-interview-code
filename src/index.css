@@ -63,3 +63,25 @@ pre {
 .overflow-hidden {
   contain: layout;
 }
+
+/* KaTeX 核心公式 ---------------------------------------------------------
+   display math 默认 margin: 1em 0；长公式会超出卡片（卡片带 overflow-hidden），
+   所以要给它自己的横向滚动容器。三个要点：
+   1. margin 归零，块间距交给外层容器的 space-y
+   2. .katex 用 width:max-content + min-width:100%：放得下时撑满容器、由 KaTeX 自带的
+      text-align:center 居中；放不下时盒子按内容定宽、从左边排出去，overflow-x 才滚得到
+      —— 若留成「撑满容器的居中 block」，超宽内容会向左右同时溢出，左侧永远滚不到
+   3. overflow-y 会被 overflow-x:auto 强行变成滚动容器，显式设 hidden 并用 padding
+      留出上下的余量，避免分数 / 上下标被裁
+   颜色沿 currentColor，深色主题无需额外覆盖 */
+.katex-display {
+  margin: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.5em 0;
+}
+
+.katex-display > .katex {
+  width: max-content;
+  min-width: 100%;
+}

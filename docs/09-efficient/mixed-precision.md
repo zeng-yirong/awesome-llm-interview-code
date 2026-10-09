@@ -29,18 +29,33 @@
 
 ## 📐 核心公式
 
-```
-前向/反向: FP16 (半精度, 2 bytes)
-主权重: FP32 (全精度, 4 bytes)
-梯度: FP16 → loss_scale → 转 FP32 → 更新主权重
+$$
+\text{value}=(-1)^{s}\cdot 2^{\,e-\text{bias}}\cdot(1.m)
+$$
 
-BF16: 指数位更多 (8 vs 5), 不需要 loss scaling
+$$
+\begin{aligned}
+\text{FP32}: &\quad 1+8+23\ \text{bits}\\[2pt]
+\text{FP16}: &\quad 1+5+10\ \text{bits}\\[2pt]
+\text{BF16}: &\quad 1+8+7\ \text{bits}
+\end{aligned}
+$$
 
-精度对比:
-  FP32: 1 + 8 + 23 bits (符号 + 指数 + 尾数)
-  FP16: 1 + 5 + 10 bits
-  BF16: 1 + 8 + 7 bits
-```
+$$
+\begin{aligned}
+\text{forward / backward}: &\quad \text{FP16}\ (2\ \text{B})\\[2pt]
+\text{master weights}: &\quad \text{FP32}\ (4\ \text{B})\\[2pt]
+\text{gradient}: &\quad g_{\text{FP16}}\ \longrightarrow\ \text{FP32}
+\end{aligned}
+$$
+
+$$
+\mathcal{L}'\leftarrow S\cdot\mathcal{L},
+\qquad
+g\leftarrow\frac{\operatorname{cast}\!\left(g_{\text{FP16}}\right)}{S},
+\qquad
+\text{BF16}:\ e_{\text{bits}}=8\ \Rightarrow\ S=1
+$$
 
 ## 📊 张量流程图
 

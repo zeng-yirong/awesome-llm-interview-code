@@ -29,13 +29,15 @@
 
 ## 📐 核心公式
 
-```
-mask[i][j] = 1  if j ≤ i
-           = 0  if j > i
+$$
+M_{ij}=\begin{cases}1, & j\le i\\[2pt] 0, & j>i\end{cases}
+\qquad
+S'_{ij}=S_{ij}-\infty\,(1-M_{ij})
+$$
 
-scores = scores.masked_fill(mask == 0, -inf)
-attn = softmax(scores, dim=-1)
-```
+$$
+A=\operatorname{softmax}(S'),\qquad A_{ij}=0\ \text{ for }\ j>i
+$$
 
 ## 📊 张量流程图
 

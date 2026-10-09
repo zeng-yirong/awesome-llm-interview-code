@@ -27,32 +27,29 @@ Muon 只用于二维隐藏层权重：累积动量后，用 Newton-Schulz 迭代
 
 ## 📐 核心公式
 
-```
-Muon 更新（只对 ≥ 2 维的隐藏层权重）:
-  M_t = μ·M_{t-1} + G_t                  # 累积动量
-  O_t = NS5(M_t)                          # 正交化，逼近极分解 UVᵀ
-  θ_t = θ_{t-1} - η·O_t
+$$
+\begin{aligned}
+M_t &= \mu M_{t-1}+G_t,\qquad \mu\approx 0.95\\
+O_t &= \operatorname{NS}_5(M_t)\\
+\theta_t &= \theta_{t-1}-\eta\,O_t
+\end{aligned}
+$$
 
-Newton-Schulz 五次迭代（求零次幂）:
-  X_0 = G / (‖G‖_F + ε)                   # 先归一化，保证谱范数 ≤ 1
-  重复 5 次:
-      A = X·Xᵀ
-      X ← a·X + (b·A + c·A²)·X
-  系数 (a, b, c) = (3.4445, -4.7750, 2.0315)
+$$
+\begin{aligned}
+X_0 &= \frac{M_t}{\|M_t\|_F+\epsilon}\\
+A &= X_kX_k^{\top}\\
+X_{k+1} &= aX_k+(bA+cA^{2})X_k,\qquad k=0,\dots,4\\
+(a,b,c) &= (3.4445,\ -4.7750,\ 2.0315)
+\end{aligned}
+$$
 
-MuonClip = Muon + QK-Clip（Kimi K2 的做法）:
-  S_max = 每个 head 在本 batch 上的最大注意力 logit
-  若 S_max > τ:   γ = τ / S_max
-                 W_q ← √γ · W_q ,   W_k ← √γ · W_k
-  (典型 τ = 100)
-```
-
-其中:
-- `M_t`: 动量矩阵，形状与权重相同
-- `NS5(·)`: 5 次 Newton-Schulz 迭代，逼近 `UVᵀ`。5 次之后奇异值落在约 `[0.5, 1.5]`，不是严格正交，但实践中足够
-- `μ`: 动量系数，典型 `0.95`
-- `QK-Clip`: 从源头缩放 Q/K 投影权重来压住 logit 增长。用 `√γ` 是因为 logit 正比于 `W_q·W_kᵀ`，放缩一次权重，logit 就被放缩 γ 倍
-- 规模化时 Muon 会把注意力 logit 推到爆炸（远超正常量级），QK-Clip 是 Kimi K2 能稳定训到万亿参数的关键
+$$
+\text{MuonClip:}\quad S_{\max}>\tau\Rightarrow\gamma=\frac{\tau}{S_{\max}},\qquad
+W_q\leftarrow\sqrt{\gamma}\,W_q,\qquad
+W_k\leftarrow\sqrt{\gamma}\,W_k,\qquad
+\tau\approx 100
+$$
 
 ## 📊 张量流程图
 

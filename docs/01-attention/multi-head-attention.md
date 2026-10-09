@@ -29,16 +29,15 @@
 
 ## 📐 核心公式
 
-```
-MultiHead(Q, K, V) = Concat(head₁, ..., headₕ) · Wₒ
+$$
+\operatorname{MultiHead}(Q,K,V)=\operatorname{Concat}\!\left(\text{head}_1,\dots,\text{head}_H\right)W_O
+$$
 
-其中: headᵢ = Attention(Q·WᵢQ, K·WᵢK, V·WᵢV)
-
-- h: 头数
-- WᵢQ, WᵢK, WᵢV: 第 i 个头的投影矩阵
-- Wₒ: 输出投影矩阵
-- head_dim = d_model / num_heads
-```
+$$
+\text{head}_i=\operatorname{Attention}\!\left(QW_i^{Q},\ KW_i^{K},\ VW_i^{V}\right),
+\qquad
+D_h=\frac{D}{H}
+$$
 
 ## 📊 张量流程图
 

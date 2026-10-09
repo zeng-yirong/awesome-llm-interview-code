@@ -30,12 +30,17 @@
 
 ## 📐 核心公式
 
-```
-MoE(x) = Σᵢ∈TopK softmax(Router(x))ᵢ · Eᵢ(x)
+$$
+\operatorname{MoE}(x)=\sum_{i\in\operatorname{TopK}}\operatorname{softmax}\!\left(\operatorname{Router}(x)\right)_i E_i(x)
+$$
 
-Mixtral 8x7B: 8 个专家选 2 个
-实际计算量 ≈ 12.9B (vs 46.7B 总参数)
-```
+$$
+\operatorname{Router}(x)=W_rx,\qquad W_r\in\mathbb{R}^{D\times N},\qquad K=2
+$$
+
+$$
+\text{Mixtral 8x7B:}\quad N=8,\ K=2,\qquad \text{FLOPs}\approx 12.9\text{B}\ \text{vs}\ 46.7\text{B total}
+$$
 
 ## 📊 张量流程图
 

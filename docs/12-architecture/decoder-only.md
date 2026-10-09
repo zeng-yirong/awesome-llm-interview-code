@@ -29,19 +29,19 @@
 
 ## 📐 核心公式
 
-```
-每层:
-  x = x + Attention(LayerNorm(x), causal_mask)
-  x = x + FFN(LayerNorm(x))
+$$
+x\leftarrow x+\operatorname{Attn}\!\left(\operatorname{LN}(x),\ \text{causal mask}\right),
+\qquad
+x\leftarrow x+\operatorname{FFN}\!\left(\operatorname{LN}(x)\right)
+$$
 
-生成: P(x₁...xₙ) = Π P(xₜ|x<t)
+$$
+P(x_1,\dots,x_n)=\prod_{t=1}^{n}P(x_t\mid x_{<t})
+$$
 
-现代 LLM 标配:
-  - RMSNorm (替代 LayerNorm)
-  - SwiGLU (替代 FFN+ReLU)
-  - RoPE (替代 Sinusoidal PE)
-  - Pre-Norm (替代 Post-Norm)
-```
+$$
+\{\text{RMSNorm},\ \text{SwiGLU},\ \text{RoPE},\ \text{Pre-Norm}\}
+$$
 
 ## 📊 张量流程图
 

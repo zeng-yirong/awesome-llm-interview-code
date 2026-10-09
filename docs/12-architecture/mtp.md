@@ -29,26 +29,22 @@
 
 ## 📐 核心公式
 
-```
-串行 MTP（DeepSeek-V3 的做法）:
-  第 k 个 MTP 模块:
-    h_i^k = M_k[ RMSNorm(h_i^{k-1}) ; RMSNorm(Emb(x_{i+k})) ]
-    p_{i+k+1} = lm_head(h_i^k)
+$$
+h_i^{k}=M_k\!\left[\operatorname{RMSNorm}\!\left(h_i^{k-1}\right);\ \operatorname{RMSNorm}\!\left(\operatorname{Emb}\!\left(x_{i+k}\right)\right)\right],
+\qquad
+p_{i+k+1}=\operatorname{lm\_head}\!\left(h_i^{k}\right)
+$$
 
-  损失:
-    L_MTP   = (λ / D) · Σ_k Σ_i CE( p_{i+k+1} , x_{i+1+k} )
-    L_total = L_main + L_MTP
+$$
+\mathcal{L}_{\text{MTP}}=\frac{\lambda}{D}\sum_k\sum_i \text{CE}\!\left(p_{i+k+1},\ x_{i+1+k}\right),
+\qquad
+\mathcal{L}_{\text{total}}=\mathcal{L}_{\text{main}}+\mathcal{L}_{\text{MTP}}
+$$
 
-  典型取值: λ = 0.3（前 10T tokens），之后衰减到 0.1
-```
-
-其中:
-- `h_i^k`: 第 k 个 MTP 模块在位置 i 的隐状态；`h_i^0` 就是主模型最后一层的隐状态
-- `M_k`: 一个 Transformer 块（前置投影把拼接后的 2d 向量压回 d 维）
-- `Emb` 与 `lm_head`: **与主模型共享**，所以 MTP 只增加很薄的参数
-- `D`: 序列长度。除以它是把 k 个预测的损失归一化回与主损失同一量级
-- `λ`: 权衡系数，训练后期衰减 —— 此时主损失已收敛，辅助信号的价值下降
-- 注意偏移：模块的**输入**是 `x_{i+k}`，**目标**是 `x_{i+1+k}`（整体比主模型前移 k 步）
+$$
+\lambda=0.3\ \text{(first 10T tokens)}\ \longrightarrow\ 0.1,\qquad
+\operatorname{Emb},\ \operatorname{lm\_head}\ \text{shared with the main model}
+$$
 
 ## 📊 张量流程图
 

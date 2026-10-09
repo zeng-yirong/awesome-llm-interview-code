@@ -4,7 +4,8 @@
  *
  *   1. flowDiagram 的 DSL 解析普查：哪些题已迁移成结构化 DSL、哪些还走 <pre> 兜底
  *   2. 已迁移条目的语法卫生：不含框线字符、每行 `::` 字段 ≤ 3
- *   3. doc ↔ TS 一致性：张量流程图 fence / oneLiner / 原理首段 / 原理分节 / 面试要点条数
+ *   3. formula 的 LaTeX 普查：哪些题已迁移成 `$$` 块、哪些还走 <pre> 兜底
+ *   4. doc ↔ TS 一致性：张量流程图 fence / 核心公式 / oneLiner / 原理首段 / 原理分节 / 面试要点条数
  *
  * 用法: node scripts/check-flow.mjs
  */
@@ -17,6 +18,7 @@ const ROOT = resolve(HERE, '..');
 
 const { problems } = await import(new URL('../src/data/problems.ts', import.meta.url).href);
 const { parseFlow } = await import(new URL('../src/lib/flowDsl.ts', import.meta.url).href);
+const { parseMath } = await import(new URL('../src/lib/mathBlock.ts', import.meta.url).href);
 
 const BOX_CHARS = /[│├└┘┐┌┤┬┴─╱╲]/;
 const failures = [];
@@ -168,6 +170,8 @@ function stripBackticks(text) {
 const docMap = buildDocMap();
 const migrated = [];
 const legacy = [];
+const latexMigrated = [];
+const latexLegacy = [];
 
 for (const problem of problems) {
   const isDsl = parseFlow(problem.flowDiagram) !== null;
@@ -263,9 +267,8 @@ for (const problem of problems) {
     }
   }
 
-  // 4) 面试要点：报告 doc/TS 的条数漂移。
-  //    注意这不是仓库的硬性约定 —— 存量题目里本来就有 doc ≠ TS + 1 的情况，
-  //    所以只作为警告输出，本次任务不改动 keyPoints。
+  // 4) 面试要点：文档比 TS 固定多一条（文档首条是「一句话总结」，TS 的 keyPoints 不存它）。
+  //    仍只报警告不报失败：条数漂移是内容质量问题，不是结构错误，不该卡住 CI。
   const keyBody = sectionBody(markdown, '🎯 面试要点');
   if (keyBody === null) {
     failures.push(`[${problem.id}] 文档缺少「面试要点」章节`);
@@ -277,6 +280,46 @@ for (const problem of problems) {
       );
     }
   }
+
+  // 5) 核心公式：文档正文与 TS formula 逐字节一致（两边归一到 LF 再比，对 CRLF 免疫）
+  const formulaBody = sectionBody(markdown, '📐 核心公式');
+  if (formulaBody === null) {
+    failures.push(`[${problem.id}] 文档缺少「核心公式」章节`);
+  } else {
+    const body = formulaBody.replace(/^\n+/, '').replace(/\s+$/, '');
+    const blocks = parseMath(problem.formula);
+
+    if (blocks === null) {
+      latexLegacy.push(problem.id);
+      // 还没迁移的，文档里应该还是原来的围栏，不做内容比对
+    } else {
+      latexMigrated.push(problem.id);
+
+      if (body.includes('```')) {
+        failures.push(`[${problem.id}] 已迁移为 LaTeX，文档里却还留着 \`\`\` 围栏`);
+      }
+      if (body.replace(/\r\n?/g, '\n') !== problem.formula.replace(/\r\n?/g, '\n')) {
+        failures.push(`[${problem.id}] 核心公式与 TS formula 不一致`);
+      }
+
+      // 数学环境里的语法卫生。% 会注释掉整行后半段、# 在数学模式非法，
+      // 两者都必须转义成 \% \#；行尾落单的反斜杠会在 String.raw 里吃掉换行。
+      for (const block of blocks) {
+        const bad = [];
+        if (/[`]/.test(block.latex)) bad.push('反引号');
+        if (block.latex.includes('${')) bad.push('${');
+        if (/(^|[^\\])%/.test(block.latex)) bad.push('未转义的 %');
+        if (/(^|[^\\])#/.test(block.latex)) bad.push('未转义的 #');
+        if (/[一-鿿]/.test(block.latex)) bad.push('数学环境里的中文');
+        if (block.latex.split('\n').some((line) => /(^|[^\\])(\\\\)*\\$/.test(line))) {
+          bad.push('行尾落单的反斜杠');
+        }
+        if (bad.length > 0) {
+          failures.push(`[${problem.id}] formula 里有${bad.join(' / ')}`);
+        }
+      }
+    }
+  }
 }
 
 /* ---------- 报告 ---------- */
@@ -284,6 +327,7 @@ for (const problem of problems) {
 console.log(`题库总数: ${problems.length}`);
 console.log(`已迁移为 DSL: ${migrated.length}  → ${migrated.join(', ') || '(无)'}`);
 console.log(`仍走 <pre> 兜底: ${legacy.length}  → ${legacy.join(', ') || '(无)'}`);
+console.log(`已迁移为 LaTeX: ${latexMigrated.length} / ${problems.length}`);
 
 const withSections = problems.filter((p) => (p.principleSections ?? []).length > 0);
 console.log(`已补 principleSections: ${withSections.length} / ${problems.length}`);

@@ -29,16 +29,26 @@
 
 ## 📐 核心公式
 
-```
-KV 压缩: c_kv = W_down(x)  → [B, S, latent_dim]  (存入 Cache)
-KV 恢复: K,V = W_up(c_kv)  → [B, S, H, (Dh+Dr+Dh)]
+$$
+c^{KV}=x\,W^{DKV}\in\mathbb{R}^{B\times S\times C},\qquad
+[K;V]=\operatorname{split}\!\left(c^{KV}W^{UK}\right)
+$$
 
-Q 压缩: c_q = W_down_q(x) → W_up_q → [B, S, H, (Dh+Dr)]
+$$
+c^{Q}=x\,W^{DQ},\qquad
+Q=\operatorname{split}\!\left(c^{Q}W^{UQ}\right)
+$$
 
-对比:
-- GQA: KV Cache = 2 × G × Dh
-- MLA: KV Cache = latent_dim (远小于 GQA)
-```
+$$
+k=[k_{\text{content}};k_{\text{rope}}],\qquad q=[q_{\text{content}};q_{\text{rope}}]
+$$
+
+$$
+\begin{aligned}
+\text{GQA}: &\quad \text{KV cache}=2\,G\,D_h\\[2pt]
+\text{MLA}: &\quad \text{KV cache}=C\qquad (C=512,\ D_h=128)
+\end{aligned}
+$$
 
 ## 📊 张量流程图
 

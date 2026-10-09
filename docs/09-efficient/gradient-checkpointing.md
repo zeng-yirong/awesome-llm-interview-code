@@ -29,16 +29,17 @@
 
 ## 📐 核心公式
 
-```
-标准: 保存所有层激活 → 显存 O(L)
-Checkpoint: 只保存 √L 个检查点 → 显存 O(√L)
+$$
+\text{activations}: O(L)\ \longrightarrow\ O\!\left(\sqrt{L}\right)
+$$
 
-代价: 反向传播需要重新计算 → 训练时间 +20%
+$$
+\text{memory}: L\,B\,S\,d\cdot 4\ \text{B}\ \longrightarrow\ \sqrt{L}\,B\,S\,d\cdot 4\ \text{B}
+$$
 
-显存节省:
-  标准: L × batch_size × seq_len × d_model × 4 bytes
-  检查点: √L × batch_size × seq_len × d_model × 4 bytes
-```
+$$
+\text{checkpoints}=\sqrt{L},\qquad \text{time overhead}\approx 20\%
+$$
 
 ## 📊 张量流程图
 

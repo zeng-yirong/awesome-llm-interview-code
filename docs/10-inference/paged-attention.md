@@ -29,17 +29,24 @@
 
 ## 📐 核心公式
 
-```
-逻辑块: 连续的 token 块 (如 16 tokens/block)
-物理块: GPU 显存中的实际存储位置
-块表: logical_block → physical_block 映射
+$$
+\text{phys}(s,j)=\text{block\_table}[s][j]
+$$
 
-内存利用率: ~96% (vs 传统 ~45%)
+$$
+\text{utilization}=\frac{\sum_i\ell_i}{N_{\text{blocks}}\cdot B},
+\qquad B=16\ \text{tokens/block}
+$$
 
-对比:
-  传统: 每个序列预分配 max_len → 浪费 + 碎片
-  Paged: 按需分配物理块 → 无浪费
-```
+$$
+\text{naive}: \text{batch}\times S_{\max}\ \text{preallocated},
+\qquad
+\text{paged}: \sum_i\ell_i\ \text{allocated on demand}
+$$
+
+$$
+\text{utilization}: 45\%\ \longrightarrow\ 96\%
+$$
 
 ## 📊 张量流程图
 

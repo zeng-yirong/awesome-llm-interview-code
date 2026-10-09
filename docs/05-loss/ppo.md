@@ -29,17 +29,24 @@
 
 ## 📐 核心公式
 
-```
-L_PPO = E[min(r_t · A_t, clip(r_t, 1-ε, 1+ε) · A_t)]
+$$
+\mathcal{L}_{\text{PPO}}=-\mathbb{E}_t\left[\min\!\left(r_tA_t,\ \operatorname{clip}(r_t,\,1-\epsilon,\,1+\epsilon)\,A_t\right)\right]
+$$
 
-r_t = exp(log_π_new - log_π_old)
-A_t: 优势函数 (GAE 估计)
-ε: 截断参数，通常 0.2
+$$
+r_t=\exp\!\left(\log\pi_\theta^{\text{new}}-\log\pi_\theta^{\text{old}}\right),
+\qquad
+A_t=\text{GAE advantage},
+\qquad
+\epsilon=0.2
+$$
 
-裁剪机制:
-- A > 0 (好动作): ratio > 1+ε 时停止奖励 (防过度优化)
-- A < 0 (坏动作): ratio < 1-ε 时停止惩罚 (防过度惩罚)
-```
+$$
+\begin{aligned}
+A_t>0:\ &\quad r_t>1+\epsilon\ \Rightarrow\ r_tA_t\ \text{capped at}\ (1+\epsilon)A_t\\[2pt]
+A_t<0:\ &\quad r_t<1-\epsilon\ \Rightarrow\ r_tA_t\ \text{floored at}\ (1-\epsilon)A_t
+\end{aligned}
+$$
 
 ## 📊 张量流程图
 
