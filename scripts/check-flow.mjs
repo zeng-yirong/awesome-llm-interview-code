@@ -6,7 +6,9 @@
  *   2. 已迁移条目的语法卫生：不含框线字符、每行 `::` 字段 ≤ 3
  *   3. formula 的 LaTeX 普查：哪些题已迁移成 `$$` 块、哪些还走 <pre> 兜底
  *   4. doc ↔ TS 一致性：张量流程图 fence / 核心公式 / oneLiner / 原理首段 / 原理分节 / 面试要点条数
- *   5. 核心公式的渲染卫生：数学模式里的语法、GitHub 数学渲染器不接受的宏、\text 里的裸 _ ^
+ *   5. 核心公式的渲染卫生：KaTeX 实渲染、数学模式里的语法、GitHub 数学渲染器不接受的宏、\text 里的裸 _ ^
+ *
+ * 核心公式在文档里用 ```math 围栏——原因见 mathFences 的注释，别改回 $$。
  *
  * 用法: node scripts/check-flow.mjs
  */
@@ -20,6 +22,8 @@ const ROOT = resolve(HERE, '..');
 const { problems } = await import(new URL('../src/data/problems.ts', import.meta.url).href);
 const { parseFlow } = await import(new URL('../src/lib/flowDsl.ts', import.meta.url).href);
 const { parseMath } = await import(new URL('../src/lib/mathBlock.ts', import.meta.url).href);
+// katex 本来就是站点的依赖：这里直接用站点那条渲染路径验公式，报错即失败。
+const katex = (await import('katex')).default;
 
 const BOX_CHARS = /[│├└┘┐┌┤┬┴─╱╲]/;
 
@@ -144,6 +148,48 @@ function firstFence(body) {
   if (body === null) return null;
   const match = body.match(/```[a-zA-Z]*\n([\s\S]*?)\n```/);
   return match ? match[1] : null;
+}
+
+/**
+ * 取「核心公式」章节里的 ```math 围栏正文，按块返回 LaTeX 列表。
+ *
+ * 为什么文档用 ```math 而不是 $$：GitHub 的 markdown 管道会把 `$$` 块里的
+ * 「反斜杠 + ASCII 标点」解掉反斜杠，于是
+ *     \\[2pt] → \[2pt]   （\[ 是 TeX 的 display 定界符 → 版式错乱）
+ *     \%      → %        （裸 % 注释掉本行后半段，连 \end{aligned} 一起吃掉 → Missing \end{aligned}
+ *     \_      → _        （文本模式里的下划线 → '_' allowed only in math mode
+ *     \# \; \! \, \| \{ \} 同样被吃
+ * 围栏代码块不参与这套转义，GitHub 又原生支持 ```math 渲染数学。实测 118 个块：
+ * 围栏内容逐行原样送达渲染器，唯一的改动是行尾的反斜杠会被再补一个（`\\` → `\\\`，
+ * 保护行尾的通用做法）—— `\` + 换行在 TeX 里本就是个空格，MathJax 输出逐字节相同。
+ * 改回 $$ 则会把上面那批错全带回来。
+ *
+ * 返回 null = 这节不是「围栏外无文字 + 围栏闭合」的规范写法（含块数 0）。
+ */
+function mathFences(body) {
+  const blocks = [];
+  let buffer = null;
+  for (const line of body.replace(/\r\n?/g, '\n').split('\n')) {
+    // 与 parseMath 一致：逐行 trim 后再比，缩进/行尾空白不算漂移
+    const text = line.trim();
+    if (text === '```math') {
+      if (buffer !== null) return null; // 上一个围栏没闭合
+      buffer = [];
+      continue;
+    }
+    if (text === '```') {
+      if (buffer === null) return null; // 没有对应的开围栏
+      const latex = buffer.join('\n').trim();
+      if (latex === '') return null;
+      blocks.push(latex);
+      buffer = null;
+      continue;
+    }
+    if (buffer !== null) buffer.push(text);
+    else if (text !== '') return null; // 公式落在了围栏外
+  }
+  if (buffer !== null) return null; // 围栏没闭合
+  return blocks.length > 0 ? blocks : null;
 }
 
 /** 原理与思想的第一段正文（跳过标题行与 bullet）
@@ -334,7 +380,8 @@ for (const problem of problems) {
     }
   }
 
-  // 5) 核心公式：文档正文与 TS formula 逐字节一致（两边归一到 LF 再比，对 CRLF 免疫）
+  // 5) 核心公式：文档里的 ```math 围栏与 TS formula 是同一份 LaTeX
+  //    （两边各自归一成「块 × 逐行 trim」的列表再比，对 CRLF 与定界符形式免疫）
   const formulaBody = sectionBody(markdown, '📐 核心公式');
   if (formulaBody === null) {
     failures.push(`[${problem.id}] 文档缺少「核心公式」章节`);
@@ -348,11 +395,21 @@ for (const problem of problems) {
     } else {
       latexMigrated.push(problem.id);
 
-      if (body.includes('```')) {
-        failures.push(`[${problem.id}] 已迁移为 LaTeX，文档里却还留着 \`\`\` 围栏`);
-      }
-      if (body.replace(/\r\n?/g, '\n') !== problem.formula.replace(/\r\n?/g, '\n')) {
-        failures.push(`[${problem.id}] 核心公式与 TS formula 不一致`);
+      const docBlocks = mathFences(body);
+      if (docBlocks === null) {
+        failures.push(
+          `[${problem.id}] 文档的核心公式必须写成 \`\`\`math 围栏（围栏外不得有文字、围栏必须闭合）`,
+        );
+      } else if (docBlocks.length !== blocks.length) {
+        failures.push(
+          `[${problem.id}] 公式块数不一致：文档 ${docBlocks.length} vs TS ${blocks.length}`,
+        );
+      } else {
+        for (const [i, block] of blocks.entries()) {
+          if (docBlocks[i] !== block.latex) {
+            failures.push(`[${problem.id}] 第 ${i + 1} 个公式块与 TS formula 不一致`);
+          }
+        }
       }
 
       // 数学环境里的语法卫生。% 会注释掉整行后半段、# 在数学模式非法，
@@ -369,6 +426,21 @@ for (const problem of problems) {
         }
         if (bad.length > 0) {
           failures.push(`[${problem.id}] formula 里有${bad.join(' / ')}`);
+        }
+
+        // 站点的渲染路径就是这么调 KaTeX（见 src/components/MathFormula.tsx）：
+        // 这里过了，网页上就不会出现 .katex-error。缺 \right、\begin 没配 \end、
+        // 少一个花括号、命令拼错，全在这一关卡住。
+        try {
+          katex.renderToString(block.latex, {
+            displayMode: true,
+            throwOnError: true,
+            strict: false,
+          });
+        } catch (error) {
+          failures.push(
+            `[${problem.id}] KaTeX 渲染失败：${String(error.message).replace(/^KaTeX parse error:\s*/, '')}`,
+          );
         }
 
         // GitHub 数学渲染器的宏黑名单（`\operatorname` 就是这样炸的）

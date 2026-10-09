@@ -19,22 +19,22 @@
 
 ## 📐 核心公式
 
-$$
+```math
 \mathcal{L}_{\text{CE}}=-\frac{1}{|x|}\sum_{t=1}^{|x|}\log P_\theta(x_t\mid x_{<t})
-$$
+```
 
-$$
+```math
 \text{CE}\!\left(\text{shift}(\text{logits}),\ \text{shift}(\text{labels})\right),
 \qquad
 \text{logits}[:,:-1]\ \text{predicts}\ \text{labels}[:,1:]
-$$
+```
 
-$$
+```math
 \begin{aligned}
 \text{Pretrain}: &\quad \text{all tokens counted}\\[2pt]
 \text{SFT}: &\quad \text{label}_{\text{prompt}}=-100,\qquad \text{ignore\_index}=-100
 \end{aligned}
-$$
+```
 
 ## 📊 张量流程图
 

@@ -18,22 +18,22 @@
 
 ## 📐 核心公式
 
-$$
+```math
 \text{ReLU}(x)=\max(0,x),\qquad \text{ReLU}^{\prime}(x)=(x>0)
-$$
+```
 
-$$
+```math
 \text{GELU}(x)=x\,\Phi(x),\qquad \Phi=\text{standard normal CDF}
-$$
+```
 
-$$
+```math
 \text{SiLU}(x)=x\,\sigma(x),\qquad
 \text{SiLU}^{\prime}(x)=\text{SiLU}(x)+\sigma(x)\left(1-\text{SiLU}(x)\right)
-$$
+```
 
-$$
+```math
 \text{Swish}\equiv\text{SiLU}
-$$
+```
 
 ## 📊 张量流程图
 

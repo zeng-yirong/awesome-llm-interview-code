@@ -18,15 +18,15 @@
 
 ## 📐 核心公式
 
-$$
+```math
 M_{ij}=\begin{cases}1, & j\le i\\[2pt] 0, & j>i\end{cases}
 \qquad
 S'_{ij}=S_{ij}-\infty\,(1-M_{ij})
-$$
+```
 
-$$
+```math
 A=\text{softmax}(S'),\qquad A_{ij}=0\ \text{ for }\ j>i
-$$
+```
 
 ## 📊 张量流程图
 

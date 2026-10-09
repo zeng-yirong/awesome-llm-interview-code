@@ -18,17 +18,17 @@
 
 ## 📐 核心公式
 
-$$
+```math
 \mu=\text{mean}(x,\ \dim=-1),\qquad
 \sigma^{2}=\text{var}(x,\ \dim=-1,\ \text{unbiased}=\text{False})
-$$
+```
 
-$$
+```math
 \text{LN}(x)=\frac{x-\mu}{\sqrt{\sigma^{2}+\epsilon}}\odot\gamma+\beta,
 \qquad
 \gamma,\beta\in\mathbb{R}^{D},\qquad
 \epsilon=10^{-5}
-$$
+```
 
 ## 📊 张量流程图
 

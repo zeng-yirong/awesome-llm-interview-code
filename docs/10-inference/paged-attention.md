@@ -19,24 +19,24 @@
 
 ## 📐 核心公式
 
-$$
+```math
 \text{phys}(s,j)=\text{block\_table}[s][j]
-$$
+```
 
-$$
+```math
 \text{utilization}=\frac{\sum_i\ell_i}{N_{\text{blocks}}\cdot B},
 \qquad B=16\ \text{tokens/block}
-$$
+```
 
-$$
+```math
 \text{naive}: \text{batch}\times S_{\max}\ \text{preallocated},
 \qquad
 \text{paged}: \sum_i\ell_i\ \text{allocated on demand}
-$$
+```
 
-$$
+```math
 \text{utilization}: 45\%\ \longrightarrow\ 96\%
-$$
+```
 
 ## 📊 张量流程图
 

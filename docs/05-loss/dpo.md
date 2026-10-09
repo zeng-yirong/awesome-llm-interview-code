@@ -18,19 +18,19 @@
 
 ## 📐 核心公式
 
-$$
+```math
 \mathcal{L}_{\text{DPO}}=-\mathbb{E}_{(x,y_w,y_l)\sim\mathcal{D}}\left[\log\sigma\!\left(\beta\left(\log\frac{\pi_\theta(y_w\mid x)}{\pi_{\text{ref}}(y_w\mid x)}-\log\frac{\pi_\theta(y_l\mid x)}{\pi_{\text{ref}}(y_l\mid x)}\right)\right)\right]
-$$
+```
 
-$$
+```math
 \text{logits}=\left(\log p_\theta^{w}-\log p_{\text{ref}}^{w}\right)-\left(\log p_\theta^{l}-\log p_{\text{ref}}^{l}\right),
 \qquad
 \mathcal{L}=-\log\sigma\!\left(\beta\cdot\text{logits}\right)
-$$
+```
 
-$$
+```math
 y_w:\ \text{chosen},\qquad y_l:\ \text{rejected},\qquad \beta\in[0.1,\ 0.5]
-$$
+```
 
 ## 📊 张量流程图
 

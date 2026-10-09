@@ -20,23 +20,23 @@
 
 ## 📐 核心公式
 
-$$
+```math
 \text{KV cache}=2\,n_{\text{layers}}\,n_{\text{kv}}\,S\,D_h\,b
-$$
+```
 
-$$
+```math
 \text{LLaMA 2 70B:}\quad 2\times 80\times 8\times 4096\times 128\times 2\ \mathrm{B}=80\ \mathrm{GB}
-$$
+```
 
-$$
+```math
 \text{decode}: \quad K\leftarrow\text{concat}(K,\,k_{\text{new}}),\qquad
 V\leftarrow\text{concat}(V,\,v_{\text{new}})
-$$
+```
 
-$$
+```math
 \text{no cache}: \sum_{t=1}^{S}t=O(S^{2}),\qquad
 \text{cache}: O(S)\ \text{per step}
-$$
+```
 
 ## 📊 张量流程图
 

@@ -21,26 +21,26 @@
 
 ## 📐 核心公式
 
-$$
+```math
 c^{KV}=x\,W^{DKV}\in\mathbb{R}^{B\times S\times C},\qquad
 [K;V]=\text{split}\!\left(c^{KV}W^{UK}\right)
-$$
+```
 
-$$
+```math
 c^{Q}=x\,W^{DQ},\qquad
 Q=\text{split}\!\left(c^{Q}W^{UQ}\right)
-$$
+```
 
-$$
+```math
 k=[k_{\text{content}};k_{\text{rope}}],\qquad q=[q_{\text{content}};q_{\text{rope}}]
-$$
+```
 
-$$
+```math
 \begin{aligned}
 \text{GQA}: &\quad \text{KV cache}=2\,G\,D_h\\[2pt]
 \text{MLA}: &\quad \text{KV cache}=C\qquad (C=512,\ D_h=128)
 \end{aligned}
-$$
+```
 
 ## 📊 张量流程图
 

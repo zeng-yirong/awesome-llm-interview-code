@@ -18,25 +18,25 @@
 
 ## 📐 核心公式
 
-$$
+```math
 \text{student}: \pi_\theta(\cdot\mid x)\ \ \text{(rollout, gradient)},
 \qquad
 \text{teacher}: \pi_\theta(\cdot\mid x\oplus c)\ \ \text{(one forward, no\_grad)}
-$$
+```
 
-$$
+```math
 \mathcal{L}=\mathbb{E}_{y\sim\pi_\theta(\cdot\mid x)}\left[\frac{1}{|y|}\sum_t\text{KL}\!\left(\pi_\theta(\cdot\mid x,y_{<t})\ \|\ \pi_\theta(\cdot\mid x\oplus c,y_{<t})\right)\right]
-$$
+```
 
-$$
+```math
 \text{forward KL}: \text{KL}(\pi_T\|\pi_S)
 \qquad\text{vs}\qquad
 \text{reverse KL}: \text{KL}(\pi_S\|\pi_T)
-$$
+```
 
-$$
+```math
 c\in\{\text{reference answer},\ \text{hint},\ \text{strategy name},\ \text{tool output},\ \text{user correction}\}
-$$
+```
 
 ## 📊 张量流程图
 

@@ -17,29 +17,29 @@ Muon 只用于二维隐藏层权重：累积动量后，用 Newton-Schulz 迭代
 
 ## 📐 核心公式
 
-$$
+```math
 \begin{aligned}
 M_t &= \mu M_{t-1}+G_t,\qquad \mu\approx 0.95\\
 O_t &= \text{NS}_5(M_t)\\
 \theta_t &= \theta_{t-1}-\eta\,O_t
 \end{aligned}
-$$
+```
 
-$$
+```math
 \begin{aligned}
 X_0 &= \frac{M_t}{\|M_t\|_F+\epsilon}\\
 A &= X_kX_k^{\top}\\
 X_{k+1} &= aX_k+(bA+cA^{2})X_k,\qquad k=0,\dots,4\\
 (a,b,c) &= (3.4445,\ -4.7750,\ 2.0315)
 \end{aligned}
-$$
+```
 
-$$
+```math
 \text{MuonClip:}\quad S_{\max}>\tau\Rightarrow\gamma=\frac{\tau}{S_{\max}},\qquad
 W_q\leftarrow\sqrt{\gamma}\,W_q,\qquad
 W_k\leftarrow\sqrt{\gamma}\,W_k,\qquad
 \tau\approx 100
-$$
+```
 
 ## 📊 张量流程图
 

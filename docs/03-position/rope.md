@@ -20,23 +20,23 @@
 
 ## 📐 核心公式
 
-$$
+```math
 f(q,m)=q\odot\cos(m\theta)+\text{rotate\_half}(q)\odot\sin(m\theta)
-$$
+```
 
-$$
+```math
 \text{rotate\_half}([x_1,x_2])=[-x_2,\ x_1],
 \qquad
 R(m\theta)=\begin{pmatrix}\cos m\theta & -\sin m\theta\\[2pt] \sin m\theta & \cos m\theta\end{pmatrix}
-$$
+```
 
-$$
+```math
 (R_mq)\cdot(R_nk)=q^{\top}R_{n-m}\,k
-$$
+```
 
-$$
+```math
 \theta_i=10000^{-2i/d},\qquad i=0,\dots,\frac{d}{2}-1
-$$
+```
 
 ## 📊 张量流程图
 

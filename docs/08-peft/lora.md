@@ -19,26 +19,26 @@
 
 ## 📐 核心公式
 
-$$
+```math
 h=W_0x+\Delta Wx=W_0x+\frac{\alpha}{r}BAx
-$$
+```
 
-$$
+```math
 W_0\in\mathbb{R}^{d\times k}\ \text{(frozen)},\qquad
 A\in\mathbb{R}^{r\times k},\qquad
 B\in\mathbb{R}^{d\times r},\qquad
 r\ll\min(d,k)
-$$
+```
 
-$$
+```math
 A\sim\text{kaiming},\qquad B=\mathbf{0}\ \Rightarrow\ BA=0\ \text{at init}
-$$
+```
 
-$$
+```math
 \frac{\text{trainable}}{\text{total}}=\frac{r(d+k)}{dk}\approx 0.1\%,
 \qquad
 W_{\text{new}}=W_0+\frac{\alpha}{r}BA\ \ \text{(mergeable at inference)}
-$$
+```
 
 ## 📊 张量流程图
 

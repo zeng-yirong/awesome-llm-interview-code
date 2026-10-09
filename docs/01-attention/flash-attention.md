@@ -20,24 +20,24 @@
 
 ## 📐 核心公式
 
-$$
+```math
 \begin{aligned}
 \text{standard}: &\quad \mathrm{IO}=O(S^{2})\\[2pt]
 \text{FlashAttention}: &\quad \mathrm{IO}=O\!\left(\frac{S^{2}d}{M}\right),\qquad M=\text{SRAM size}
 \end{aligned}
-$$
+```
 
-$$
+```math
 \begin{aligned}
 m^{(\text{new})} &= \max\!\left(m^{(\text{old})},\ \text{rowmax}(S_{\text{blk}})\right)\\[2pt]
 \ell^{(\text{new})} &= \ell^{(\text{old})}e^{\,m^{(\text{old})}-m^{(\text{new})}}+\text{rowsum}\!\left(e^{\,S_{\text{blk}}-m^{(\text{new})}}\right)\\[2pt]
 O^{(\text{new})} &= O^{(\text{old})}e^{\,m^{(\text{old})}-m^{(\text{new})}}+e^{\,S_{\text{blk}}-m^{(\text{new})}}V_{\text{blk}}
 \end{aligned}
-$$
+```
 
-$$
+```math
 O=\frac{O^{(\text{final})}}{\ell^{(\text{final})}},\qquad \text{memory}: O(S^{2})\to O(S)
-$$
+```
 
 ## 📊 张量流程图
 

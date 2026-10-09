@@ -19,24 +19,24 @@
 
 ## 📐 核心公式
 
-$$
+```math
 \mathcal{L}_{\text{PPO}}=-\mathbb{E}_t\left[\min\!\left(r_tA_t,\ \text{clip}(r_t,\,1-\epsilon,\,1+\epsilon)\,A_t\right)\right]
-$$
+```
 
-$$
+```math
 r_t=\exp\!\left(\log\pi_\theta^{\text{new}}-\log\pi_\theta^{\text{old}}\right),
 \qquad
 A_t=\text{GAE advantage},
 \qquad
 \epsilon=0.2
-$$
+```
 
-$$
+```math
 \begin{aligned}
 A_t>0:\ &\quad r_t>1+\epsilon\ \Rightarrow\ r_tA_t\ \text{capped at}\ (1+\epsilon)A_t\\[2pt]
 A_t<0:\ &\quad r_t<1-\epsilon\ \Rightarrow\ r_tA_t\ \text{floored at}\ (1-\epsilon)A_t
 \end{aligned}
-$$
+```
 
 ## 📊 张量流程图
 

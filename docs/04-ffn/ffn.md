@@ -17,20 +17,20 @@
 
 ## 📐 核心公式
 
-$$
+```math
 \text{FFN}(x)=W_2\text{ReLU}(W_1x+b_1)+b_2
-$$
+```
 
-$$
+```math
 W_1\in\mathbb{R}^{D\times 4D},\qquad W_2\in\mathbb{R}^{4D\times D}
-$$
+```
 
-$$
+```math
 \begin{aligned}
 \text{FFN}: &\quad D\cdot 4D+4D\cdot D=8D^{2}\\[2pt]
 \text{Attention}: &\quad 4D^{2}
 \end{aligned}
-$$
+```
 
 ## 📊 张量流程图
 

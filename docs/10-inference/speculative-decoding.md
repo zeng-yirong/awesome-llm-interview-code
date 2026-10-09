@@ -19,28 +19,28 @@
 
 ## 📐 核心公式
 
-$$
+```math
 \text{accept } x_i\ \text{iff}\ r<\frac{p_{\text{target}}(x_i)}{p_{\text{draft}}(x_i)},
 \qquad r\sim U[0,1]
-$$
+```
 
-$$
+```math
 \mathbb{E}\left[\#\text{accepted}\right]=\sum_{t=1}^{\gamma}\prod_{i=1}^{t}\alpha_i,
 \qquad
 \alpha_i=\min\!\left(1,\ \frac{p_{\text{target}}(x_i)}{p_{\text{draft}}(x_i)}\right)
-$$
+```
 
-$$
+```math
 \gamma=5,\qquad
 \mathbb{E}\left[\#\text{accepted}\right]\sim 3\text{ to }4,\qquad
 \text{speedup}\sim 2\text{ to }3\times
-$$
+```
 
-$$
+```math
 \text{standard}: 1\ \text{forward}\to 1\ \text{token},
 \qquad
 \text{speculative}: 1\ \text{forward}\to 3\text{ to }4\ \text{tokens}
-$$
+```
 
 ## 📊 张量流程图
 

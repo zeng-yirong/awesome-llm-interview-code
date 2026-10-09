@@ -18,22 +18,22 @@
 
 ## 📐 核心公式
 
-$$
+```math
 h_i^{k}=M_k\!\left[\text{RMSNorm}\!\left(h_i^{k-1}\right);\ \text{RMSNorm}\!\left(\text{Emb}\!\left(x_{i+k}\right)\right)\right],
 \qquad
 p_{i+k+1}=\text{lm\_head}\!\left(h_i^{k}\right)
-$$
+```
 
-$$
+```math
 \mathcal{L}_{\text{MTP}}=\frac{\lambda}{D}\sum_k\sum_i \text{CE}\!\left(p_{i+k+1},\ x_{i+1+k}\right),
 \qquad
 \mathcal{L}_{\text{total}}=\mathcal{L}_{\text{main}}+\mathcal{L}_{\text{MTP}}
-$$
+```
 
-$$
+```math
 \lambda=0.3\ \text{(first 10T tokens)}\ \longrightarrow\ 0.1,\qquad
 \text{Emb},\ \text{lm\_head}\ \text{shared with the main model}
-$$
+```
 
 ## 📊 张量流程图
 

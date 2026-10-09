@@ -19,23 +19,23 @@ MHA 和 MQA 的折中方案：Q 有 H 个头，KV 只有 G 个头 (G<H)。多个
 
 ## 📐 核心公式
 
-$$
+```math
 Q\in\mathbb{R}^{B\times H\times S\times D_h},\qquad
 K,V\in\mathbb{R}^{B\times G\times S\times D_h},\qquad
 1\le G\le H
-$$
+```
 
-$$
+```math
 \text{KV cache}=2\,n_{\text{layers}}\,G\,S\,D_h\,b
-$$
+```
 
-$$
+```math
 \begin{aligned}
 G=H &\Rightarrow \text{MHA}, & \text{one KV per query head}\\[2pt]
 1<G<H &\Rightarrow \text{GQA}, & H/G \text{ query heads share one KV}\\[2pt]
 G=1 &\Rightarrow \text{MQA}, & \text{all query heads share one KV}
 \end{aligned}
-$$
+```
 
 ## 📊 张量流程图
 
