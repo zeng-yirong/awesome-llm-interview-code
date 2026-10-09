@@ -19,9 +19,9 @@
 ## 📐 核心公式
 
 $$
-h_i^{k}=M_k\!\left[\operatorname{RMSNorm}\!\left(h_i^{k-1}\right);\ \operatorname{RMSNorm}\!\left(\operatorname{Emb}\!\left(x_{i+k}\right)\right)\right],
+h_i^{k}=M_k\!\left[\text{RMSNorm}\!\left(h_i^{k-1}\right);\ \text{RMSNorm}\!\left(\text{Emb}\!\left(x_{i+k}\right)\right)\right],
 \qquad
-p_{i+k+1}=\operatorname{lm\_head}\!\left(h_i^{k}\right)
+p_{i+k+1}=\text{lm\_head}\!\left(h_i^{k}\right)
 $$
 
 $$
@@ -32,7 +32,7 @@ $$
 
 $$
 \lambda=0.3\ \text{(first 10T tokens)}\ \longrightarrow\ 0.1,\qquad
-\operatorname{Emb},\ \operatorname{lm\_head}\ \text{shared with the main model}
+\text{Emb},\ \text{lm\_head}\ \text{shared with the main model}
 $$
 
 ## 📊 张量流程图

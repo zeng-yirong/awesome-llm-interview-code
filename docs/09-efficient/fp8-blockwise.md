@@ -19,11 +19,11 @@
 ## 📐 核心公式
 
 $$
-s=\frac{\operatorname{amax}(\text{block})}{448},\qquad 448=\text{e4m3 max}
+s=\frac{\text{amax}(\text{block})}{448},\qquad 448=\text{e4m3 max}
 $$
 
 $$
-x_q=\operatorname{clamp}\!\left(\frac{x}{s},\ -448,\ 448\right)\to\text{FP8},
+x_q=\text{clamp}\!\left(\frac{x}{s},\ -448,\ 448\right)\to\text{FP8},
 \qquad
 \hat{x}=x_q\,s
 $$

@@ -8,12 +8,12 @@
  * 格式（`$$` 独占一行，块外不得有文字）：
  *
  *   $$
- *   \operatorname{Attention}(Q,K,V)=\operatorname{softmax}\!\left(\frac{QK^{\top}}{\sqrt{d_k}}\right)V
+ *   \text{Attention}(Q,K,V)=\text{softmax}\!\left(\frac{QK^{\top}}{\sqrt{d_k}}\right)V
  *   $$
  *
  * 一题可以有多个块，块与块之间空一行（如 DAPO 的多项改动、稀疏注意力的两套方案）。
  * 块内不含中文：中文在 KaTeX 里要走字体回退、在 MathJax 里排版也不稳，需要名字时
- * 用英文的 `\operatorname{}` / `\text{}`。
+ * 用英文的 `\text{}`（GitHub 的数学渲染器会拒掉 `\operatorname`，见 scripts/check-flow.mjs）。
  *
  * 只要没有 `$$`、`$$` 未闭合、或块外出现非空行，就返回 null；调用方回退到旧的 <pre>。
  * 因此迁移可以逐题进行，网站不会中途损坏。

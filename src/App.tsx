@@ -41,7 +41,7 @@ function AppContent() {
           p.titleCn.includes(q) ||
           p.oneLiner.includes(q) ||
           p.principle.includes(q) ||
-          // formula 现在是 LaTeX，先投影成纯文本，否则 \operatorname{softmax} 这类搜不到
+          // formula 现在是 LaTeX，先投影成纯文本，否则 \text{softmax} 这类搜不到
           plainMath(p.formula).toLowerCase().includes(q) ||
           p.keyPoints.some(kp => kp.includes(q)) ||
           p.category.toLowerCase().includes(q);

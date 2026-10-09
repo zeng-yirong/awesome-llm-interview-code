@@ -21,9 +21,9 @@
 ## 📐 核心公式
 
 $$
-x\leftarrow x+\operatorname{Attn}\!\left(\operatorname{LN}(x),\ \text{causal mask}\right),
+x\leftarrow x+\text{Attn}\!\left(\text{LN}(x),\ \text{causal mask}\right),
 \qquad
-x\leftarrow x+\operatorname{FFN}\!\left(\operatorname{LN}(x)\right)
+x\leftarrow x+\text{FFN}\!\left(\text{LN}(x)\right)
 $$
 
 $$

@@ -18,7 +18,7 @@
 ## 📐 核心公式
 
 $$
-\operatorname{FFN}(x)=W_2\operatorname{ReLU}(W_1x+b_1)+b_2
+\text{FFN}(x)=W_2\text{ReLU}(W_1x+b_1)+b_2
 $$
 
 $$

@@ -21,23 +21,23 @@
 
 $$
 \begin{aligned}
-K_{\text{cmp},j} &= \operatorname{mean}\!\left(K_{jl:(j+1)l}\right)\\[2pt]
-p_j &= \operatorname{score}\!\left(q_t,K_{\text{cmp},j}\right),\qquad
-\mathcal{B}_{\text{slc}}=\operatorname{top}_{n}(p)\\[2pt]
+K_{\text{cmp},j} &= \text{mean}\!\left(K_{jl:(j+1)l}\right)\\[2pt]
+p_j &= \text{score}\!\left(q_t,K_{\text{cmp},j}\right),\qquad
+\mathcal{B}_{\text{slc}}=\text{top}_{n}(p)\\[2pt]
 \mathcal{B}_{\text{win}} &= \{t-w,\dots,t\}
 \end{aligned}
 $$
 
 $$
-o_t=\sum_{b\in\{\text{cmp},\text{slc},\text{win}\}} g_b\,\operatorname{Attn}(q_t,K_b,V_b),
+o_t=\sum_{b\in\{\text{cmp},\text{slc},\text{win}\}} g_b\,\text{Attn}(q_t,K_b,V_b),
 \qquad
 g=\sigma\!\left(w^{\top}[q_t;\dots]\right)
 $$
 
 $$
 k_s=W^{K,l}h_s,\qquad
-I_{t,s}=\sum_j w_{t,j}\operatorname{ReLU}(q_{t,j}\cdot k_s),\qquad
-\mathcal{S}_t=\operatorname{top}_{k}\!\left(I_{t,\cdot}\right)
+I_{t,s}=\sum_j w_{t,j}\text{ReLU}(q_{t,j}\cdot k_s),\qquad
+\mathcal{S}_t=\text{top}_{k}\!\left(I_{t,\cdot}\right)
 $$
 
 $$

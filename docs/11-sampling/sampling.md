@@ -28,7 +28,7 @@ T<1:\ \text{sharper},\qquad T>1:\ \text{flatter},\qquad T\to 0:\ \text{greedy}
 $$
 
 $$
-\text{top-}k:\quad \mathcal{S}_k=\{i:\ \operatorname{rank}(z_i)\le k\},
+\text{top-}k:\quad \mathcal{S}_k=\{i:\ \text{rank}(z_i)\le k\},
 \qquad p_i\leftarrow 0\ \text{for}\ i\notin\mathcal{S}_k
 $$
 

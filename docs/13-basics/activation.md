@@ -19,20 +19,20 @@
 ## 📐 核心公式
 
 $$
-\operatorname{ReLU}(x)=\max(0,x),\qquad \operatorname{ReLU}^{\prime}(x)=(x>0)
+\text{ReLU}(x)=\max(0,x),\qquad \text{ReLU}^{\prime}(x)=(x>0)
 $$
 
 $$
-\operatorname{GELU}(x)=x\,\Phi(x),\qquad \Phi=\text{standard normal CDF}
+\text{GELU}(x)=x\,\Phi(x),\qquad \Phi=\text{standard normal CDF}
 $$
 
 $$
-\operatorname{SiLU}(x)=x\,\sigma(x),\qquad
-\operatorname{SiLU}^{\prime}(x)=\operatorname{SiLU}(x)+\sigma(x)\left(1-\operatorname{SiLU}(x)\right)
+\text{SiLU}(x)=x\,\sigma(x),\qquad
+\text{SiLU}^{\prime}(x)=\text{SiLU}(x)+\sigma(x)\left(1-\text{SiLU}(x)\right)
 $$
 
 $$
-\text{Swish}\equiv\operatorname{SiLU}
+\text{Swish}\equiv\text{SiLU}
 $$
 
 ## 📊 张量流程图

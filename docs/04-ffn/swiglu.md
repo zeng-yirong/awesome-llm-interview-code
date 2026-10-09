@@ -19,11 +19,11 @@
 ## 📐 核心公式
 
 $$
-\operatorname{SwiGLU}(x)=W_{\text{down}}\!\left(\operatorname{SiLU}(W_{\text{gate}}x)\odot W_{\text{up}}x\right)
+\text{SwiGLU}(x)=W_{\text{down}}\!\left(\text{SiLU}(W_{\text{gate}}x)\odot W_{\text{up}}x\right)
 $$
 
 $$
-\operatorname{SiLU}(x)=x\,\sigma(x),\qquad d_{ff}=\tfrac{8}{3}D
+\text{SiLU}(x)=x\,\sigma(x),\qquad d_{ff}=\frac{8}{3}D
 $$
 
 $$

@@ -19,7 +19,7 @@ GRPO 的重要性比率是 token 级的，每个 token 各自 clip；而奖励�
 ## 📐 核心公式
 
 $$
-\hat{A}_i=\frac{r_i-\operatorname{mean}(r)}{\operatorname{std}(r)+\epsilon}
+\hat{A}_i=\frac{r_i-\text{mean}(r)}{\text{std}(r)+\epsilon}
 $$
 
 $$
@@ -28,7 +28,7 @@ s_i(\theta)=\left(\frac{\pi_\theta(y_i\mid x)}{\pi_{\text{old}}(y_i\mid x)}\righ
 $$
 
 $$
-\mathcal{L}_{\text{GSPO}}=-\mathbb{E}\left[\min\!\left(s_i\hat{A}_i,\ \operatorname{clip}(s_i,\,1-\epsilon,\,1+\epsilon)\,\hat{A}_i\right)\right],
+\mathcal{L}_{\text{GSPO}}=-\mathbb{E}\left[\min\!\left(s_i\hat{A}_i,\ \text{clip}(s_i,\,1-\epsilon,\,1+\epsilon)\,\hat{A}_i\right)\right],
 \qquad
 \epsilon=3\times10^{-4}
 $$

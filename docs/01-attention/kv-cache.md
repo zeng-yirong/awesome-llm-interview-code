@@ -29,8 +29,8 @@ $$
 $$
 
 $$
-\text{decode}: \quad K\leftarrow\operatorname{concat}(K,\,k_{\text{new}}),\qquad
-V\leftarrow\operatorname{concat}(V,\,v_{\text{new}})
+\text{decode}: \quad K\leftarrow\text{concat}(K,\,k_{\text{new}}),\qquad
+V\leftarrow\text{concat}(V,\,v_{\text{new}})
 $$
 
 $$

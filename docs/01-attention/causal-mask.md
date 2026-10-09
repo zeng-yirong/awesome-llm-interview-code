@@ -25,7 +25,7 @@ S'_{ij}=S_{ij}-\infty\,(1-M_{ij})
 $$
 
 $$
-A=\operatorname{softmax}(S'),\qquad A_{ij}=0\ \text{ for }\ j>i
+A=\text{softmax}(S'),\qquad A_{ij}=0\ \text{ for }\ j>i
 $$
 
 ## 📊 张量流程图

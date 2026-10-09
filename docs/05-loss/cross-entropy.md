@@ -24,7 +24,7 @@ $$
 $$
 
 $$
-\text{CE}\!\left(\operatorname{shift}(\text{logits}),\ \operatorname{shift}(\text{labels})\right),
+\text{CE}\!\left(\text{shift}(\text{logits}),\ \text{shift}(\text{labels})\right),
 \qquad
 \text{logits}[:,:-1]\ \text{predicts}\ \text{labels}[:,1:]
 $$
