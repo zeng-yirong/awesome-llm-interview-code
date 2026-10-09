@@ -34,15 +34,17 @@ A_t: 优势函数 (GAE 估计)
 ## 📊 张量流程图
 
 ```
-ratio = exp(new_logp - old_logp)    # 重要性采样比率
-  │
-  ├── unclipped = ratio × advantage
-  ├── clipped   = clamp(ratio, 1-ε, 1+ε) × advantage
-  │
-  └── loss = -mean(min(unclipped, clipped))
-
-当 A > 0 (好动作): ratio > 1+ε 时停止奖励 (防过度优化)
-当 A < 0 (坏动作): ratio < 1-ε 时停止惩罚 (防过度惩罚)
+# 截断重要性比率，给更新幅度设上界
+old_logp :: π_old 对已采样动作的对数概率
+new_logp :: π_new 的对数概率，需要梯度
+ratio = exp(new_logp - old_logp) :: 重要性采样比率，用对数相减更稳
++ unclipped :: ratio · A :: 不加约束的更新量
++ clipped :: clip(ratio, 1-ε, 1+ε) · A :: 比率被夹住后的更新量
+loss = -mean(min(unclipped, clipped)) :: 取更小的那个，得到悲观下界
+! A > 0 时 ratio 涨过 1+ε 停止奖励，防过度优化
+! A < 0 时 ratio 跌破 1-ε 停止惩罚，防过度惩罚
+$ ε 通常取 0.2，一步更新幅度便有了显式上界
+> ratio 必须用旧策略的 logp 现算，rollout 与更新要严格配对
 ```
 
 ## 💻 代码实现

@@ -34,14 +34,19 @@ KV Cache 大小 = 2 × n_layers × n_kv_heads × seq_len × head_dim × bytes
 ## 📊 张量流程图
 
 ```
-Prefill 阶段 (处理 prompt):
-  prompt [1, S_prompt, D] → 模型 → 缓存 KV [1, H, S_prompt, Dh]
+# Prefill：整段算完，把每层的 K/V 留下来
+prompt :: [1, S_prompt, D] :: 整段输入，一次前向
+Q, K, V 投影 :: [1, H_kv, S_prompt, Dh] :: 只有 K、V 会被留下
+cache :: [L, 2, B, H_kv, S, Dh] :: 每层一份，显存随序列长度线性增长
 
-Decode 阶段 (逐 token 生成):
-  token_t [1, 1, D] → Q,K,V
-  K = cat(K_cache, K_t)    → [1, H, S_prompt+t, Dh]
-  V = cat(V_cache, V_t)    → [1, H, S_prompt+t, Dh]
-  attn(Q, K, V) → 输出 → 更新 cache
+# Decode：每步只算新 token，历史 KV 从缓存拼
+token_t :: [1, 1, D] :: 当前步唯一的新输入
++ q_t :: [1, H, 1, Dh] :: 查询，只有这一步用得上，不缓存
++ k_t, v_t :: [1, H_kv, 1, Dh] :: 键值，追加到缓存末尾
+K = cat(K_cache, k_t) :: [1, H_kv, S+t, Dh] :: 拼接即可，历史部分完全不重算
+O = SDPA(q_t, K, V) :: [1, H, S+t, Dh] :: 一个 query 对整个历史
+$ 每步计算量恒定，不缓存则是 Σt = O(S²)
+> LLaMA 2 70B 在 4096 长度、fp16 下缓存约 80GB —— 比模型本身还大
 ```
 
 ## 💻 代码实现

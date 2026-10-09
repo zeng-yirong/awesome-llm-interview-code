@@ -29,15 +29,14 @@ attn = softmax(scores, dim=-1)
 ## 📊 张量流程图
 
 ```
-seq_len = 4 的 causal mask (1=可见, 0=屏蔽):
-
-  ┌           ┐
-  │ 1  0  0  0 │   row 0 只能看自己
-  │ 1  1  0  0 │   row 1 看 0,1
-  │ 1  1  1  0 │   row 2 看 0,1,2
-  │ 1  1  1  1 │   row 3 看所有
-  └           ┘
-  = torch.tril(torch.ones(S, S))
+# 只改 softmax 的输入，不改任何形状
+scores = Q·Kᵀ/√D :: [B, H, S, S] :: 与普通注意力完全一样
+mask = tril(ones(S, S)) :: [S, S] :: 下三角含对角线为 1（可见），上三角为 0（屏蔽）
+scores.masked_fill(mask == 0, -1e9) :: [B, H, S, S] :: 屏蔽位填一个极大的负数
+A = softmax(scores, -1) :: [B, H, S, S] :: exp(-1e9) 下溢为 0，权重精确为 0
+O = A·V :: [B, H, S, Dh] :: 第 i 行只混合了 j ≤ i 的 V
+$ 形状全程不变，因果性完全由 mask 的取值保证
+> 推理时每步只有 1 个 token，掩码自动失效 —— 训练与推理走的是同一套代码
 ```
 
 ## 💻 代码实现

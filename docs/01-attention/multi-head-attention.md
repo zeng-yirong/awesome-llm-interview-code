@@ -33,15 +33,17 @@ MultiHead(Q, K, V) = Concat(head₁, ..., headₕ) · Wₒ
 ## 📊 张量流程图
 
 ```
-x: [B, S, D]
-  │
-  ├── Wq ─→ Q [B,S,D] ─→ view [B,S,H,Dh] ─→ transpose [B,H,S,Dh] ─┐
-  ├── Wk ─→ K [B,S,D] ─→ view [B,S,H,Dh] ─→ transpose [B,H,S,Dh] ─┤ SDPA
-  └── Wv ─→ V [B,S,D] ─→ view [B,S,H,Dh] ─→ transpose [B,H,S,Dh] ─┘
-                                                                      │
-                                              [B,H,S,Dh] ← transpose ←┘
-                                                    │
-                                              view [B,S,D] → Wo → [B,S,D]
+# 一次投影，再把 D 拆成 H 个头
+x :: [B, S, D] :: 输入
++ Q = x·W_qᵀ :: [B, S, D] :: 查询投影
++ K = x·W_kᵀ :: [B, S, D] :: 键投影
++ V = x·W_vᵀ :: [B, S, D] :: 值投影
+view + transpose :: [B, H, S, Dh] :: 把 D 拆成 H×Dh，再把头维提到前面
+SDPA :: [B, H, S, Dh] :: 每个头独立算一次缩放点积注意力
+transpose + view :: [B, S, D] :: 头拼回完整的 D 维
+y = ·W_o :: [B, S, D] :: 输出投影，唯一发生跨头交互的地方
+$ H·Dh = D，参数量与单头完全相同，只多出一组中间张量
+> 中间的注意力矩阵是 [B, H, S, S]，显存与头数成正比 —— GQA、MQA 砍的就是这一项
 ```
 
 ## 💻 代码实现

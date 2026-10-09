@@ -37,19 +37,17 @@
 ## 📊 张量流程图
 
 ```
-输入 tokens: [B, S]
-       │
-  Token Embedding + Position Embedding (RoPE/ALiBi)
-       │
-  ┌─── Transformer Block ×N ───┐
-  │  x = x + Attn(LN(x), causal) │  ← Pre-Norm
-  │  x = x + FFN(LN(x))          │  ← SwiGLU
-  └──────────────────────────────┘
-       │
-  RMSNorm → LM Head → logits [B, S, V]
-       │
-  Shift + CrossEntropy (训练)
-  Sample next token (推理)
+# 一路 decoder 堆到顶
+tokens :: [B, S] :: 输入
+Embedding + RoPE :: [B, S, D] :: 词嵌入叠加位置信息
++ 注意力子层 :: x = x + Attn(LN(x), causal_mask) :: 因果掩码，只能看左边
++ FFN 子层 :: x = x + FFN(LN(x)) :: Pre-Norm 加残差
+Transformer Block × N :: 上述两个子层重复 N 次
+RMSNorm → LM Head :: logits [B, S, V]
+! ✓ 训练 :: shift + CrossEntropy，所有位置一次算完
+! ✓ 推理 :: 取末位采样下一个 token，拼回去再跑一轮
+$ 现代标配：RMSNorm、SwiGLU、RoPE、Pre-Norm
+> 训练与推理共用一套权重，形式统一是 scaling 的前提
 ```
 
 ## 💻 代码实现

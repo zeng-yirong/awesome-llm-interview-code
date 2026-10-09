@@ -35,15 +35,15 @@ Top-p: 按概率降序排列, 保留累积概率≥p 的最小集合
 ## 📊 张量流程图
 
 ```
-logits: [V]
-  │
-  ├── /T (temperature)
-  │
-  ├── Top-k: 只保留最大的 k 个, 其余 → -inf
-  │
-  ├── Top-p: 排序 → cumsum → 超过 p 的 → -inf
-  │
-  └── softmax → multinomial sample → next_token
+# 三步：调形状 → 截长尾 → 采样
+logits :: [V] :: 模型对词表的原始打分
+logits = logits / T :: [V] :: 温度只做一次除法，却改变整个分布的熵
++ Top-k :: 取最大的 k 个，其余置 -inf :: 固定数量截断
++ Top-p :: 排序 → cumsum → 累积超过 p 的置 -inf :: 候选集随分布陡峭程度伸缩
+probs = softmax(logits) :: [V] :: 被截掉的位置概率为 0
+next_token = multinomial(probs) :: 下一个 token :: 只在留下的候选里采样
+$ T<1 更确定、T>1 更随机、T→0 退化成 greedy
+> 实践中常组合：温度在最前，Top-k 保底，Top-p 收缩
 ```
 
 ## 💻 代码实现

@@ -29,19 +29,15 @@ Mixtral 8x7B: 8 个专家选 2 个
 ## 📊 张量流程图
 
 ```
-x: [B*S, D]
-  │
-  ├── Router: [D, N_experts] → logits: [B*S, N]
-  │                                    │
-  │                              Top-K → indices, weights
-  │                                    │
-  └── Experts: E₁, E₂, ..., Eₙ        │
-        │                              │
-   每个 expert 处理分配到的 token       │
-        │                              │
-   weighted_sum(expert_out × weight) ←─┘
-        │
-   output: [B*S, D] → [B, S, D]
+# 按 token 路由到 Top-K 个专家
+x = reshape(x, [B*S, D]) :: [B*S, D] :: 摊平序列维，路由是逐 token 的
+logits = Router(x) :: [B*S, N] :: Router 只是一个 [D, N] 的线性层
+Top-K :: indices, weights :: 通常 K=2，取出下标与权重
+w = softmax(选中的 logits) :: [B*S, K] :: 路由权重，用来加权求和
+E_k(x) :: 每个专家都是一个完整的 FFN
+y = Σ_k w_k · E_k(x) :: [B*S, D] :: 只算 K 个专家，其余不参与
+$ 总参数是 N 份专家，每个 token 只算 K 份 → FLOPs 只占 K/N
+> Mixtral 8x7B：8 选 2，46.7B 总参数，单 token 实际计算约 12.9B
 ```
 
 ## 💻 代码实现

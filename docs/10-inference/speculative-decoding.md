@@ -35,21 +35,15 @@
 ## 📊 张量流程图
 
 ```
-Draft model (小, 快):
-  prompt → x₁ → x₂ → x₃ → x₄ → x₅   (γ=5 个候选)
-           ↓      ↓      ↓      ↓      ↓
-Target model (大, 慢, 并行验证):
-  p(x₁)  p(x₂)  p(x₃)  p(x₄)  p(x₅)
-  │
-  ├── accept x₁ (p_t/p_d ≥ r) ✓
-  ├── accept x₂ ✓
-  ├── accept x₃ ✓
-  ├── reject x₄ (p_t/p_d < r) ✗ → 从 x₄ 重新采样
-  └── x₅ 不需要验证
-
-结果: 一次大模型前向 → 获得 3-4 个 token
-vs 标准: 一次大模型前向 → 只获得 1 个 token
-→ 加速 2-3x!
+# Draft 先猜，Target 一次验证
+Draft model :: 小、快，自回归生成 γ 个候选
+x₁ → x₂ → x₃ → x₄ → x₅ :: 候选 token :: γ = 5，逐个猜出来
+Target model :: 大、慢，prompt 加候选一起喂进去，一次前向
+p(x₁) … p(x₅) :: 每个位置的概率 :: 一次算完，验证几乎是白送的
+! ✓ accept x₁、x₂、x₃：满足 r < p_target / p_draft
+! ✗ reject x₄：从 x₄ 按修正后的分布重新采样，x₅ 直接丢弃
+$ 一次大模型前向产出 3~4 个 token，而标准解码只有 1 个
+> 拒绝采样保证输出分布与「只用大模型」逐位一致，属于无损加速
 ```
 
 ## 💻 代码实现

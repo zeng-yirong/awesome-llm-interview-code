@@ -15,6 +15,12 @@ export type Category =
   | 'Architecture'
   | 'Basics';
 
+/** 原理的一个分节：标题固定四选一，条目是纯文本（渲染成 ▸ 列表） */
+export interface PrincipleSection {
+  title: string;
+  items: string[];
+}
+
 export interface Problem {
   id: string;
   title: string;
@@ -24,18 +30,24 @@ export interface Problem {
   difficulty: Difficulty;
   /** 一句话描述 */
   oneLiner: string;
-  /** 原理概述 */
+  /** 原理概述（卡片首段） */
   principle: string;
+  /**
+   * 原理分节展开，标题取自固定四节：
+   * `它解决什么问题` / `核心思想` / `算法步骤与推导` / `对比与代价`。
+   * 可选是为了让 36 题分批迁移；全部迁移完成后由 scripts/check-flow.mjs 强制齐全。
+   */
+  principleSections?: PrincipleSection[];
   /** 核心公式（文本表示） */
   formula: string;
-  /** 张量流程图（ASCII art） */
+  /** 张量流程图（结构化 DSL，见 src/lib/flowDsl.ts；旧的 ASCII art 会被兜底渲染） */
   flowDiagram: string;
   /** 代码实现 */
   code: string;
   /** 面试要点 */
   keyPoints: string[];
   /** 来源 */
-  source: 'ckd0817' | 'cdhx' | 'both';
+  source: 'ckd0817' | 'cdhx' | 'both' | 'original';
 }
 
 export const problems: Problem[] = [
@@ -48,13 +60,37 @@ export const problems: Problem[] = [
     hot: 3,
     difficulty: 3,
     oneLiner: 'softmax(QKᵀ/√d)V — 所有注意力的基础',
-    principle: '计算 Q 和 K 的点积，除以缩放因子 √d_k 后通过 softmax 得到注意力权重，最后加权求和 V。缩放因子防止点积过大导致 softmax 梯度消失。',
+    principle: '计算 Q 和 K 的点积，除以缩放因子 √d_k 后通过 softmax 得到注意力权重，最后加权求和 V。缩放防止点积过大导致梯度消失，是所有注意力变体（MHA/GQA/Flash Attention）的基础。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '通过点积衡量 Q 和 K 的相似度，softmax 归一化后作为权重对 V 加权求和。缩放因子 1/√d_k 确保方差稳定，使 softmax 不会进入饱和区。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '计算 Q 和 K 的点积：scores = Q @ K^T',
+          '缩放：scores = scores / √d_k',
+          '应用 mask（可选）：masked_fill(mask == 0, -inf)',
+          'Softmax 归一化：attn_weights = softmax(scores)',
+          '加权求和：output = attn_weights @ V',
+        ],
+      },
+    ],
     formula: 'Attention(Q, K, V) = softmax(QKᵀ / √d_k) · V',
-    flowDiagram: `Q: [B, H, Sq, D]  ──┐
-                    ├─ matmul → [B, H, Sq, Sk] → /√D → mask → softmax → [B, H, Sq, Sk]
-K: [B, H, Sk, D]  ──┘                                                          │
-                                                                        matmul   │
-V: [B, H, Sk, D]  ─────────────────────────────────────────────────────→ [B, H, Sq, D]`,
+    flowDiagram: `# 打分：一次 matmul 得到所有位置对的相关性
++ Q :: [B, H, Sq, D] :: 查询
++ K :: [B, H, Sk, D] :: 键
+S = Q·Kᵀ/√D :: [B, H, Sq, Sk] :: 除以 √D 把点积方差从 D 拉回 1
+Mask :: 因果 / padding 位置填 -1e9，softmax 后权重≈0
+A = softmax(S) :: [B, H, Sq, Sk] :: 每行和为 1
+
+# 加权求和
++ A :: [B, H, Sq, Sk] :: 注意力权重
++ V :: [B, H, Sk, D] :: 值
+O = A·V :: [B, H, Sq, D] :: 与 Q 同形`,
     code: `import torch, torch.nn.functional as F, math
 
 def scaled_dot_product_attention(q, k, v, mask=None):
@@ -83,17 +119,37 @@ def scaled_dot_product_attention(q, k, v, mask=None):
     hot: 3,
     difficulty: 4,
     oneLiner: '并行多头 → 拼接 → 输出投影',
-    principle: '将输入投影到多个子空间，每个头独立计算注意力，最后拼接并通过线性层融合。不同头可学习不同的注意力模式。',
+    principle: '将输入投影到多个子空间，每个头独立计算注意力，最后拼接并通过线性层融合。相比单头注意力，多头机制允许模型同时关注不同位置的不同表示子空间，捕捉更丰富的语义关系。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '通过多个独立的注意力头，每个头学习不同的注意力模式（如语法关系、语义关系等）。最后通过输出投影融合所有头的信息，增强模型的表达能力。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '线性投影：Q = x @ Wq, K = x @ Wk, V = x @ Wv',
+          '分头：view(B, S, H, Dh).transpose(1, 2) → [B, H, S, Dh]',
+          '对每个头计算缩放点积注意力',
+          '合并多头：transpose(1, 2).contiguous().view(B, S, D)',
+          '输出投影：output = concat_output @ Wo',
+        ],
+      },
+    ],
     formula: 'MultiHead(Q,K,V) = Concat(head₁…headₕ) · Wₒ\nheadᵢ = Attention(QWᵢQ, KWᵢK, VWᵢV)',
-    flowDiagram: `x: [B, S, D]
-  │
-  ├── Wq ─→ Q [B,S,D] ─→ view [B,S,H,Dh] ─→ transpose [B,H,S,Dh] ─┐
-  ├── Wk ─→ K [B,S,D] ─→ view [B,S,H,Dh] ─→ transpose [B,H,S,Dh] ─┤ SDPA
-  └── Wv ─→ V [B,S,D] ─→ view [B,S,H,Dh] ─→ transpose [B,H,S,Dh] ─┘
-                                                                      │
-                                              [B,H,S,Dh] ← transpose ←┘
-                                                    │
-                                              view [B,S,D] → Wo → [B,S,D]`,
+    flowDiagram: `# 一次投影，再把 D 拆成 H 个头
+x :: [B, S, D] :: 输入
++ Q = x·W_qᵀ :: [B, S, D] :: 查询投影
++ K = x·W_kᵀ :: [B, S, D] :: 键投影
++ V = x·W_vᵀ :: [B, S, D] :: 值投影
+view + transpose :: [B, H, S, Dh] :: 把 D 拆成 H×Dh，再把头维提到前面
+SDPA :: [B, H, S, Dh] :: 每个头独立算一次缩放点积注意力
+transpose + view :: [B, S, D] :: 头拼回完整的 D 维
+y = ·W_o :: [B, S, D] :: 输出投影，唯一发生跨头交互的地方
+$ H·Dh = D，参数量与单头完全相同，只多出一组中间张量
+> 中间的注意力矩阵是 [B, H, S, S]，显存与头数成正比 —— GQA、MQA 砍的就是这一项`,
     code: `import torch, torch.nn as nn, torch.nn.functional as F, math
 
 class MultiHeadAttention(nn.Module):
@@ -135,17 +191,33 @@ class MultiHeadAttention(nn.Module):
     hot: 3,
     difficulty: 2,
     oneLiner: '下三角矩阵，防止看到未来信息',
-    principle: '在 decoder 中使用下三角矩阵作为 mask，使得位置 i 只能关注位置 ≤i 的 token。这是自回归生成的基础。',
+    principle: '在 decoder 中使用下三角矩阵作为 mask，使得位置 i 只能关注位置 ≤i 的 token。这是自回归生成的基础，相比无 mask 的注意力，确保模型在训练时不会"看到未来"。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '通过下三角矩阵屏蔽未来位置的信息，使每个位置只能 attend 到当前及之前的 token。被屏蔽的位置填充 -inf，softmax 后变为 0，从而实现因果约束。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '创建下三角矩阵：mask = torch.tril(torch.ones(S, S))',
+          '调整维度：mask = mask.unsqueeze(0).unsqueeze(0) → [1, 1, S, S]',
+          '在注意力计算中应用：scores.masked_fill(mask == 0, -inf)',
+          'Softmax 归一化：attn = softmax(scores)',
+        ],
+      },
+    ],
     formula: 'mask[i][j] = 1  if j ≤ i\n           0  if j > i\nscores = scores.masked_fill(mask == 0, -inf)',
-    flowDiagram: `seq_len = 4 的 causal mask (1=可见, 0=屏蔽):
-
-  ┌           ┐
-  │ 1  0  0  0 │   row 0 只能看自己
-  │ 1  1  0  0 │   row 1 看 0,1
-  │ 1  1  1  0 │   row 2 看 0,1,2
-  │ 1  1  1  1 │   row 3 看所有
-  └           ┘
-  = torch.tril(torch.ones(S, S))`,
+    flowDiagram: `# 只改 softmax 的输入，不改任何形状
+scores = Q·Kᵀ/√D :: [B, H, S, S] :: 与普通注意力完全一样
+mask = tril(ones(S, S)) :: [S, S] :: 下三角含对角线为 1（可见），上三角为 0（屏蔽）
+scores.masked_fill(mask == 0, -1e9) :: [B, H, S, S] :: 屏蔽位填一个极大的负数
+A = softmax(scores, -1) :: [B, H, S, S] :: exp(-1e9) 下溢为 0，权重精确为 0
+O = A·V :: [B, H, S, Dh] :: 第 i 行只混合了 j ≤ i 的 V
+$ 形状全程不变，因果性完全由 mask 的取值保证
+> 推理时每步只有 1 个 token，掩码自动失效 —— 训练与推理走的是同一套代码`,
     code: `import torch
 
 def create_causal_mask(seq_len, device='cpu'):
@@ -172,18 +244,39 @@ def create_causal_mask(seq_len, device='cpu'):
     hot: 3,
     difficulty: 4,
     oneLiner: '多 Q 头共享 KV 头，LLaMA 2 标配',
-    principle: 'MHA 和 MQA 的折中：Q 有 H 个头，KV 只有 G 个头 (G<H)。多个 Q 头共享同一组 KV 头，大幅减少 KV Cache。',
+    principle: 'MHA 和 MQA 的折中方案：Q 有 H 个头，KV 只有 G 个头 (G<H)。多个 Q 头共享同一组 KV 头，大幅减少 KV Cache。相比 MHA 节省推理显存，相比 MQA 保持更好的模型质量。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '通过让多个 Q 头共享同一组 KV 头，在保持模型表达能力的同时大幅减少 KV Cache 大小。核心操作是 repeat_kv：将 G 个 KV 头复制扩展为 H 个，以匹配 Q 的头数。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '线性投影：Q → [B, S, H, Dh]，K,V → [B, S, G, Dh]',
+          '复制 KV 头：repeat_kv(K, H/G) → [B, S, H, Dh]',
+          '转置维度：transpose(1, 2) → [B, H, S, Dh]',
+          '计算缩放点积注意力',
+          '合并多头并输出投影',
+        ],
+      },
+    ],
     formula: 'Q: [B, H, S, Dh]     (H 个头)\nK,V: [B, G, S, Dh]   (G 个头, G < H)\nrepeat_kv: K,V → [B, H, S, Dh]   (复制 G→H)',
-    flowDiagram: `Q: [B, H, S, Dh]  ─────────────────────────┐
-                                                │ SDPA
-K: [B, G, S, Dh] → repeat_kv → [B, H, S, Dh] ─┤
-V: [B, G, S, Dh] → repeat_kv → [B, H, S, Dh] ─┘
+    flowDiagram: `# Q 有 H 个头，K/V 只有 G 组
++ Q :: [B, H, S, Dh] :: 全部 H 个头各自独立
++ K, V :: [B, G, S, Dh] :: 只有 G 组，G < H
+repeat_kv :: G → H :: 每份 KV 复制 H/G 次，与 Q 的头数对齐
+SDPA :: [B, H, S, Dh] :: 之后与 MHA 完全相同
+$ KV Cache 降到 G/H；LLaMA 2 70B 取 G=8、H=64，只剩 1/8
 
-repeat_kv 实现:
-  x: [B, G, S, Dh]
-  → x[:,:,None,:,:]          [B, G, 1, S, Dh]
-  → .expand(B, G, H/G, S, Dh) [B, G, H/G, S, Dh]
-  → .reshape(B, H, S, Dh)    [B, H, S, Dh]`,
+# repeat_kv：unsqueeze → expand → reshape
+x :: [B, G, S, Dh] :: 输入，G 份 KV
+unsqueeze :: [B, G, 1, S, Dh] :: 插一个复制维
+expand :: [B, G, H/G, S, Dh] :: 只建视图，不占新内存
+reshape :: [B, H, S, Dh] :: 到这里才真正复制
+> MHA: G = H；MQA: G = 1；GQA: 1 < G < H`,
     code: `import torch, torch.nn as nn, torch.nn.functional as F, math
 
 class GQA(nn.Module):
@@ -236,17 +329,41 @@ class GQA(nn.Module):
     hot: 2,
     difficulty: 5,
     oneLiner: '分块计算 + Online Softmax → O(N) 显存',
-    principle: '将 Q/K/V 分成块，在 SRAM 中完成注意力计算，避免将 O(N²) 的注意力矩阵写入 HBM。利用 Online Softmax 算法，不需要存储完整的注意力矩阵。',
+    principle: '将 Q/K/V 分成块，在 SRAM 中完成注意力计算，避免将 O(N²) 的注意力矩阵写入 HBM。相比标准 Attention 的 O(N²) IO 复杂度，Flash Attention 将其降至 O(N²d/M)，大幅提升长序列训练/推理效率。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '利用 Online Softmax 算法，分块计算注意力而不需要存储完整的 N×N 注意力矩阵。GPU SRAM 快但小(20MB)，HBM 慢但大(40GB)，算法设计围绕减少 HBM 访问。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '将 Q 分成块，逐块处理',
+          '对每个 Q 块，遍历所有 K/V 块',
+          '计算当前块的 attention scores',
+          'Online Softmax 更新：维护最大值 m 和分母 l',
+          '累加输出：O = O * exp(m_old - m_new) + P @ V_block',
+          '最终归一化：O = O / l',
+        ],
+      },
+    ],
     formula: '标准 Attention:  IO = O(N²)  (存注意力矩阵)\nFlash Attention: IO = O(N²d/M)  (M=SRAM大小)\n\n核心: Online Softmax\n  m_new = max(m_old, max(S_block))\n  l_new = l_old * exp(m_old - m_new) + sum(exp(S_block - m_new))\n  O_new = O_old * exp(m_old - m_new) + exp(S_block - m_new) @ V_block',
-    flowDiagram: `标准 Attention:                Flash Attention:
-  Q → scores[N×N] → softmax → @V    Q分块 → 逐块计算 → Online Softmax → 输出
-      ↑ 写入HBM (O(N²))                    ↑ 只在SRAM (O(N))
+    flowDiagram: `# 标准实现：把中间矩阵物化到 HBM
+S = Q·Kᵀ :: [B, H, S, S] :: 一次写完整个分数矩阵
+P = softmax(S) :: [B, H, S, S] :: 再整块读回来做 softmax
+O = P·V :: [B, H, S, Dh] :: 第三次读写 O(S²) 的数据
+$ IO = O(S²)：瓶颈在显存带宽，不在乘加
 
-Online Softmax 三步:
-  Pass 1: 找每行最大值 m (数值稳定)
-  Pass 2: 计算 exp(x-m) 的和 l (分母)
-  Pass 3: 计算 exp(x-m)/l * V (分子)
-  → 不需要存储完整 N×N 矩阵!`,
+# Flash Attention：分块 + Online Softmax
++ Q 分块 :: [B, H, Br, Dh] :: 常驻 SRAM，反复使用
++ K, V 分块 :: [B, H, Bc, Dh] :: 从 HBM 流式读入，每个 Q 块读一遍
+m = max(m, rowmax(S_block)) :: [B, H, Br] :: 维护每行的 running max
+l = l·exp(m_old - m) + rowsum(exp(S_block - m)) :: [B, H, Br] :: 修正后的分母
+O = O·exp(m_old - m) + exp(S_block - m)·V_block :: [B, H, Br, Dh] :: 旧结果缩放后叠加新块
+> 全程不需要 [S, S] 矩阵，每行只维护 m、l、O 三个状态
+$ IO 从 O(S²) 降到 O(S²d/M)，M 是 SRAM 大小；结果与标准 softmax 数值等价`,
     code: `import torch, math
 
 def flash_attention_qk(Q, K, V, block_size=64):
@@ -296,16 +413,40 @@ def flash_attention_qk(Q, K, V, block_size=64):
     hot: 3,
     difficulty: 3,
     oneLiner: '缓存历史 KV，避免自回归重复计算',
-    principle: '自回归生成时，每步只处理新 token，但需要与所有历史 token 做注意力。KV Cache 缓存历史的 K/V，避免重复计算。',
+    principle: '自回归生成时，每步只处理新 token，但需要与所有历史 token 做注意力。KV Cache 缓存历史的 K/V，避免重复计算。相比每步重新计算所有 token 的 O(N²) 复杂度，KV Cache 将其降至 O(N)，是推理加速的核心技术。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '空间换时间：缓存历史 token 的 K/V，每步只计算新 token 的 K/V，然后与缓存拼接。代价是额外的显存占用 O(L × H × Dh)。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          'Prefill 阶段：处理整个 prompt，计算并缓存所有 KV',
+          'Decode 阶段：每步只处理 1 个新 token',
+          '计算新 token 的 Q, K, V',
+          '拼接历史 KV：K = cat(K_cache, K_new)',
+          '计算注意力：attn(Q, K, V)',
+          '更新 cache，输出下一个 token',
+        ],
+      },
+    ],
     formula: 'Prefill:  处理整个 prompt → 缓存所有 KV\nDecode:   每步只处理 1 token → K_new = cat(K_cache, K_new)\n\nKV Cache 大小 = 2 × n_layers × n_kv_heads × seq_len × head_dim × bytes',
-    flowDiagram: `Prefill 阶段 (处理 prompt):
-  prompt [1, S_prompt, D] → 模型 → 缓存 KV [1, H, S_prompt, Dh]
+    flowDiagram: `# Prefill：整段算完，把每层的 K/V 留下来
+prompt :: [1, S_prompt, D] :: 整段输入，一次前向
+Q, K, V 投影 :: [1, H_kv, S_prompt, Dh] :: 只有 K、V 会被留下
+cache :: [L, 2, B, H_kv, S, Dh] :: 每层一份，显存随序列长度线性增长
 
-Decode 阶段 (逐 token 生成):
-  token_t [1, 1, D] → Q,K,V
-  K = cat(K_cache, K_t)    → [1, H, S_prompt+t, Dh]
-  V = cat(V_cache, V_t)    → [1, H, S_prompt+t, Dh]
-  attn(Q, K, V) → 输出 → 更新 cache`,
+# Decode：每步只算新 token，历史 KV 从缓存拼
+token_t :: [1, 1, D] :: 当前步唯一的新输入
++ q_t :: [1, H, 1, Dh] :: 查询，只有这一步用得上，不缓存
++ k_t, v_t :: [1, H_kv, 1, Dh] :: 键值，追加到缓存末尾
+K = cat(K_cache, k_t) :: [1, H_kv, S+t, Dh] :: 拼接即可，历史部分完全不重算
+O = SDPA(q_t, K, V) :: [1, H, S+t, Dh] :: 一个 query 对整个历史
+$ 每步计算量恒定，不缓存则是 Σt = O(S²)
+> LLaMA 2 70B 在 4096 长度、fp16 下缓存约 80GB —— 比模型本身还大`,
     code: `import torch, torch.nn as nn, torch.nn.functional as F, math
 
 class KVCacheAttention(nn.Module):
@@ -349,24 +490,41 @@ class KVCacheAttention(nn.Module):
     hot: 2,
     difficulty: 5,
     oneLiner: 'KV 低秩压缩到潜空间，DeepSeek-V2 核心',
-    principle: '将 KV 先下投影压缩到低维潜空间（存入 Cache），再上投影恢复。压缩比可达 90%+，远超 GQA。',
+    principle: '将 KV 先下投影压缩到低维潜空间（存入 Cache），再上投影恢复。压缩比可达 90%+，远超 GQA 的 75%。相比 GQA，MLA 通过低秩压缩实现更极致的 KV Cache 压缩，是 DeepSeek-V2 的核心创新。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '利用低秩矩阵分解压缩 KV：先下投影到 latent_dim（存入 Cache），再上投影恢复完整的 K/V。Q 也使用低秩投影，但不缓存（只用于当前 token）。RoPE 只应用于 k_rope 和 q_rope 部分。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          'KV 下投影压缩：c_kv = W_down(x) → [B, S, latent_dim]',
+          'KV 上投影恢复：K,V = W_up(c_kv) → split → k_content, k_rope, v',
+          'Q 下投影压缩：c_q = W_down_q(x)',
+          'Q 上投影恢复：q = W_up_q(c_q) → split → q_content, q_rope',
+          '应用 RoPE：q_rope, k_rope = rope(q_rope, k_rope)',
+          '合并内容：q = cat(q_content, q_rope), k = cat(k_content, k_rope)',
+          '计算注意力并输出投影',
+        ],
+      },
+    ],
     formula: 'KV 压缩: c_kv = W_down(x)  → [B, S, latent_dim]  (存入 Cache)\nKV 恢复: K,V = W_up(c_kv)  → [B, S, H, (Dh+Dr+Dh)]\nQ 压缩: c_q = W_down_q(x) → W_up_q → [B, S, H, (Dh+Dr)]',
-    flowDiagram: `x: [B, S, D]
-  │
-  ├── kv_down → [B, S, C]  ←── 只缓存这个! (压缩后)
-  │       │
-  │    kv_up → split → k_content, k_rope, v
-  │                                │
-  ├── q_down → [B, S, C]         │
-  │       │                       │
-  │    q_up → split → q_content, q_rope
-  │                                │
-  │    RoPE(q_rope, k_rope) ──────┘
-  │            │
-  │    q = cat(q_content, q_rope)
-  │    k = cat(k_content, k_rope)
-  │            │
-  └── SDPA(q, k, v) → Wo → output`,
+    flowDiagram: `# 只缓存低维潜变量，用的时候再恢复
+x :: [B, S, D] :: 输入
+c_kv = x·W_dkv :: [B, S, C] :: 下投影到潜空间，C 远小于 H·Dh
+> 进 cache 的只有 c_kv —— 压缩发生在存储维度上，不是头数上
+kv = c_kv·W_ukv :: [B, S, H·(Dh+Dr+Dh)] :: 用时上投影恢复
+split :: k_content, k_rope, v :: 内容分量与 RoPE 分量分开
++ q_content :: [B, S, H, Dh] :: 同样先低秩压缩再上投影
++ q_rope :: [B, S, H, Dr] :: 不压缩，单独留给 RoPE
+q = cat(q_content, q_rope) :: [B, S, H, Dh+Dr] :: 拼成完整的查询
+k = cat(k_content, k_rope) :: [B, S, H, Dh+Dr] :: 键同样拼接
+O = SDPA(q, k, v)·W_o :: [B, S, D] :: 之后与普通注意力完全一致
+$ Cache 从 2·G·Dh 降到 C：DeepSeek-V2 取 C=512，压缩比 10× 以上
+> RoPE 必须单独走不压缩的分量：它是位置相关的，挤进低秩空间会被压坏`,
     code: `import torch, torch.nn as nn, torch.nn.functional as F, math
 
 class MLA(nn.Module):
@@ -408,6 +566,125 @@ class MLA(nn.Module):
     ],
     source: 'ckd0817',
   },
+  {
+    id: 'attn-sparse',
+    title: 'Native Sparse Attention / DSA',
+    titleCn: '稀疏注意力',
+    category: 'Attention',
+    hot: 3,
+    difficulty: 5,
+    oneLiner: '长上下文下 O(S²) 不可行：压缩 + 选择 + 滑窗，或索引器 + top-k',
+    principle: '长上下文注意力是 O(S²)，必须稀疏化。NSA 走三分支路线：压缩块注意力（粗粒度全局）、top-n 块选择（中粒度重要区域）、滑动窗口（局部精确），再用学到的门控加权求和；DSA 走另一条路，用一个极轻的 lightning indexer 给每个历史 token 打分，只对 top-k 个 token 做真正的注意力。两者都把复杂度降到 O(S·n) 或 O(S·k)，也都要求块对齐以适配硬件 —— 代价是块大小 l 成了超参，太小则选择本身变贵，太大则选得不够精细。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '注意力权重实际上是稀疏的 —— 绝大多数位置对当前 token 无关，稠密计算在浪费算力。难点在「怎么稀疏」：套固定模式（只看滑窗）会丢掉长程依赖，随机或启发式选择非连续，gather 会让 GPU 利用率崩掉。所以能用的方案必须同时满足三条：保住长程信息、选择是学出来的、粒度块对齐。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          'NSA：先把 K/V 按块均值池化成 K_cmp（块大小 l），用压缩后的表示做一次粗粒度注意力。',
+          '同一份 K_cmp 的分数用来挑 top-n 个块，再取回这些块的原始 KV 做精注意力；同时保留最近 w 个 token 的滑窗。',
+          '三路输出按 g = σ(wᵀ·[q_t ; ...]) 加权求和，门控是学出来的，模型自己决定何时依赖全局、何时只看局部。',
+          'DSA：k_s = W^{K,l}·h_s 是一个很轻的 key 投影（d^I 远小于 d），I_{t,s} = Σ_j w_{t,j}·ReLU(q_{t,j}·k_s) 给每个历史 token 打分，取 top-k 后再在这 k 个 token 上做 MLA 注意力。',
+          'Indexer 维度极低且能用 FP8 跑，所以「给所有历史 token 打分」这一步的代价可以忽略。',
+        ],
+      },
+    ],
+    formula: 'NSA 三分支 + 门控:\n  o_t = Σ_{b ∈ {cmp, slc, win}} g_b · Attn(q_t, K_b, V_b)\n  压缩块: K_cmp_j = mean_pool(K_{j·l : (j+1)·l})      选择: top-n 个块      滑窗: 最近 w 个 token\n  门控: g = σ(wᵀ · [q_t ; ...])                     # 学习到的权重\n\nDSA (Lightning Indexer + top-k):\n  k_s = W^{K,l} · h_s                              # 轻量 key 投影，d^I ≪ d\n  I_{t,s} = Σ_j w_{t,j} · ReLU(q_{t,j} · k_s)      # indexer head 加权求和，可用 FP8 算\n  S_t = top-k(I_{t,:})                             # 只保留 k 个历史 token（如 k = 2048）\n\n复杂度: O(S²) → O(S·k)',
+    flowDiagram: `# NSA：压缩 + 选择 + 滑窗，三路门控加权
+K, V :: [B, H, S, D] :: 输入
++ 压缩分支 :: [B, H, S/l, D] :: mean_pool 按块大小 l 池化，给粗粒度全局
++ 选择分支 :: top-n 块 :: 用压缩表示打分选出重要块，再取回这些块的原始 KV
++ 滑窗分支 :: 最近 w 个 token :: 局部精确
+门控 g = σ(wᵀ·[q_t ; ...]) :: [B, H, 1] :: 学出来的加权系数
+o = Σ_b g_b · Attn(q, K_b, V_b) :: [B, H, S, D] :: 三路结果加权求和
+$ 复杂度 O(S²) → O(S·n)
+
+# DSA：一个极轻的 indexer 粗筛，只对 top-k 做真注意力
+q_t, k_s :: [B, H, S, D] :: 输入
+k_s = W^{K,l}·h_s :: [B, S, d^I] :: 轻量 key 投影，d^I 远小于 d
+I_{t,s} = Σ_j w_{t,j}·ReLU(q_{t,j}·k_s) :: [B, S, S] :: 给每个历史 token 打分
+top-k :: [B, S, k] :: 选中的 token 索引，其余全部丢掉
+MLA 注意力 :: [B, S, k] :: 只在这 k 个 token 上做真正的注意力
+$ 复杂度 O(S²) → O(S·k)，indexer 可以用 FP8 跑`,
+    code: `import torch, torch.nn as nn, torch.nn.functional as F, math
+
+def compress_blocks(x, block_size):
+    """块内均值池化: [B,H,S,D] → [B,H,S//l,D]"""
+    B, H, S, D = x.shape
+    n_blocks = S // block_size
+    x = x[:, :, :n_blocks * block_size].reshape(B, H, n_blocks, block_size, D)
+    return x.mean(dim=3)
+
+def sdpa(q, k, v, scale):
+    """标准缩放点积注意力（q 可多一个 query 维度）"""
+    return F.softmax(q @ k.transpose(-1, -2) * scale, dim=-1) @ v
+
+def nsa_attention(q, k, v, block_size=8, top_n=2, window=16):
+    """NSA 三分支稀疏注意力; q,k,v: [B,H,S,D]。为简洁省略因果掩码，真实实现必须加"""
+    B, H, S, D = q.shape
+    scale = 1.0 / math.sqrt(D)
+    n_blocks = S // block_size
+
+    # 分支 1: 压缩块注意力（粗粒度全局）
+    o_cmp = sdpa(q, compress_blocks(k, block_size), compress_blocks(v, block_size), scale)
+
+    # 分支 2: top-n 块选择（中粒度重要区域）
+    k_cmp = compress_blocks(k, block_size)
+    top_idx = (q @ k_cmp.transpose(-1, -2) * scale).topk(top_n, dim=-1).indices   # [B,H,S,top_n]
+    k_blk = k[:, :, :n_blocks * block_size].reshape(B, H, n_blocks, block_size, D)
+    v_blk = v[:, :, :n_blocks * block_size].reshape(B, H, n_blocks, block_size, D)
+    bidx = torch.arange(B, device=q.device).view(B, 1, 1, 1)
+    hidx = torch.arange(H, device=q.device).view(1, H, 1, 1)
+    k_sel = k_blk[bidx, hidx, top_idx].reshape(B, H, S, -1, D)     # [B,H,S,top_n*l,D]
+    v_sel = v_blk[bidx, hidx, top_idx].reshape(B, H, S, -1, D)
+    o_slc = sdpa(q.unsqueeze(3), k_sel, v_sel, scale).squeeze(3)
+
+    # 分支 3: 滑动窗口（局部精确）
+    win = min(window, S)
+    o_win = sdpa(q, k[:, :, -win:, :], v[:, :, -win:, :], scale)
+
+    # 门控加权求和
+    g = torch.sigmoid(q.mean(dim=(1, 3), keepdim=True)).expand(-1, 1, -1, 3)
+    return g[..., 0:1] * o_cmp + g[..., 1:2] * o_slc + g[..., 2:3] * o_win
+
+class LightningIndexer(nn.Module):
+    """DSA 的 lightning indexer: 轻量投影 + ReLU 打分 + top-k"""
+
+    def __init__(self, n_heads, d_model, d_index=16):
+        super().__init__()
+        self.wq = nn.Linear(d_model, n_heads * d_index, bias=False)
+        self.wk = nn.Linear(d_model, d_index, bias=False)
+        self.w_scale = nn.Linear(d_model, n_heads, bias=False)     # 每个 head 的标量权重
+        self.n_heads, self.d_index = n_heads, d_index
+
+    def forward(self, h, top_k=8):
+        """h: [B,S,D] → 每个 query 选中的 token 索引 [B,S,top_k]"""
+        B, S, _ = h.shape
+        q = self.wq(h).view(B, S, self.n_heads, self.d_index).transpose(1, 2)   # [B,H,S,d]
+        k = self.wk(h)                                                          # [B,S,d]
+        w = self.w_scale(h).transpose(1, 2)                                     # [B,H,S]
+        dot = q @ k.transpose(-1, -2)                                           # [B,H,S,S]
+        score = (w * torch.relu(dot)).sum(dim=1)                                # [B,S,S]
+        causal = torch.tril(torch.ones(S, S, dtype=torch.bool, device=h.device))
+        score = score.masked_fill(~causal, -1e9)                                # 只看过去
+        return score.topk(min(top_k, S), dim=-1).indices                        # [B,S,top_k]`,
+    keyPoints: [
+      '一句话: 长上下文的注意力必须稀疏 —— NSA 靠三分支 + 门控，DSA 靠极轻的 indexer 选 top-k',
+      '三分支各解决什么: 压缩块给粗粒度全局视野，top-n 选择聚焦重要中程区域，滑窗保证局部精确 —— 缺一个就有明显退化',
+      '为什么需要门控: 三条分支的相对重要性随层数、位置、任务变化，硬相加不行，必须有可学习的权重',
+      '块级 vs token 级选择: 块级选择（NSA）对硬件友好；DSA 的 token 级 top-k 靠极轻的 indexer 把选择成本压到可忽略',
+      'indexer 为什么能用 ReLU: softmax 需要全序列归一化，ReLU 不需要，因此可以分块算、能跑 FP8 —— 这是「lightning」的工程前提',
+      'indexer 的维度要小: d^I 刻意做得很小（几十维量级），选择成本才可以忽略',
+      '复杂度: O(S²) → O(S·k)。k=2048、S=128K 时计算量约降两个数量级',
+      '训练不是一步到位: DSA 先冻结主模型、只训 indexer 对齐分布（warm-up），再放开全部参数做稀疏训练',
+      '因果性: 只能从当前 token 往前的历史里选，未来的块必须屏蔽',
+    ],
+    source: 'original',
+  },
   // ===================== Normalization =====================
   {
     id: 'norm-ln',
@@ -417,16 +694,33 @@ class MLA(nn.Module):
     hot: 3,
     difficulty: 2,
     oneLiner: '沿特征维度归一化，Transformer 标配',
-    principle: '在每个样本的特征维度上计算均值和方差进行归一化，再通过可学习的 gamma/beta 进行仿射变换。与 BatchNorm 不同，不依赖 batch size。',
+    principle: '在每个样本的特征维度上计算均值和方差进行归一化，再通过可学习的 gamma/beta 进行仿射变换。与 BatchNorm 不同，不依赖 batch size，适合序列模型，能稳定训练并加速收敛。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '沿特征维度归一化，使每个样本的特征分布稳定在均值为 0、方差为 1 附近。通过 gamma（缩放）和 beta（偏移）两个可学习参数，让模型自适应调整归一化后的分布。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '计算均值：μ = mean(x, dim=-1, keepdim=True)',
+          '计算方差：σ² = var(x, dim=-1, keepdim=True, unbiased=False)',
+          '归一化：x_norm = (x - μ) / √(σ² + ε)',
+          '仿射变换：output = x_norm × γ + β',
+        ],
+      },
+    ],
     formula: 'LN(x) = (x - μ) / √(σ² + ε) × γ + β\nμ = mean(x, dim=-1)\nσ² = var(x, dim=-1, unbiased=False)',
-    flowDiagram: `x: [B, S, D]
-  │
-  ├── mean(x, dim=-1, keepdim=True) → μ: [B, S, 1]
-  ├── var(x, dim=-1, keepdim=True, unbiased=False) → σ²: [B, S, 1]
-  │
-  └── (x - μ) / √(σ² + ε) × γ + β → [B, S, D]
-                                       γ: [D]  (可学习)
-                                       β: [D]  (可学习)`,
+    flowDiagram: `# 沿特征维归一化：每个 token 独立统计
+x :: [B, S, D] :: 残差流的输入
+μ = mean(x, -1, keepdim=True) :: [B, S, 1] :: 只沿最后一维求均值
+σ² = var(x, -1, unbiased=False) :: [B, S, 1] :: 用总体方差，不做贝塞尔校正
+x̂ = (x - μ) / √(σ² + ε) :: [B, S, D] :: 广播回原形状，每个 token 均值 0、方差 1
+y = x̂·γ + β :: [B, S, D] :: γ、β 都是可学习的 [D]，负责恢复尺度与偏移
+$ 统计量取自每个 token 自己的 D 维，与 batch 里其他样本无关
+> 训练与推理走同一条路径，不像 BatchNorm 需要维护滑动平均`,
     code: `import torch, torch.nn as nn
 
 class LayerNorm(nn.Module):
@@ -459,15 +753,33 @@ class LayerNorm(nn.Module):
     hot: 3,
     difficulty: 2,
     oneLiner: '去掉均值中心化，LLaMA/Mistral 标配',
-    principle: 'LayerNorm 的简化版：不做均值中心化，只用 RMS (均方根) 归一化。计算更快，效果相当。',
+    principle: 'LayerNorm 的简化版：不做均值中心化，只用 RMS (均方根) 归一化。相比 LayerNorm 计算更快、参数更少（只有 gamma 无 beta），实践中效果相当。LLaMA/Mistral/PaLM/Gemma 等主流模型都采用。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '去掉均值中心化步骤，只用均方根归一化。使用 rsqrt 替代 1/sqrt，计算更高效。在 float32 下计算保证数值稳定性。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '计算均方值：ms = mean(x², dim=-1, keepdim=True)',
+          '计算均方根倒数：rsqrt = 1/√(ms + ε)',
+          '归一化：x_norm = x × rsqrt',
+          '缩放：output = x_norm × γ',
+        ],
+      },
+    ],
     formula: 'RMSNorm(x) = x / √(mean(x²) + ε) × γ\n\n对比 LayerNorm:\n  LN:  (x - mean) / √(var + ε) × γ + β\n  RMS: x / √(mean(x²) + ε) × γ\n  → 去掉 mean centering 和 bias',
-    flowDiagram: `x: [B, S, D]
-  │
-  ├── x.float().pow(2).mean(-1, keepdim=True) → ms: [B,S,1]
-  ├── rsqrt(ms + eps) → rsqrt: [B,S,1]
-  │
-  └── (x.float() * rsqrt).type_as(x) × γ → [B, S, D]
-                                              γ: [D] (只有缩放, 无偏移)`,
+    flowDiagram: `# 只压尺度，不管中心
+x :: [B, S, D] :: 残差流的输入
+x32 = x.float() :: [B, S, D] :: 升 fp32，bf16 下 x² 动态范围不够
+ms = mean(x32², -1, keepdim=True) :: [B, S, 1] :: 均方，只沿特征维
+r = rsqrt(ms + ε) :: [B, S, 1] :: ε 取 1e-5，纯数值保护
+y = (x32·r).type_as(x)·γ :: [B, S, D] :: 只有一个可学习参数 γ: [D]
+$ 相比 LayerNorm 少了求均值与减均值，归约次数减半、参数量减半
+> LLaMA、PaLM、Qwen 都把它放在每个子层之前`,
     code: `import torch, torch.nn as nn
 
 class RMSNorm(nn.Module):
@@ -501,23 +813,39 @@ class RMSNorm(nn.Module):
     hot: 3,
     difficulty: 4,
     oneLiner: '旋转 Q/K 向量注入位置信息，LLaMA 标配',
-    principle: '将位置信息编码为旋转角度，对 Q 和 K 的每对相邻维度施加旋转。旋转后 Q·K 的点积自然包含相对位置信息。',
+    principle: '将位置信息编码为旋转角度，对 Q 和 K 的每对相邻维度施加旋转。旋转后 Q·K 的点积自然包含相对位置信息。相比绝对位置编码（无法处理变长序列）和 ALiBi（需要额外参数），RoPE 无需额外参数即可自然编码相对位置。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '通过旋转矩阵将位置信息注入 Q 和 K。对每对相邻维度 [x₁, x₂] 施加旋转 [-x₂, x₁]，等价于旋转 90°。旋转后 q_m · k_n 只依赖 m-n，天然具有相对位置感知能力。只对 Q 和 K 施加旋转，V 不变。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '预计算频率：inv_freq = 1/(10000^(2i/d))',
+          '计算角度：angles = outer(positions, inv_freq)',
+          '预计算 cos/sin：cos = cos(angles), sin = sin(angles)',
+          '定义 rotate_half：chunk(x, 2, dim=-1) → cat(-x2, x1)',
+          '应用旋转：q_rot = q × cos + rotate_half(q) × sin',
+          '对 k 同样应用旋转',
+        ],
+      },
+    ],
     formula: 'f(q, m) = q × cos(mθ) + rotate_half(q) × sin(mθ)\n\nrotate_half([x₁, x₂]) = [-x₂, x₁]\n\n等价旋转矩阵: [cos(mθ), -sin(mθ)] [x₁]\n               [sin(mθ),  cos(mθ)] [x₂]\n\nθᵢ = 1/10000^(2i/d)',
-    flowDiagram: `预计算:
-  inv_freq = 1/(10000^(2i/d)): [d/2]
-  angles = outer(pos, inv_freq): [S, d/2]
-  cos, sin = cos(angles), sin(angles): [S, d]
-  (复制一份匹配完整维度)
+    flowDiagram: `# 预计算：每个位置、每个维度对对应的旋转角
+inv_freq = 1/10000^(2i/d) :: [d/2] :: i = 0..d/2-1，靠后的维度对频率更低
+angles = outer(pos, inv_freq) :: [S, d/2] :: 位置 × 维度对
+cos, sin = cos(angles), sin(angles) :: [S, d] :: 复制一份拼成完整维度，好与 [B,S,H,D] 广播
 
-前向:
-  q: [B, S, H, D] ──┐
-                     ├─ q' = q×cos + rotate_half(q)×sin
-  cos,sin: [1,S,1,D] ┘
-  k: [B, S, H, D] ──→ k' = k×cos + rotate_half(k)×sin
-
-rotate_half(x):
-  x1, x2 = chunk(x, 2, dim=-1)    # 各 [B,S,H,D/2]
-  return cat(-x2, x1, dim=-1)     # 旋转90°`,
+# 旋转：只作用在 Q、K 上
+rotate_half(x) :: cat(-x₂, x₁) :: 后半段取负拼到前面，等价于旋转 90°
++ q' = q·cos + rotate_half(q)·sin :: [B, S, H, D] :: 查询被旋转
++ k' = k·cos + rotate_half(k)·sin :: [B, S, H, D] :: 键被旋转同样的角度
+> v 不参与旋转：它是被加权求和的内容，本身与位置无关
+$ (R_m q)·(R_n k) = qᵀ·R_{n-m}·k —— 点积里只剩相对位置 n - m
+> 基频 10000 是超参，直接外推到远超训练长度时高频维度会震荡，所以有 NTK-aware、线性插值等改法`,
     code: `import torch, torch.nn as nn
 
 class RotaryEmbedding(nn.Module):
@@ -562,18 +890,31 @@ class RotaryEmbedding(nn.Module):
     hot: 2,
     difficulty: 2,
     oneLiner: '两层 MLP，占 Transformer 2/3 参数量',
-    principle: '注意力层之后的两层全连接网络。先上投影扩展维度（通常 4 倍），应用激活函数，再下投影恢复维度。',
+    principle: '注意力层之后的两层全连接网络。先上投影扩展维度（通常 4 倍），应用激活函数，再下投影恢复维度。Attention 捕捉 token 间的关系，FFN 对每个 token 独立做非线性变换，占 Transformer 参数量的 2/3。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '通过上投影将维度从 D 扩展到 4D，在高维空间做非线性变换，再下投影回 D 维。这种"扩展-变换-压缩"的结构增强了模型的表达能力。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '上投影：h = W₁ · x + b₁，维度 D → 4D',
+          '激活函数：a = ReLU(h)',
+          '下投影：output = W₂ · a + b₂，维度 4D → D',
+        ],
+      },
+    ],
     formula: 'FFN(x) = W₂ · ReLU(W₁ · x + b₁) + b₂\n\n参数量: D × 4D + 4D × D = 8D² (vs Attention: 4D²)',
-    flowDiagram: `x: [B, S, D]
-  │
-  W₁: [D, 4D]
-  │
-  → [B, S, 4D] → ReLU → [B, S, 4D]
-                              │
-  W₂: [4D, D]                 │
-  │                           │
-  ←───────────────────────────┘
-  → [B, S, D]`,
+    flowDiagram: `# 两层全连接 + 中间一层逐元素非线性
+x :: [B, S, D] :: 残差流的输入
+h = x·W₁ᵀ :: [B, S, 4D] :: 上投影，中间维度通常取 4 倍
+a = ReLU(h) :: [B, S, 4D] :: 逐元素 max(0, x)，唯一引入非线性的地方
+y = a·W₂ᵀ :: [B, S, D] :: 下投影回残差流维度，才能与输入相加
+$ 参数量 8D²，是注意力 4D² 的两倍，约占 Transformer 的 2/3
+> 逐 token 独立：同一个 W₁ 作用在所有位置上，没有任何跨 token 交互`,
     code: `import torch, torch.nn as nn, torch.nn.functional as F
 
 class FFN(nn.Module):
@@ -602,19 +943,33 @@ class FFN(nn.Module):
     hot: 2,
     difficulty: 3,
     oneLiner: '门控 + SiLU 激活，LLaMA/PaLM 标配',
-    principle: '引入门控机制：一个分支用 SiLU 激活作为门，另一个分支无激活，两者逐元素相乘后下投影。比标准 FFN 效果更好。',
+    principle: '引入门控机制：一个分支用 SiLU 激活作为门，另一个分支无激活，两者逐元素相乘后下投影。相比标准 FFN+ReLU，门控机制让模型学习哪些信息通过，SiLU 激活更平滑，实验证明效果更好。LLaMA/PaLM/Mistral/Qwen 等主流模型都使用。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '通过门控机制控制信息流：Gate 分支用 SiLU 激活学习"哪些信息应该通过"，Up 分支无激活提供"信息内容"，两者逐元素相乘实现选择性传递。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '门控分支：gate = SiLU(W_gate · x)',
+          '值分支：up = W_up · x',
+          '门控相乘：activated = gate ⊙ up（逐元素乘法）',
+          '下投影：output = W_down · activated',
+        ],
+      },
+    ],
     formula: 'SwiGLU(x) = W_down · (SiLU(W_gate · x) ⊙ W_up · x)\n\nSiLU(x) = x · σ(x)  (也称 Swish)\n⊙ = 逐元素乘法\n\n参数量: 3 个矩阵 (vs 标准 FFN 2 个)',
-    flowDiagram: `x: [B, S, D]
-  │
-  ├── W_gate → [B, S, D_ff] → SiLU → gate ──┐
-  │                                           ├─ ⊙ (逐元素乘)
-  └── W_up   → [B, S, D_ff] ─────────→ up ───┘
-                                              │
-                                        [B, S, D_ff]
-                                              │
-                                        W_down
-                                              │
-                                        [B, S, D]`,
+    flowDiagram: `# 门控 FFN：两路上投影，一路当门
+x :: [B, S, D] :: 残差流的输入
++ gate = SiLU(x·W_gateᵀ) :: [B, S, d_ff] :: 门，过激活
++ up = x·W_upᵀ :: [B, S, d_ff] :: 内容，不过激活
+g = gate ⊙ up :: [B, S, d_ff] :: 逐元素相乘，门决定每一维通过多少
+y = g·W_downᵀ :: [B, S, D] :: 下投影回残差流维度
+$ d_ff 取 8/3·D，3·D·d_ff ≈ 8D²，与标准 FFN 参数量持平
+> SiLU(x) = x·σ(x)：σ 是 0~1 的开关，x 是内容，所以叫「自带门控」`,
     code: `import torch, torch.nn as nn, torch.nn.functional as F
 
 class SwiGLU(nn.Module):
@@ -646,21 +1001,35 @@ class SwiGLU(nn.Module):
     hot: 2,
     difficulty: 4,
     oneLiner: '稀疏激活，大参数量小计算量',
-    principle: '将 FFN 替换为多个"专家"网络，Router 为每个 token 选择 Top-K 个专家处理。总参数量大但每次只激活部分，计算量可控。',
+    principle: '将 FFN 替换为多个"专家"网络，Router 为每个 token 选择 Top-K 个专家处理。总参数量大但每次只激活部分，计算量可控。相比 Dense 模型，MoE 可以增加模型容量但不增加计算量，如 Mixtral 8x7B 有 46.7B 参数但实际计算量仅约 12.9B。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '通过 Router 网络为每个 token 动态选择最相关的 K 个专家处理，实现稀疏激活。每个专家是独立的 FFN，只处理分配到的 token，最后加权融合。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          'Router 计算：logits = Router(x)，得到每个专家的得分',
+          'Top-K 选择：选出得分最高的 K 个专家',
+          '权重归一化：weights = softmax(top_k_logits)',
+          '专家处理：每个 expert 处理分配到的 token',
+          '加权融合：output = Σ(weights[i] × expert[i](x))',
+        ],
+      },
+    ],
     formula: 'MoE(x) = Σᵢ∈TopK softmax(Router(x))ᵢ · Eᵢ(x)\n\nMixtral 8x7B: 8 个专家选 2 个\n实际计算量 ≈ 12.9B (vs 46.7B 总参数)',
-    flowDiagram: `x: [B*S, D]
-  │
-  ├── Router: [D, N_experts] → logits: [B*S, N]
-  │                                    │
-  │                              Top-K → indices, weights
-  │                                    │
-  └── Experts: E₁, E₂, ..., Eₙ        │
-        │                              │
-   每个 expert 处理分配到的 token       │
-        │                              │
-   weighted_sum(expert_out × weight) ←─┘
-        │
-   output: [B*S, D] → [B, S, D]`,
+    flowDiagram: `# 按 token 路由到 Top-K 个专家
+x = reshape(x, [B*S, D]) :: [B*S, D] :: 摊平序列维，路由是逐 token 的
+logits = Router(x) :: [B*S, N] :: Router 只是一个 [D, N] 的线性层
+Top-K :: indices, weights :: 通常 K=2，取出下标与权重
+w = softmax(选中的 logits) :: [B*S, K] :: 路由权重，用来加权求和
+E_k(x) :: 每个专家都是一个完整的 FFN
+y = Σ_k w_k · E_k(x) :: [B*S, D] :: 只算 K 个专家，其余不参与
+$ 总参数是 N 份专家，每个 token 只算 K 份 → FLOPs 只占 K/N
+> Mixtral 8x7B：8 选 2，46.7B 总参数，单 token 实际计算约 12.9B`,
     code: `import torch, torch.nn as nn, torch.nn.functional as F
 
 class MoE(nn.Module):
@@ -707,15 +1076,35 @@ class MoE(nn.Module):
     hot: 3,
     difficulty: 2,
     oneLiner: '下一个 token 预测，LLM 训练基础',
-    principle: '语言模型的核心训练目标：给定前文预测下一个 token。通过 shift 操作将 logits 和 labels 对齐，计算交叉熵。',
+    principle: '语言模型的核心训练目标：给定前文预测下一个 token。通过 shift 操作将 logits 和 labels 对齐，计算交叉熵。交叉熵衡量预测分布与真实分布的差异，梯度计算简洁（softmax + CE 的梯度 = y - one_hot），是 LLM 训练的基础。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '用前面的 token 预测下一个 token。通过 shift 操作：logits 去尾（去掉最后一个位置的预测），labels 去头（去掉第一个位置的目标），使 logits[:, :-1] 预测 labels[:, 1:]。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          'Shift logits：shift_logits = logits[:, :-1, :]',
+          'Shift labels：shift_labels = labels[:, 1:]',
+          '展平：flattened_logits = shift_logits.view(-1, V)',
+          '展平：flattened_labels = shift_labels.view(-1)',
+          '计算交叉熵：loss = CE(flattened_logits, flattened_labels)',
+        ],
+      },
+    ],
     formula: 'L = -Σ log P(xₜ | x<t)\n\n实现: CE(shift(logits), shift(labels))\nlogits[:, :-1] 预测 labels[:, 1:]',
-    flowDiagram: `logits: [B, S, V]  ─→ logits[:, :-1]  → [B, S-1, V]
-                                           │
-labels: [B, S]       ─→ labels[:, 1:]   → [B, S-1]
-                                           │
-                                    flatten → CE loss
-                                           │
-                                     loss: scalar`,
+    flowDiagram: `# shift 对齐：位置 t 的输出预测位置 t+1 的 token
+logits :: [B, S, V] :: 每个位置对整个词表的打分
+labels :: [B, S] :: 真实 token 下标，prompt 段置 -100
++ 预测 :: logits[:, :-1] → [B, S-1, V] :: 丢掉最后一个位置，它没有下一个 token
++ 目标 :: labels[:, 1:] → [B, S-1] :: 丢掉第一个位置，它没有被谁预测
+logp = log_softmax(logits, -1) :: [B, S-1, V] :: 直接取对数概率，避免下溢
+loss = -mean(logp[range, 目标]) :: 只取正确 token 那一项，结果是标量
+$ 梯度 = softmax(logits) - one_hot(目标)，预测越离谱梯度越大
+> SFT 时 prompt 段的 label 置 -100，ignore_index 把它们排除出分母`,
     code: `import torch, torch.nn.functional as F
 
 def lm_loss(logits, labels, ignore_index=-100):
@@ -747,9 +1136,32 @@ def lm_loss(logits, labels, ignore_index=-100):
     hot: 3,
     difficulty: 4,
     oneLiner: '无需奖励模型，直接优化偏好数据',
-    principle: '将奖励函数参数化为策略与参考策略的对数比率，直接在偏好数据上优化。增加 chosen 概率，降低 rejected 概率。',
+    principle: '将奖励函数参数化为策略与参考策略的对数比率，直接在偏好数据上优化。增加 chosen 概率，降低 rejected 概率。相比 PPO 不需要 reward model 和 critic，训练更简单稳定，效果相当甚至更好。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '利用 RL 的对偶性，将奖励函数隐式表示为 r(x,y) = β · log(πθ(y|x)/πref(y|x))。这样策略优化目标可以直接用策略的对数概率差来表示，无需显式奖励模型。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '收集偏好数据：(prompt, chosen_response, rejected_response)',
+          '计算策略与参考策略的对数概率差',
+          '构造损失函数：增加 chosen 概率，降低 rejected 概率',
+          '直接用梯度下降优化策略模型',
+        ],
+      },
+    ],
     formula: 'L_DPO = -E[log σ(β · (log πθ(yw|x)/πref(yw|x) - log πθ(yl|x)/πref(yl|x)))]\n\n简化: logits = (logp_chosen - ref_logp_chosen) - (logp_rejected - ref_logp_rejected)\nloss = -logsigmoid(β · logits)',
-    flowDiagram: `chosen:     policy_logp_w - ref_logp_w  = r_w  (隐式奖励)\nrejected:   policy_logp_l - ref_logp_l  = r_l\n\nlogits = r_w - r_l     (chosen 比 rejected 好多少)\nloss = -logsigmoid(β × logits)     (越大越好 → loss 越小)\n\nβ 控制偏离参考模型的程度`,
+    flowDiagram: `# 隐式奖励：策略相对参考策略的对数比率
++ chosen :: policy_logp_w - ref_logp_w = r_w :: 优选回答的隐式奖励
++ rejected :: policy_logp_l - ref_logp_l = r_l :: 拒绝回答的隐式奖励
+logits = r_w - r_l :: chosen 比 rejected 好多少
+loss = -logsigmoid(β · logits) :: logits 越大 loss 越小
+$ r = β·log(π/π_ref) + 常数 —— 把 RLHF 的闭式解代回 Bradley-Terry
+> 参考模型的 logp 必须 no_grad，它只是固定锚点`,
     code: `import torch, torch.nn.functional as F
 
 def dpo_loss(policy_chosen_logps, policy_rejected_logps,
@@ -783,17 +1195,37 @@ def dpo_loss(policy_chosen_logps, policy_rejected_logps,
     hot: 3,
     difficulty: 5,
     oneLiner: '截断重要性采样比率，RLHF 核心',
-    principle: '通过截断重要性采样比率 r_t = π_new/π_old 到 [1-ε, 1+ε]，限制策略更新幅度，防止策略崩溃。',
+    principle: '通过截断重要性采样比率 r_t = π_new/π_old 到 [1-ε, 1+ε]，限制策略更新幅度，防止策略崩溃。相比普通策略梯度容易更新过大导致崩溃，PPO 通过 clip 机制保证训练稳定性，是 ChatGPT/InstructGPT 的 RLHF 核心算法。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '重要性采样比率 r_t 衡量新旧策略的差异。通过 clip 将 r_t 限制在 [1-ε, 1+ε] 范围内，当 A>0 时防止 ratio 过大（过度奖励），当 A<0 时防止 ratio 过小（过度惩罚），实现保守更新。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '计算重要性采样比率：ratio = exp(new_logp - old_logp)',
+          '截断比率：clipped = clamp(ratio, 1-ε, 1+ε)',
+          '计算未截断代理损失：surr1 = ratio × advantages',
+          '计算截断代理损失：surr2 = clipped × advantages',
+          '取较小值：loss = -mean(min(surr1, surr2))',
+        ],
+      },
+    ],
     formula: 'L_PPO = E[min(r_t · A_t, clip(r_t, 1-ε, 1+ε) · A_t)]\n\nr_t = exp(log_π_new - log_π_old)\nA_t: 优势函数 (GAE 估计)\nε: 截断参数，通常 0.2',
-    flowDiagram: `ratio = exp(new_logp - old_logp)    # 重要性采样比率
-  │
-  ├── unclipped = ratio × advantage
-  ├── clipped   = clamp(ratio, 1-ε, 1+ε) × advantage
-  │
-  └── loss = -mean(min(unclipped, clipped))
-
-当 A > 0 (好动作): ratio > 1+ε 时停止奖励 (防过度优化)
-当 A < 0 (坏动作): ratio < 1-ε 时停止惩罚 (防过度惩罚)`,
+    flowDiagram: `# 截断重要性比率，给更新幅度设上界
+old_logp :: π_old 对已采样动作的对数概率
+new_logp :: π_new 的对数概率，需要梯度
+ratio = exp(new_logp - old_logp) :: 重要性采样比率，用对数相减更稳
++ unclipped :: ratio · A :: 不加约束的更新量
++ clipped :: clip(ratio, 1-ε, 1+ε) · A :: 比率被夹住后的更新量
+loss = -mean(min(unclipped, clipped)) :: 取更小的那个，得到悲观下界
+! A > 0 时 ratio 涨过 1+ε 停止奖励，防过度优化
+! A < 0 时 ratio 跌破 1-ε 停止惩罚，防过度惩罚
+$ ε 通常取 0.2，一步更新幅度便有了显式上界
+> ratio 必须用旧策略的 logp 现算，rollout 与更新要严格配对`,
     code: `import torch
 
 def ppo_loss(old_logp, new_logp, advantages, eps=0.2):
@@ -826,20 +1258,43 @@ def ppo_loss(old_logp, new_logp, advantages, eps=0.2):
     hot: 3,
     difficulty: 4,
     oneLiner: '去掉 Critic，组内归一化优势，DeepSeek-R1',
-    principle: 'PPO 的简化版：对同一问题生成 G 个回答，用组内归一化的奖励作为优势，不需要 Critic 网络。',
+    principle: 'PPO 的简化版：对同一问题生成 G 个回答，用组内归一化的奖励作为优势，不需要 Critic 网络。相比 PPO 节省约 40% 训练显存，是 DeepSeek-R1 使用的强化学习算法。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '对同一问题生成 G 个回答，用组内归一化的奖励代替 Critic 网络的价值估计。优势函数 Aᵢ = (rᵢ - mean(r)) / (std(r) + ε)，结合 PPO clip 机制和显式 KL 惩罚。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '对同一问题 q 生成 G 个回答：o₁, o₂, ..., o_G',
+          '计算每个回答的奖励：r₁, r₂, ..., r_G',
+          '组内归一化优势：Aᵢ = (rᵢ - mean) / (std + ε)',
+          '计算 PPO clip 损失',
+          '添加显式 KL 惩罚：loss += β · KL(π‖π_ref)',
+        ],
+      },
+    ],
     formula: '优势: Aᵢ = (rᵢ - mean(r)) / (std(r) + ε)    # 组内归一化\n\n损失: L = -E[min(ρᵢAᵢ, clip(ρᵢ)Aᵢ)] + β·KL(π‖π_ref)\n\nρᵢ = πθ(oᵢ|q) / πθ_old(oᵢ|q)',
-    flowDiagram: `对同一问题 q 生成 G 个回答: o₁, o₂, ..., o_G
-  │
-  ├── reward model → r₁, r₂, ..., r_G: [G]
-  │
-  ├── 组内归一化: Aᵢ = (rᵢ - mean) / (std + ε)
-  │
-  └── PPO clip loss(Aᵢ) + β · KL penalty
-       (不需要 Critic 网络!)
+    flowDiagram: `# 组内采样：同一个问题采 G 个回答
+问题 q :: 同一个 prompt
++ 回答 o₁ :: 奖励 r₁
++ 回答 o₂ :: 奖励 r₂
++ 回答 o_G :: 奖励 r_G（共 G 个，共享同一个 mean/std）
+组内归一化 :: Aᵢ = (rᵢ - mean) / (std + ε) :: 有正有负才有梯度方向
+$ 组内统计量代替 Critic：整个训练不需要 Value Head
 
-对比 PPO:
-  PPO:  需要 Critic 估计 V(s) → A = r + γV - V
-  GRPO: 组内归一化 → A = (r - mean) / std`,
+# 策略更新（PPO 的 clip 目标）
+比率 ρᵢ :: πθ(oᵢ|q) / πθ_old(oᵢ|q)
+做 clip :: clip(ρᵢ, 1-ε, 1+ε) :: 限制单步更新幅度
+$ L = -E[min(ρᵢAᵢ, clip(ρᵢ)·Aᵢ)] + β·KL(π‖π_ref)
+> 显式 KL 惩罚拉住参考策略，防止跑偏
+
+# 与 PPO 的对比
+> PPO:  需要 Critic 估计 V(s) → A = r + γV - V
+> GRPO: 组内归一化 → A = (r - mean) / std，省掉 Critic`,
     code: `import torch
 
 def grpo_advantages(rewards):
@@ -870,6 +1325,304 @@ def kl_penalty(logp, ref_logp):
     ],
     source: 'both',
   },
+  {
+    id: 'loss-gspo',
+    title: 'GSPO',
+    titleCn: '组序列策略优化',
+    category: 'Loss',
+    hot: 3,
+    difficulty: 3,
+    oneLiner: 'GRPO 的比率提到序列级，MoE 训练的稳定解',
+    principle: 'GRPO 的重要性比率是 token 级的，每个 token 各自 clip；而奖励本身是序列级的（整条回答对错），粒度对不上。这种不匹配带来高方差：同一条序列里一部分 token 被裁掉、另一部分照常更新，序列内部的更新方向互相拉扯，在 MoE 模型上还会放大路由抖动导致训练发散。GSPO 把重要性比率定义在序列级 —— 对逐 token 对数比做长度归一化，整条序列共享一个标量比率、只 clip 一次；代价是粒度变粗，序列内部个别 token 的差异会被平均掉。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '既然奖励是序列级的一个标量，比率也应该是序列级的一个标量：整条序列共享同一个比率，只 clip 一次。把逐 token 的对数比先按 mask 求和、再除以序列长度，得到长度归一化的平均对数比；取指数就得到序列级比率 s_i，它衡量的是「整条回答在当前策略下比旧策略平均好多少」。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '组内优势 Â_i 与 GRPO 完全一致：(r_i - mean(r)) / (std(r) + ε)。',
+          '逐 token 对数比 [B, G, T]，按 mask 求和压掉 padding → [B, G]，再除以 |y_i| 做长度归一化。',
+          's_i = exp(长度归一化的对数比)，形状 [B, G] —— 每条序列一个标量，这正是「序列级」的含义。',
+          '目标函数与 PPO 同形，只是把 ρ 换成 s_i：min(s_i·Â_i, clip(s_i, 1-ε, 1+ε)·Â_i)。',
+        ],
+      },
+    ],
+    formula: '组内优势 (同 GRPO): Â_i = (r_i - mean(r)) / (std(r) + ε)\n\n序列级重要性比率 (长度归一化):\n  s_i(θ) = ( π_θ(y_i|x) / π_old(y_i|x) )^(1/|y_i|)\n         = exp( (1/|y_i|) · Σ_t log( π_θ(y_{i,t}|x, y_{i,<t}) / π_old(y_{i,t}|x, y_{i,<t}) ) )\n\n目标: J(θ) = E[ min( s_i(θ)·Â_i , clip(s_i(θ), 1-ε, 1+ε)·Â_i ) ]\n\nε 典型取 3e-4（比率已长度归一化，偏离 1 的幅度很小，比 PPO 的 0.2 小几个数量级）',
+    flowDiagram: `# 把重要性比率从 token 级提到序列级
+逐 token 对数比 :: [B, G, T] :: log(π_θ / π_old)，每个 token 一个
+Σ_t :: 按 mask 求和 → [B, G] :: padding 不参与
+/ |y_i| :: 长度归一化 :: 让长短序列可比
+s_i = exp(·) :: [B, G] :: 每条序列一个标量比率
+目标 :: min(s_i·Â_i, clip(s_i, 1-ε, 1+ε)·Â_i) :: 整条序列只 clip 一次
+$ 组内优势 Â_i = (r_i - mean(r)) / (std(r) + ε)，与 GRPO 完全一致
+> 奖励是序列级的标量，比率就该是序列级的标量 —— 粒度对齐
+> GRPO 的 token 级比率在 MoE 上会放大路由抖动，是训练发散的主因之一`,
+    code: `import torch
+
+def sequence_ratio(per_token_logp_new, per_token_logp_old, completion_mask):
+    """序列级重要性比率（长度归一化）; 输入 [B, G, T] → 返回 [B, G]"""
+    log_ratio = per_token_logp_new - per_token_logp_old        # [B, G, T]
+    mask = completion_mask.float()
+    length = mask.sum(dim=-1).clamp_min(1.0)                   # [B, G]
+    avg_log_ratio = (log_ratio * mask).sum(dim=-1) / length    # [B, G]
+    return avg_log_ratio.exp()                                 # 整条序列共享一个标量
+
+def gspo_loss(per_token_logp_new, per_token_logp_old, completion_mask,
+              advantages, eps=3e-4):
+    """GSPO: 整条序列只 clip 一次; advantages: [B, G] 组内归一化优势"""
+    s = sequence_ratio(per_token_logp_new, per_token_logp_old, completion_mask)
+    clipped = torch.clamp(s, 1 - eps, 1 + eps)
+    obj = torch.min(s * advantages, clipped * advantages)
+    return -obj.mean()`,
+    keyPoints: [
+      '一句话: GSPO = GRPO + 把重要性比率从 token 级换成序列级（长度归一化）',
+      '为什么 MoE 更需要它: token 级比率的高方差会放大专家路由抖动，序列级比率把整条序列的更新绑成一个方向，显著更稳',
+      '长度归一化不可省: 不归一化的话，长序列的比率会指数级偏离 1，clip 之后梯度全为 0',
+      'clip 粒度变了，ε 也要跟着变: 序列级比率偏离 1 的幅度很小，所以 ε 取 3e-4 量级，比 PPO 的 0.2 小几个数量级',
+      '和 GRPO 的关系: 目标函数形式完全一样，min(·, clip(·)) 的骨架没动，只换了比率的定义',
+    ],
+    source: 'original',
+  },
+  {
+    id: 'loss-dapo',
+    title: 'DAPO',
+    titleCn: '解耦裁剪与动态采样',
+    category: 'Loss',
+    hot: 3,
+    difficulty: 4,
+    oneLiner: '四处改动修 GRPO：解耦裁剪、动态采样、token 级损失、超长惩罚',
+    principle: 'DAPO 不改 GRPO 的骨架，只针对四个已知缺陷动手：(1) clip-higher 解耦裁剪上下界，放开低概率 token 的上升空间以维持熵；(2) 动态采样过滤掉全对/全错的组，只留有梯度信号的组；(3) 用 token 级损失替代序列级平均，让长回答的每个 token 权重一致；(4) 超长奖励塑形，惩罚被截断的超长回答。四个改动互不耦合，最终在长链推理任务上明显更强；代价是超参变多（多一个 ε_high、一个 α、一个 L_max），动态采样在有效组不足时还要额外的重采样逻辑。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '不改 GRPO 的骨架，只针对上面四个已知缺陷定点修补。clip-higher 解耦上下界，把上界放得比下界宽，给低概率 token 留出上升通道以维持熵；动态采样过滤掉没有梯度信号的组；损失改为 token 级求和；再对超长回答做奖励塑形。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          'clip-higher：用 clip(ρ, 1-ε_low, 1+ε_high)，典型 ε_low = 0.2、ε_high = 0.28，抬高的是熵的下界。',
+          '动态采样：丢掉 Â 全为 0 的组，只留组内奖励有正有负的组，等于把算力全花在有效样本上。',
+          'token 级损失：L = -1/Σ_i|y_i| · Σ_i Σ_t min(...)，分母是总 token 数而不是每组平均，长回答的每个 token 权重一致。',
+          '超长奖励塑形：R̃(y) = R(y) - α·max(0, |y| - L_max)，超过上限就线性扣分。',
+        ],
+      },
+    ],
+    formula: '1. clip-higher（解耦上下界）:\n   L^clip = min( ρ_{i,t}·Â_i , clip(ρ_{i,t}, 1-ε_low, 1+ε_high)·Â_i )\n   ε_high > ε_low（典型 ε_low = 0.2, ε_high = 0.28）→ 抬高熵的下界\n\n2. 动态采样: 丢弃 Â 全为 0 的组（组内奖励全相同 = 全对或全错）\n\n3. token 级损失（不再按 |y_i| 各自归一化）:\n   L = - 1/Σ_i|y_i| · Σ_i Σ_t min( ρ_{i,t}·Â_i , clip(ρ_{i,t})·Â_i )\n\n4. 超长奖励塑形: R̃(y) = R(y) - α·max(0, |y| - L_max)',
+    flowDiagram: `# 一个 batch 里的若干组，先过滤再更新
+! ✗ group_1  rewards [1,1,1,1] → std = 0 → Â 全 0，无梯度信号
+! ✗ group_2  rewards [0,0,0,0] → std = 0 → Â 全 0，无梯度信号
+! ✓ group_3  rewards [1,0,1,0] → Â 有正有负，保留
+> 动态采样：只走有梯度信号的组，全对全错的组等于白算
+比率 ρ_{i,t} = exp(new_logp - old_logp) :: [B, G, T] :: 仍然是逐 token 的
+clip-higher :: clip(ρ, 1-ε_low, 1+ε_high) :: ε_high > ε_low，给低概率 token 留上升空间
+长度惩罚 :: R̃(y) = R(y) - α·max(0, |y| - L_max) :: 惩罚被截断的超长回答
+loss = -Σ(保留组的全部 token) / Σ|y_i| :: 分母是总 token 数，不是每组平均
+$ clip-higher 抬高的是熵的下界，缓解输出同质化
+> 四个改动互不耦合，都不动 GRPO 的骨架`,
+    code: `import torch
+
+def overlong_reward_shaping(rewards, lengths, max_len, alpha=1.0):
+    """超长奖励塑形: 超出 max_len 的部分线性扣分"""
+    over = (lengths - max_len).clamp_min(0).float()
+    return rewards - alpha * over
+
+def dynamic_sampling_filter(rewards, group_size=8):
+    """动态采样: 丢掉组内奖励全相同的组（Â ≡ 0，没有梯度信号）
+    rewards: [num_groups * group_size] 扁平化的组内奖励 → 返回保留的组索引"""
+    groups = rewards.view(-1, group_size)
+    keep = groups.max(dim=-1).values != groups.min(dim=-1).values
+    return keep.nonzero(as_tuple=True)[0]
+
+def dapo_loss(per_token_logp_new, per_token_logp_old, completion_mask,
+              advantages, eps_low=0.2, eps_high=0.28):
+    """DAPO 损失: clip-higher + token 级归一化; [B, G, T] 与 [B, G]"""
+    ratio = (per_token_logp_new - per_token_logp_old).exp()      # [B, G, T]
+    adv = advantages.unsqueeze(-1)                               # [B, G, 1]
+
+    # 解耦的上下界: 上界放松 → 低概率 token 有更大的上升空间
+    clipped = torch.clamp(ratio, 1 - eps_low, 1 + eps_high)
+    per_token = torch.min(ratio * adv, clipped * adv)            # [B, G, T]
+
+    # token 级归一化: 除以整个 batch 的总 token 数（不是每条序列各自的长度）
+    mask = completion_mask.float()
+    return -(per_token * mask).sum() / mask.sum().clamp_min(1.0)`,
+    keyPoints: [
+      'clip-higher 为什么有效: 上界放松后，低概率 token 的比率有更大的上升空间，熵不会那么快坍缩；抬高的是熵的下界，不是直接把熵加进损失',
+      '动态采样为什么有效: 全对/全错的组优势恒为 0，算力全白花；丢掉它们等于按「有没有梯度信号」筛数据',
+      'token 级归一化的影响: 按序列长度归一化时，长回答的每个 token 梯度被稀释；除以总 token 数让每个 token 等权，长回答因此学得更好',
+      '超长惩罚是软约束: 硬截断会让奖励突变、模型学不到收尾；线性/分段惩罚给的是平滑信号',
+      '四个改动的取向不同: clip-higher 管探索（熵），动态采样管效率，token 级损失管长度偏置，超长塑形管长度控制',
+      '和 GSPO 的对照: DAPO 保留 token 级比率（但改了归一化和裁剪界），GSPO 直接把比率提到序列级',
+    ],
+    source: 'original',
+  },
+  {
+    id: 'loss-opd',
+    title: 'On-Policy Distillation',
+    titleCn: '在线策略蒸馏',
+    category: 'Loss',
+    hot: 3,
+    difficulty: 4,
+    oneLiner: '学生自己生成轨迹，教师逐 token 给稠密监督',
+    principle: '让学生模型自己采样生成轨迹，再让教师模型在学生实际走过的每个 token 上给出完整分布作为监督信号。相比用教师生成的静态数据做离线蒸馏，on-policy 训练消除了训练与推理的分布不匹配（exposure bias）；相比只有稀疏结果奖励的 RL，教师的逐 token 分布本身就是一个稠密奖励，不需要额外的 reward model。代价是每个 batch 都要现场采样，且必须有一个更强的教师模型可用。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '让学生自己采样，教师在被采样出来的轨迹上逐 token 给出完整分布 —— 监督落在学生真正会走的路径上，训练分布与推理分布从此一致，exposure bias 被从根上消掉。教师的分布在每个位置都是一个几万维的概率向量，本身就是一个稠密奖励，不需要 reward model。方向用反向 KL：mode-seeking 让学生只去对齐教师的高概率模式，与 Hinton 蒸馏正好相反。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '学生前向并采样得到 y_S，它带着学生自己的错误 —— 这正是要让它学会纠正的地方。',
+          '教师在同一批 prompt + y_S 上做一次前向，得到 teacher_logits: [B, T, V]，必须 detach / no_grad。',
+          '逐 token 算散度 D(p_T ‖ p_S)，得到 per_token_loss: [B, T]，再按有效 token 数求平均。',
+          '用广义 JSD 插值统一方向：β = 0 是前向 KL（mode-covering）、β = 1 是反向 KL（mode-seeking）、β = 0.5 就是标准 JSD。',
+        ],
+      },
+    ],
+    formula: '损失: L = E_{y ~ π_S(·|x)} [ (1/|y|) Σ_t D( p_T(·|x, y_<t) ‖ p_S(·|x, y_<t) ) ]\n\n广义 JSD 插值 (β ∈ [0, 1]):\n  M = β·p_T + (1 - β)·p_S\n  D_GJS(β) = (1 - β)·KL(p_T ‖ M) + β·KL(p_S ‖ M)\n\n端点 (可用代码断言验证):\n  β = 0   → KL(p_T ‖ p_S)   前向 KL (mode-covering，Hinton 蒸馏的方向)\n  β = 1   → KL(p_S ‖ p_T)   反向 KL (mode-seeking，只学教师的高概率模式)\n  β = 0.5 → 标准 JSD',
+    flowDiagram: `# 两条路的对比
+! ✗ 离线蒸馏：教师生成 y_T，学生拟合 y_T，训练分布 ≠ 推理分布
+! ✓ on-policy 蒸馏：学生自己采样，教师在自己的轨迹上逐 token 打分
+# 学生采样：监督落在学生真正会走的路径上
+prompt x :: 同一批输入
+y_S ~ π_S(·|x) :: [B, T] :: 学生采样得到，带着自己的错误
+# 教师打分：逐 token 给出完整分布
+teacher_logits = π_T(·|x, y_<t) :: [B, T, V] :: 必须 detach / no_grad
+student_logits = π_S(·|x, y_<t) :: [B, T, V] :: 需要梯度
+per_token_loss = D(p_T ‖ p_S) :: [B, T] :: 逐 token 散度
+loss = mean(per_token_loss) :: 按有效 token 数平均，得到标量
+$ β=0 → 前向 KL（mode-covering）、β=1 → 反向 KL（mode-seeking）、β=0.5 → 标准 JSD
+> 教师的逐 token 分布本身就是稠密奖励，不需要 reward model`,
+    code: `import torch, torch.nn.functional as F
+
+def generalized_jsd(student_logits, teacher_logits, beta=1.0, temperature=1.0):
+    """广义 JSD 插值 → 逐 token 散度 [B, T]
+    beta = 0 → 前向 KL KL(p_T‖p_S) (mode-covering)
+    beta = 1 → 反向 KL KL(p_S‖p_T) (mode-seeking)
+    beta = 0.5 → 标准 JSD"""
+    s_logp = F.log_softmax(student_logits / temperature, dim=-1)
+    t_logp = F.log_softmax(teacher_logits / temperature, dim=-1)
+    s_p, t_p = s_logp.exp(), t_logp.exp()
+
+    # 混合分布 M = beta * p_T + (1 - beta) * p_S（clamp_min 只防 log(0)）
+    m_logp = (beta * t_p + (1 - beta) * s_p).clamp_min(1e-8).log()
+
+    kl_t = (t_p * (t_logp - m_logp)).sum(dim=-1)     # KL(p_T ‖ M)  [B, T]
+    kl_s = (s_p * (s_logp - m_logp)).sum(dim=-1)     # KL(p_S ‖ M)  [B, T]
+    return (1 - beta) * kl_t + beta * kl_s
+
+def opd_loss(student_logits, teacher_logits, loss_mask=None,
+             beta=1.0, temperature=1.0, top_k=0):
+    """在线策略蒸馏损失; loss_mask: [B, T] 1 = 学生在该位置真实采样出的 token
+    top_k > 0 时只保留教师概率最高的 k 个 token（黑盒教师只吐 top-k logits 时用）"""
+    # 教师永远不参与反传，否则「固定靶」会被同一步更新带跑
+    teacher_logits = teacher_logits.detach()
+
+    if top_k > 0:
+        # 用 -1e9 而不是 -inf，避免 0 * inf 产生 nan
+        kth = teacher_logits.topk(top_k, dim=-1).values[..., -1:]
+        teacher_logits = teacher_logits.masked_fill(teacher_logits < kth, -1e9)
+
+    per_token = generalized_jsd(student_logits, teacher_logits, beta, temperature)
+
+    if loss_mask is None:
+        return per_token.mean()
+    mask = loss_mask.float()
+    return (per_token * mask).sum() / mask.sum().clamp_min(1.0)`,
+    keyPoints: [
+      '为什么要 on-policy: 消除 exposure bias。离线蒸馏的误差累积是 O(T²)，on-policy 降到 O(T)',
+      '为什么常选反向 KL: 反向 KL 是 mode-seeking，学生只去匹配教师的高概率模式；前向 KL 是 mode-covering，会给教师几乎不给概率的区域也分配质量',
+      'KL 方向决定行为: 前向 KL 覆盖所有模式但分布更散（易产生幻觉区域），反向 KL 更尖锐但可能丢多样性',
+      '与 RL 的区别: 不需要 reward model，教师逐 token 的分布就是稠密奖励；同等效果下比 RL 便宜得多',
+      '教师的 logits 必须 detach: 教师是「固定靶」，只有学生一侧回传梯度',
+      '黑盒教师: 拿不到全词表 logits 时，用 top-k logits 截断近似，其余位置填一个很大的负数（不要填 -inf，会在 0 * inf 处产生 nan）',
+      '广义 JSD 一个公式统一了前后向 KL: β 从 0 滑到 1，就是从 mode-covering 滑到 mode-seeking，代码里用端点数值断言自检',
+    ],
+    source: 'original',
+  },
+  {
+    id: 'loss-self-opd',
+    title: 'On-Policy Self-Distillation',
+    titleCn: '在线自蒸馏',
+    category: 'Loss',
+    hot: 2,
+    difficulty: 4,
+    oneLiner: '同一个模型既是教师又是学生，用特权上下文造出更强的自己',
+    principle: '不再依赖外部更强的教师模型：让学生自己采样，同时把同一份权重在特权上下文（参考答案、关键提示、解题方向等）条件下的分布当作教师分布。学生在没有特权信息的条件下学习，把训练时才有的额外信息转成训练信号；教师与学生共享参数，因此既不需要额外的教师显存，也不存在师生能力差距过大导致的负迁移。代价是特权上下文的构造成了新的依赖，它的质量直接决定收益上限。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '把「更强的模型」换成「信息更全的自己」：同一份权重 θ，一边看 prompt，一边额外拼接特权上下文 c。两条路径共享参数，教师那条只是多了一段输入，因此既不需要额外显存，也不存在能力差距。学生学的是「在没有特权信息的条件下逼近有特权信息时的分布」，等于把训练期才有的信息蒸馏进参数。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '学生路径 π_θ(·|x) 必须真采样得到 y ~ π_θ，这条路径需要梯度。',
+          '教师路径 π_θ(·|x ⊕ c) 用同一份权重，只需一次前向，no_grad 即可。',
+          '逐 token 反向 KL：KL(π_θ(·|x, y_<t) ‖ π_θ(·|x ⊕ c, y_<t))，只在 y 自己的 token 上回传。',
+          '用反向 KL（mode-seeking）而不是前向：学生只对齐「信息更全的自己」的高概率模式，不强行覆盖全部尾巴。',
+        ],
+      },
+    ],
+    formula: '学生: π_θ(·|x)            只有 prompt，需要真采样 (rollout)\n教师: π_θ(·|x ⊕ c)        同一份权重，额外拼接特权上下文 c，只需一次前向\n\n损失: L = E_{y ~ π_θ(·|x)} [ (1/|y|) Σ_t KL( π_θ(·|x, y_<t) ‖ π_θ(·|x ⊕ c, y_<t) ) ]\n\n反向 KL: mode-seeking，学生只对齐「信息更全的自己」的高概率模式\n\n特权上下文 c 的典型形式:\n  完整参考答案 / 关键提示 (hint) / 解题策略名 / 工具返回结果 / 用户纠正',
+    flowDiagram: `# 同一份权重 θ，两条路径
+学生路径 :: x → π_θ(·|x) :: 需要真采样 rollout，带着自己的错误
+教师路径 :: x ⊕ c → π_θ(·|x ⊕ c) :: 同一份权重多拼一段上下文，no_grad
+c :: 参考答案 / 关键提示 / 解题策略 / 工具返回 / 用户纠正
+逐 token 反向 KL :: KL(π_θ(·|x, y_<t) ‖ π_θ(·|x ⊕ c, y_<t)) :: 只在 y 自己的 token 上回传
+$ 教师不是「更强的模型」，而是「信息更全的同一个自己」
+> 师生共享参数：不需要额外的教师显存，也不存在能力差距导致的负迁移`,
+    code: `import torch, torch.nn.functional as F
+
+@torch.no_grad()
+def teacher_forward(model, input_ids, privileged_ids):
+    """教师 = 同一模型 + 特权上下文，只做一次前向，不需要梯度"""
+    full = torch.cat([privileged_ids, input_ids], dim=1)
+    logits = model(full).logits
+    # 只取答案段（去掉特权上下文那一段）
+    return logits[:, privileged_ids.size(1):]
+
+def self_opd_loss(model, input_ids, privileged_ids, answer_mask):
+    """在线自蒸馏损失
+    input_ids:      [B, T] 学生看到的 prompt + 学生自己采样的回答
+    privileged_ids: [B, P] 特权上下文（如参考答案），只拼给教师
+    answer_mask:    [B, T] 1 = 学生在该位置真实生成的 token"""
+    # 1. 学生前向（需要梯度）—— 与 rollout 时是同一批 token
+    student_logits = model(input_ids).logits                      # [B, T, V]
+
+    # 2. 教师前向：同一权重 + 特权上下文，no_grad
+    t_logits = teacher_forward(model, input_ids, privileged_ids)   # [B, T, V]
+
+    # 3. 逐 token 反向 KL: KL(p_S ‖ p_T)
+    s_logp = F.log_softmax(student_logits, dim=-1)
+    t_logp = F.log_softmax(t_logits, dim=-1)
+    kl = (s_logp.exp() * (s_logp - t_logp)).sum(dim=-1)            # [B, T]
+
+    # 4. 只在学生自己生成的 token 上回传
+    mask = answer_mask.float()
+    return (kl * mask).sum() / mask.sum().clamp_min(1.0)`,
+    keyPoints: [
+      '与 OPD 的核心区别: OPD 的教师是另一个更强的模型；self-OPD 的教师是同一份权重 + 特权上下文',
+      '为什么需要它: OPD 需要外部更强的教师，但到了 SOTA 之上往往没有更强的模型可用；而特权信息训练时拿得到、推理时拿不到，正好当监督信号',
+      '特权上下文的粒度很关键: 给完整参考答案不一定最优 —— 中间抽象（解题策略名、方法方向、问题类别）往往在更少 hint token 下效果更好，因为完整答案会让教师分布过分偏离学生当前能力',
+      '必须是同一个模型: 教师和学生共享参数，所以不存在「师生能力差距过大」导致的负迁移',
+      'rollout 必须 on-policy: 训练 token 要来自学生自己的采样，否则退化成普通的上下文蒸馏',
+      '已知副作用: 反向 KL 是 mode-seeking，长期训练会压缩输出多样性、让模型变「刚性」，需要靠 hint 设计、散度方向和训练步数来调节',
+      '用武之地: 持续学习（把推理时的信息固化成权重）、利用隐式用户反馈做定向纠错',
+    ],
+    source: 'original',
+  },
   // ===================== Optimizer =====================
   {
     id: 'opt-adamw',
@@ -879,18 +1632,37 @@ def kl_penalty(logp, ref_logp):
     hot: 3,
     difficulty: 3,
     oneLiner: '解耦权重衰减，LLM 训练标配',
-    principle: 'Adam 的改进版：将权重衰减从梯度中解耦，直接作用于参数。正则化效果更好，是 LLM 训练的标准优化器。',
+    principle: 'Adam 的改进版：将权重衰减从梯度中解耦，直接作用于参数。相比 Adam 的权重衰减作用在梯度上正则化效果差，AdamW 解耦后正则化效果更好，是 LLM 训练的标准优化器。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '维护一阶矩（动量）和二阶矩（未中心化的方差），通过偏差修正确保初始阶段的稳定性。权重衰减直接作用于参数而非梯度，实现解耦正则化。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '更新一阶矩：m_t = β₁·m + (1-β₁)·g',
+          '更新二阶矩：v_t = β₂·v + (1-β₂)·g²',
+          '偏差修正：m̂ = m/(1-β₁ᵗ), v̂ = v/(1-β₂ᵗ)',
+          '解耦权重衰减：θ = θ - lr·λ·θ',
+          '参数更新：θ = θ - lr·m̂/(√v̂ + ε)',
+        ],
+      },
+    ],
     formula: 'm_t = β₁m_{t-1} + (1-β₁)g_t          # 一阶矩\nv_t = β₂v_{t-1} + (1-β₂)g_t²         # 二阶矩\nm̂_t = m_t/(1-β₁ᵗ)                     # 偏差修正\nv̂_t = v_t/(1-β₂ᵗ)\n\nθ_t = θ_{t-1} - lr · (m̂_t/(√v̂_t + ε) + λθ_{t-1})\n                                ↑ 解耦权重衰减',
-    flowDiagram: `gradient g_t
-  │
-  ├── m_t = β₁·m + (1-β₁)·g       # 一阶矩 (动量)
-  ├── v_t = β₂·v + (1-β₂)·g²      # 二阶矩
-  │
-  ├── m̂ = m/(1-β₁ᵗ)                # 偏差修正
-  ├── v̂ = v/(1-β₂ᵗ)
-  │
-  └── θ = θ - lr·(m̂/(√v̂+ε) + λ·θ) # 更新 + 解耦权重衰减
-                       ↑ adaptive    ↑ decoupled wd`,
+    flowDiagram: `# 一阶矩与二阶矩
+g_t :: 当前梯度
+m_t = β₁·m + (1-β₁)·g_t :: 一阶矩，动量
+v_t = β₂·v + (1-β₂)·g_t² :: 二阶矩，梯度平方的滑动平均
+# 偏差修正
+m̂ = m / (1-β₁ᵗ) :: 补偿前几步从 0 起步导致的偏小
+v̂ = v / (1-β₂ᵗ)
+# 更新：自适应梯度步 + 解耦的权重衰减
+θ = θ - lr·(m̂/(√v̂ + ε) + λ·θ) :: 两项相加，衰减项不经过任何归一化
+$ Adam 把 λθ 加进梯度，再被 1/√v̂ 归一化，衰减强度因此失控
+> LLM 标配：lr = 3e-4、betas = (0.9, 0.95)、weight_decay = 0.1`,
     code: `import torch
 
 class AdamW:
@@ -927,6 +1699,119 @@ class AdamW:
     ],
     source: 'cdhx',
   },
+  {
+    id: 'opt-muon',
+    title: 'Muon / MuonClip',
+    titleCn: '矩阵正交化优化器',
+    category: 'Optimizer',
+    hot: 3,
+    difficulty: 4,
+    oneLiner: '动量矩阵先正交化再更新，隐藏层权重的谱范数几何',
+    principle: 'Muon 只用于二维隐藏层权重：累积动量后，用 Newton-Schulz 迭代把动量矩阵近似成正交矩阵（极分解 UVᵀ）作为更新方向，让所有奇异方向等步长；嵌入层、输出头和所有一维参数仍交给 AdamW。规模化时 Muon 会把注意力 logit 推到爆炸，Kimi K2 用 QK-Clip 把 Q/K 权重乘 √γ（γ = τ/S_max）从源头压住。代价是每步多 5 次矩阵乘法，换来约 2× token 效率，正则与 RMS 对齐后 Adam 的超参可以直接迁移。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '在谱范数几何下做最速下降，最优更新方向是动量矩阵的极分解 UVᵀ —— 一个所有奇异值都等于 1 的半正交矩阵。直观说就是只留方向、抹掉幅度：每个奇异方向走同样大的一步，幅度交给学习率统一控制。求极分解不必真做 SVD（慢且数值敏感），Newton-Schulz 迭代只用矩阵乘法就能逼近。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '参数分组：只有 ≥2 维的隐藏层权重交给 Muon，embedding、lm_head 和所有 1D 参数（bias、norm）仍用 AdamW。',
+          '累积动量 → 除以 F 范数归一化（保证谱范数 ≤ 1，否则迭代发散）→ 5 次 NS 迭代 → θ ← θ - η·O。',
+          '5 步后奇异值落在约 [0.5, 1.5] 就够用：系数 (3.4445, -4.7750, 2.0315) 正是为「5 步内尽量压平」调出来的。',
+        ],
+      },
+    ],
+    formula: 'Muon 更新（只对 ≥ 2 维的隐藏层权重）:\n  M_t = μ·M_{t-1} + G_t                  # 累积动量\n  O_t = NS5(M_t)                          # 正交化，逼近极分解 UVᵀ\n  θ_t = θ_{t-1} - η·O_t\n\nNewton-Schulz 五次迭代（求「零次幂」）:\n  X_0 = G / (‖G‖_F + ε)                   # 先归一化，保证谱范数 ≤ 1\n  重复 5 次:\n      A = X·Xᵀ\n      X ← a·X + (b·A + c·A²)·X\n  系数 (a, b, c) = (3.4445, -4.7750, 2.0315)\n\nMuonClip = Muon + QK-Clip（Kimi K2 的做法）:\n  S_max = 每个 head 在本 batch 上的最大注意力 logit\n  若 S_max > τ:  γ = τ / S_max ;  W_q ← √γ·W_q ,  W_k ← √γ·W_k\n  (典型 τ = 100)',
+    flowDiagram: `# 参数分组：Muon 只吃 2D 隐藏层权重
++ emb / lm_head / bias / norm :: 交给 AdamW
++ attn & mlp 的 2D 权重矩阵 :: 交给 Muon
+
+# Muon 单步
+G :: [m, n] :: 本步梯度
+M = μM + G :: [m, n] :: 累积动量（Nesterov 变体用 G + μ·M）
+X = M / (‖M‖_F + ε) :: [m, n] :: 归一化，保证谱范数 ≤ 1，否则迭代发散
+NS5 :: 重复 5 次 X ← a·X + (b·A + c·A²)·X，其中 A = X·Xᵀ
+O :: [m, n] :: 奇异值 ≈ 1，逼近极分解 UVᵀ
+$ θ ← θ - η·O：每个奇异方向走同样大的一步
+> 系数 (a, b, c) = (3.4445, -4.7750, 2.0315)，5 步后奇异值落在约 [0.5, 1.5]
+
+# MuonClip 额外一步（周期性执行）
+S_max :: 每个 head 在本 batch 上的最大注意力 logit
+! S_max > τ → γ = τ / S_max，W_q ← √γ·W_q，W_k ← √γ·W_k
+> 典型 τ = 100。logit ∝ W_q·W_kᵀ，缩放一次权重等于缩放 γ 倍 logit，所以取 √γ`,
+    code: `import torch
+
+def zeropower_via_newtonschulz5(G, steps=5, eps=1e-7):
+    """用 Newton-Schulz 迭代近似 G 的极分解 UVᵀ（即「零次幂」）
+    G: [m, n] 动量矩阵 → 同形状矩阵，奇异值趋近 1"""
+    assert G.ndim == 2, "Muon 只处理二维矩阵参数"
+    a, b, c = 3.4445, -4.7750, 2.0315        # 调好的五次多项式系数
+
+    X = G.to(torch.bfloat16)
+    X = X / (X.norm() + eps)                 # 归一化，否则迭代会发散
+
+    for _ in range(steps):
+        A = X @ X.mT                         # [m, m]
+        B = b * A + c * (A @ A)              # 五次多项式
+        X = a * X + B @ X                    # [m, n]
+
+    return X.to(G.dtype)
+
+class Muon(torch.optim.Optimizer):
+    """只用于 2D 隐藏层权重的 Muon 优化器"""
+
+    def __init__(self, params, lr=0.02, momentum=0.95, nesterov=True, ns_steps=5):
+        defaults = dict(lr=lr, momentum=momentum, nesterov=nesterov, ns_steps=ns_steps)
+        super().__init__(params, defaults)
+
+    @torch.no_grad()
+    def step(self):
+        for group in self.param_groups:
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                g = p.grad
+                state = self.state[p]
+                if "momentum_buffer" not in state:
+                    state["momentum_buffer"] = torch.zeros_like(g)
+
+                buf = state["momentum_buffer"]
+                buf.mul_(group["momentum"]).add_(g)
+                # Nesterov: 用 g + μ·buf 作为动量方向
+                update = g.add(buf, alpha=group["momentum"]) if group["nesterov"] else buf
+
+                # 先正交化，再更新
+                p.add_(zeropower_via_newtonschulz5(update, group["ns_steps"]),
+                       alpha=-group["lr"])
+
+@torch.no_grad()
+def qk_clip_(model, tau=100.0):
+    """MuonClip 的 QK-Clip: 从源头压住注意力 logit 的增长
+    约定: 模块把本 batch 每 head 的最大 logit 存在 qk_max_logit 属性上"""
+    for module in model.modules():
+        s_max = getattr(module, "qk_max_logit", None)
+        if s_max is None or s_max <= tau:
+            continue
+        gamma = tau / s_max                      # 缩放因子
+        scale = gamma ** 0.5                     # logit ∝ W_q·W_kᵀ，所以取 √γ
+        module.q_proj.weight.mul_(scale)
+        module.k_proj.weight.mul_(scale)`,
+    keyPoints: [
+      '为什么正交化: 把动量矩阵的所有奇异值归一化为 1，让更新在每个奇异方向上等步长 —— 对应谱范数下的最速下降',
+      '为什么 5 步够: Newton-Schulz 收敛很快，5 步后奇异值已经落在 [0.5, 1.5]；继续迭代收益很小而算力翻倍',
+      'bf16 能跑: 迭代全是矩阵乘法，没有 SVD 那样的数值敏感操作，bfloat16 下稳定',
+      'Muon 只管 2D 权重: 嵌入、输出头、所有 1D 参数（bias、norm）留给 AdamW —— 混合优化器是标准做法',
+      'Adam 与 Muon 的几何差别: Adam 是逐坐标自适应步长，完全忽略权重矩阵的行列结构；Muon 在谱范数几何下让每个奇异方向等步长',
+      '规模化会炸 logit: Muon 训到万亿参数时注意力 logit 会涨到远超正常量级（上千），QK-Clip 用 √γ 缩放 Q/K 权重从源头压住，且它是无损的（只维持数值稳定，不改变表达力）',
+      '为什么是 √γ: logit 正比于 W_q·W_kᵀ，放缩一次权重，logit 就被放缩 γ 倍，所以权重取 √γ',
+      'QK-Clip 会自己退场: 训练早期生效，模型稳定后 S_max 不再超阈值，机制自动不再触发',
+      '实测收益: 相比 AdamW 约有 2× token 效率；正则与 RMS 对齐后 Adam 的超参可以直接迁移',
+    ],
+    source: 'original',
+  },
   // ===================== PEFT =====================
   {
     id: 'peft-lora',
@@ -936,19 +1821,35 @@ class AdamW:
     hot: 3,
     difficulty: 3,
     oneLiner: 'ΔW = BA，低秩分解高效微调',
-    principle: '冻结预训练权重 W，用低秩矩阵 B·A 近似权重更新 ΔW。A 用高斯初始化，B 用零初始化，保证初始输出不变。',
+    principle: '冻结预训练权重 W，用低秩矩阵 B·A 近似权重更新 ΔW。相比全量微调需要巨大显存，LoRA 只训练少量参数（约 0.1%），效果接近全量微调。A 用高斯初始化，B 用零初始化，保证初始输出不变。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '利用低秩分解近似权重更新：ΔW ≈ B·A，其中 A: [r, k]，B: [d, r]，r ≪ min(d, k)。B 初始化为零保证训练初期 LoRA 贡献为 0，通过 scaling = α/r 控制更新幅度。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '冻结原始权重：linear.requires_grad_(False)',
+          '初始化 LoRA 矩阵：A 用 kaiming 初始化，B 用零初始化',
+          '前向传播：output = linear(x) + (x @ A.T @ B.T) × scaling',
+          '反向传播：只更新 A 和 B',
+          '推理时合并：W_new = W + B·A·scaling（无额外开销）',
+        ],
+      },
+    ],
     formula: 'h = W₀x + ΔWx = W₀x + (B·A)x · (α/r)\n\nW₀: [d, k] 冻结\nA:  [r, k] 可训练 (kaiming 初始化)\nB:  [d, r] 可训练 (零初始化)\nr ≪ min(d, k)',
-    flowDiagram: `x: [B, S, k]
-  │
-  ├── W₀ (frozen) ──────────→ W₀x ──────┐
-  │                                       │
-  └── dropout → A [r,k] → B [d,r] → BAx · (α/r)
-                                              │
-                                        ──────┤ +
-                                              │
-                                        output: [B, S, d]
-
-推理时可合并: W_new = W₀ + B·A·(α/r)  → 无额外开销`,
+    flowDiagram: `# 主干冻结，旁路低秩可训练
+x :: [B, S, k] :: 输入
+W₀ :: [d, k] :: 预训练权重，冻结
++ 主干 :: W₀x :: 冻结，不产生梯度
++ 旁路 :: dropout → A[r,k] → B[d,r] → (B·A)x · (α/r) :: 只训练这两个小矩阵
+h = W₀x + (B·A)x·(α/r) :: [B, S, d] :: 两条路相加
+$ 可训练参数从 d·k 降到 r·(d+k)，而 r ≪ min(d, k)
+> B 零初始化 ⇒ 初始 BA = 0，模型一开始与原模型逐位一致
+> 推理时可合并：W_new = W₀ + B·A·(α/r)，零额外开销`,
     code: `import torch, torch.nn as nn, math
 
 class LoRALinear(nn.Module):
@@ -991,18 +1892,36 @@ class LoRALinear(nn.Module):
     category: 'Sampling',
     hot: 3,
     difficulty: 2,
-    oneLiner: '控制输出多样性：温度/Top-k/Top-p',
-    principle: 'Temperature 控制分布锐度；Top-k 只保留概率最高的 K 个 token；Top-p 保留累积概率达到 P 的最小集合。实践中常组合使用。',
+    oneLiner: '控制输出多样性：Temperature / Top-k / Top-p',
+    principle: 'Temperature 控制分布锐度；Top-k 只保留概率最高的 K 个 token；Top-p 保留累积概率达到 P 的最小集合。相比 Greedy（确定性但容易重复）和纯 Sampling（多样性但可能低质量），采样策略在质量和多样性之间取得平衡。实践中常组合使用。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          'Temperature 通过除以温度参数 T 调整分布锐度（T<1 更确定，T>1 更随机）。Top-k 固定保留 K 个候选，Top-p 动态选择累积概率达到 P 的最小集合，后者更灵活。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '应用 Temperature：logits = logits / T',
+          'Top-k 过滤：只保留最大的 k 个，其余设为 -inf',
+          'Top-p 过滤：排序后累积概率超过 p 的设为 -inf',
+          'Softmax 归一化：probs = softmax(logits)',
+          '多项式采样：next_token = multinomial(probs)',
+        ],
+      },
+    ],
     formula: 'Temperature: P(xᵢ) = softmax(zᵢ/T)\n  T<1: 更确定  T>1: 更随机  T→0: greedy\n\nTop-k: 只保留 top-k 个 token, 其余设为 -∞\nTop-p: 按概率降序排列, 保留累积概率≥p 的最小集合',
-    flowDiagram: `logits: [V]
-  │
-  ├── /T (temperature)
-  │
-  ├── Top-k: 只保留最大的 k 个, 其余 → -inf
-  │
-  ├── Top-p: 排序 → cumsum → 超过 p 的 → -inf
-  │
-  └── softmax → multinomial sample → next_token`,
+    flowDiagram: `# 三步：调形状 → 截长尾 → 采样
+logits :: [V] :: 模型对词表的原始打分
+logits = logits / T :: [V] :: 温度只做一次除法，却改变整个分布的熵
++ Top-k :: 取最大的 k 个，其余置 -inf :: 固定数量截断
++ Top-p :: 排序 → cumsum → 累积超过 p 的置 -inf :: 候选集随分布陡峭程度伸缩
+probs = softmax(logits) :: [V] :: 被截掉的位置概率为 0
+next_token = multinomial(probs) :: 下一个 token :: 只在留下的候选里采样
+$ T<1 更确定、T>1 更随机、T→0 退化成 greedy
+> 实践中常组合：温度在最前，Top-k 保底，Top-p 收缩`,
     code: `import torch, torch.nn.functional as F
 
 def top_k_top_p_sampling(logits, temperature=0.7, top_k=50, top_p=0.9):
@@ -1044,13 +1963,37 @@ def top_k_top_p_sampling(logits, temperature=0.7, top_k=50, top_p=0.9):
     hot: 2,
     difficulty: 3,
     oneLiner: 'FP16/BF16 计算 + FP32 主权重',
-    principle: '使用前向/反向用 FP16/BF16 减少显存和加速计算，但保持 FP32 主权重防止精度损失。配合 loss scaling 防止梯度下溢。',
+    principle: '使用前向/反向用 FP16/BF16 减少显存和加速计算，但保持 FP32 主权重防止精度损失。FP16/BF16 只需 2 bytes（显存减半、计算加速），FP32 需 4 bytes（精度高），混合使用实现既快又准。配合 loss scaling 防止梯度下溢。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '前向和反向传播使用低精度（FP16/BF16）加速计算并减少显存，但主权重始终保持 FP32 防止精度损失。BF16 指数位更多（8 vs 5），不需要 loss scaling。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          'FP32 主权重 → copy → FP16 权重',
+          'FP16 前向传播 → FP16 loss',
+          'Loss scaling：loss × loss_scale',
+          'FP16 反向传播 → FP16 梯度',
+          '梯度转 FP32 → 更新 FP32 主权重',
+        ],
+      },
+    ],
     formula: '前向/反向: FP16 (半精度, 2 bytes)\n主权重: FP32 (全精度, 4 bytes)\n梯度: FP16 → loss_scale → 转 FP32 → 更新主权重\n\nBF16: 指数位更多 (8 vs 5), 不需要 loss scaling',
-    flowDiagram: `FP32 主权重 ──→ copy ──→ FP16 权重 ──→ 前向 ──→ FP16 loss
-                                    ↑                      │
-                                    │               loss_scale × loss
-                                    │                      │
-FP32 主权重 ←── update ←── FP32 梯度 ←── cast ←── FP16 梯度 ←─┘`,
+    flowDiagram: `# 计算走半精度，参数留全精度
+FP32 主权重 :: 唯一被更新的真身
+FP16 权重 :: 每次前向前从主权重 cast 一份
+前向 :: FP16 :: 激活与权重都是半精度
+loss :: FP16 :: 前向的输出，数值偏小
+loss × scale :: 先把 loss 放大 2^k 倍，梯度跟着抬出下溢区
+FP16 梯度 :: 数值已被放大到安全范围
+cast + 除以 scale :: FP32 梯度 :: 恢复真实尺度后转回 fp32
+update :: FP32 主权重 :: 高精度累加，误差不写回主权重
+$ FP32 是 1+8+23 位；FP16 是 1+5+10；BF16 是 1+8+7
+> bf16 指数位与 fp32 相同，动态范围足够，因此不需要 loss scaling`,
     code: `import torch
 
 # PyTorch 原生 AMP (Automatic Mixed Precision)
@@ -1088,17 +2031,33 @@ optimizer.step()`,
     hot: 2,
     difficulty: 3,
     oneLiner: '时间换空间，重新计算代替存储激活',
-    principle: '不保存所有中间激活值，只保存检查点。反向传播时重新计算需要的激活值。用约 20% 额外计算换取大量显存。',
+    principle: '不保存所有中间激活值，只保存检查点。反向传播时重新计算需要的激活值。相比标准训练保存所有层激活（显存 O(L)），梯度检查点只保存 √L 个检查点（显存 O(√L)），用约 20% 额外计算换取大量显存。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '时间换空间：不保存所有中间激活值，只保存关键检查点。反向传播时从最近的检查点重新计算需要的激活值，大幅减少显存占用。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '前向传播时只保存检查点（如每 √L 层保存一次）',
+          '反向传播时从检查点重新计算需要的激活值',
+          '使用 torch.utils.checkpoint 包裹需要检查点的层',
+          'HuggingFace 模型可直接设置 gradient_checkpointing=True',
+        ],
+      },
+    ],
     formula: '标准: 保存所有层激活 → 显存 O(L)\nCheckpoint: 只保存 √L 个检查点 → 显存 O(√L)\n\n代价: 反向传播需要重新计算 → 训练时间 +20%',
-    flowDiagram: `标准训练:
-  Layer₁ → act₁ → Layer₂ → act₂ → ... → Layer_L → act_L
-  全部保存 → 显存 O(L)
-
-梯度检查点:
-  Layer₁ → act₁* → Layer₂ → Layer₃ → act₃* → ...
-              ↑ 检查点 (保存)              ↑ 检查点
-  反向时: 从检查点重新计算 → 显存 O(√L)
-  代价: 多一次前向计算 → 训练慢 ~20%`,
+    flowDiagram: `# 标准训练：全部激活都留着
++ 标准 :: Layer₁ → act₁ → Layer₂ → act₂ → … → Layer_L → act_L :: 每层激活全部保存
+! ✗ 标准代价：激活显存 O(L)，层数一多就成了显存大头
+! ✓ 检查点：只保存 √L 份，段内激活反向时重算
+Layer₁ → act₁* → Layer₂ → Layer₃ → act₃* → … :: 带 * 的是检查点
+! 反向时从最近的检查点重跑一次前向，把段内激活重建出来
+$ 激活显存 O(L) → O(√L)，代价是训练时间 +20%
+> 省下来的显存可以直接换成更大的 batch 或更长的序列`,
     code: `import torch
 from torch.utils.checkpoint import checkpoint
 
@@ -1131,6 +2090,87 @@ class CheckpointBlock(nn.Module):
     ],
     source: 'cdhx',
   },
+  {
+    id: 'eff-fp8',
+    title: 'Blockwise FP8 Training',
+    titleCn: 'FP8 分块量化训练',
+    category: 'Efficient',
+    hot: 3,
+    difficulty: 3,
+    oneLiner: '按 128 一块算缩放因子，FP8 训练的关键全在块级缩放',
+    principle: '训练用 FP8（前向的激活和权重用 e4m3，反向的梯度用 e5m2）能省显存带宽并提高吞吐，但整张量共用一个缩放因子会被少数离群值拖垮 —— 为了覆盖极值，绝大多数正常值被迫压到很低的精度。解决办法是分块：每 128 个元素（或 128×128 的块）单独算 amax 和缩放因子，块内共享一个 scale，矩阵乘法在 FP8 上做、累加仍在高精度。代价是需要 Hopper 及以后专门支持 FP8 的硬件，且块越小精度越好、缩放因子的元数据开销也越大。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '缩放因子不该整张量共用一个，而应该按块各算各的：每 128 个元素单独求 amax 定 scale，这样离群值的影响被限制在它自己那一块，其余块按自己的分布正常量化。矩阵乘法在 FP8 上做，但累加提到高精度 —— 精度损失只发生在「存」，不发生在「算」。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          'scale = amax(block) / 448，448 是 e4m3 的可表示上界，除完正好用满整个范围。',
+          '量化 x_q = clamp(x/scale, -448, 448).to(fp8)，只保留 3 位尾数；反量化 x̂ = x_q·scale。',
+          '缩放因子可以提到块外：y = Σ_block s_x·s_w·(x_q·w_q)，FP8 相乘、高精度累加，缩放因子不进乘法开销。',
+          'DeepSeek-V3 的配置：激活用 1×128 的块（per-token per-128-channel），权重用 128×128 的块。',
+        ],
+      },
+    ],
+    formula: '缩放因子（块内 amax）:\n  scale = amax(block) / 448                # 448 是 e4m3 的可表示上界\n\n量化 / 反量化:\n  x_q = clamp(x / scale, -448, 448).to(fp8)      # 只保留 3 位尾数\n  x̂  = x_q · scale\n\n块级矩阵乘法（缩放因子提到块外）:\n  y = Σ_block (x_q · s_x) · (w_q · s_w) = Σ_block s_x · s_w · (x_q · w_q)\n\nDeepSeek-V3 的配置:\n  激活: 1×128 的块（per-token per-128-channel）\n  权重: 128×128 的块\n  累加: 提升到高精度（FP32 / 张量核内高精度累加）',
+    flowDiagram: `# 整张量共用一个 scale：离群值把所有正常值拖下水
+x :: [4096] :: 含离群值 1200
+scale = amax / 448 :: 2.68 :: 为了装下 1200，只能把范围拉到最大
+! ✗ 正常值 ~1.0 除以 2.68 只剩 0.37，3 位尾数不够用，精度崩了
+# 块级缩放：每块自己算 amax
++ block_0 :: amax = 1.2 → s = 0.0027 :: 块内共享一个 scale
++ block_1 :: amax = 0.9 → s = 0.0020
++ block_7 :: amax = 1200 → s = 2.68 :: 离群值只影响自己这一块
+x_q = (x / s).to(fp8_e4m3) :: 1 字节/元素 :: 只保留 3 位尾数
+GEMM :: Σ s_x·s_w·(x_q @ w_q) :: FP8 相乘、高精度累加
+$ 显存与带宽相对 FP16 再减半，累加精度不变
+> DeepSeek-V3：激活 1×128 分块，权重 128×128 分块`,
+    code: `import torch
+
+FP8_MAX = {"e4m3": 448.0, "e5m2": 57344.0}
+FP8_DTYPE = {"e4m3": torch.float8_e4m3fn, "e5m2": torch.float8_e5m2}
+
+def per_block_quant(x, block_size=128, fmt="e4m3"):
+    """按最后一维分块做 FP8 量化; x: [..., N] → (反量化后的值, 每块的缩放因子)
+    注意: 需要 torch >= 2.1 才有 float8_e4m3fn"""
+    assert x.shape[-1] % block_size == 0, "最后一维要能被 block_size 整除"
+    orig_shape = x.shape
+    n_blocks = orig_shape[-1] // block_size
+    xb = x.reshape(-1, n_blocks, block_size)                     # [M, n_blocks, B]
+
+    # 1. 每块一个 amax → 一个缩放因子（clamp_min 防止除零）
+    amax = xb.abs().amax(dim=-1, keepdim=True).clamp_min(1e-12)   # [M, n_blocks, 1]
+    scale = amax / FP8_MAX[fmt]
+
+    # 2. 量化到 FP8 再反量化（模拟「FP8 存、高精度用」）
+    x_q = (xb / scale).clamp(-FP8_MAX[fmt], FP8_MAX[fmt]).to(FP8_DTYPE[fmt])
+    x_hat = x_q.to(x.dtype) * scale
+
+    return x_hat.reshape(orig_shape), scale.reshape(-1, n_blocks)
+
+def fp8_gemm_sim(x, w, block_size=128):
+    """模拟 FP8 块级矩阵乘法: FP8 乘 + 高精度累加; x: [M, K]  w: [K, N]"""
+    # 激活按 1×128 的块量化（沿 K 维切块）
+    x_hat, _ = per_block_quant(x, block_size, fmt="e4m3")
+    # 权重按 128×128 的块量化
+    w_hat, _ = per_block_quant(w.t().contiguous(), block_size, fmt="e4m3")
+    # 真实实现是 FP8 张量核 + 高精度累加；这里用反量化后的值算等价的数学结果
+    return x_hat @ w_hat.t().contiguous()`,
+    keyPoints: [
+      '核心一句话: FP8 训练的成败在缩放粒度，块级缩放把离群值的影响关在块内',
+      '为什么必须分块: FP8 的动态范围很窄（e4m3 只有 3 位尾数、上界 448），而激活分布是重尾的；整张量共享 scale 时，为了装下离群值，正常值全跌到只剩几档可表示',
+      'e4m3 与 e5m2 的分工: 前向用 e4m3（要精度），反向梯度用 e5m2（要动态范围）',
+      '累加精度不能省: FP8 只用来做乘，累加必须回到高精度，否则误差快速累积',
+      '块大小的权衡: 块越小，离群值影响越小但缩放因子的存储和计算开销越大；1×128（激活）和 128×128（权重）是常见折中',
+      '必须让缩放因子以可融合的方式参与: 真实实现把 scale 融进张量核的 epilogue，避免额外的反量化访存',
+      '和 BF16 混合精度的区别: BF16 混合精度靠「主权重 FP32 + 计算 BF16」保精度；FP8 靠「块级缩放 + 高精度累加」保精度，省的是带宽',
+    ],
+    source: 'original',
+  },
   // ===================== Inference =====================
   {
     id: 'infer-paged',
@@ -1140,25 +2180,36 @@ class CheckpointBlock(nn.Module):
     hot: 2,
     difficulty: 4,
     oneLiner: 'vLLM 核心，分页管理 KV Cache',
-    principle: '借鉴操作系统虚拟内存的分页思想，将 KV Cache 分成固定大小的块（页），通过块表映射到非连续物理内存。消除内存碎片和预分配浪费。',
+    principle: '借鉴操作系统虚拟内存的分页思想，将 KV Cache 分成固定大小的块（页），通过块表映射到非连续物理内存。相比传统 KV Cache 预分配 max_len 导致大量浪费和内存碎片，PagedAttention 按需分配，内存利用率可达 ~96%。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '逻辑块是连续的 token 块（如 16 tokens/block），物理块是 GPU 显存中的实际存储位置。通过块表（block table）将逻辑块映射到非连续的物理块，消除预分配浪费和内存碎片。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '预分配物理块池：physical_blocks = zeros(num_blocks, ...)',
+          '为序列分配物理块：allocate(seq_id, num_tokens)',
+          '写入 KV 到对应物理块：write(seq_id, position, key, value)',
+          '注意力计算时从物理块 gather K/V',
+          '序列结束时释放物理块：free(seq_id)',
+        ],
+      },
+    ],
     formula: '逻辑块: 连续的 token 块 (如 16 tokens/block)\n物理块: GPU 显存中的实际存储位置\n块表: logical_block → physical_block 映射\n\n内存利用率: ~96% (vs 传统 ~45%)',
-    flowDiagram: `传统 KV Cache:
-  [seq1: 预分配 max_len] [seq2: 预分配 max_len] ...
-  → 大量浪费 + 碎片
-
-PagedAttention:
-  逻辑视图:  seq₁ = [block₀, block₁, block₂, ...]
-             seq₂ = [block₀, block₁, ...]
-  │
-  块表 (block table):
-  │  logical → physical
-  │  seq₁_b₀ → GPU_block_3
-  │  seq₁_b₁ → GPU_block_7
-  │  seq₂_b₀ → GPU_block_1
-  │  ...
-  ↓
-  物理显存: [block₀][block₁][block₂]...[blockₙ] (非连续)
-  → 按需分配, 无碎片, 利用率 ~96%`,
+    flowDiagram: `# 传统：每个请求按 max_len 预分配
+! ✗ seq₁ 预分配 max_len，实际只用了很短一段，其余全程闲置
+! ✗ 剩余空洞拼不到一起 → 显存碎片化，利用率约 45%
+# PagedAttention：逻辑连续、物理离散
+逻辑视图 :: seq₁ = [block₀, block₁, block₂, …] :: 序列视角看仍是连续的
+块表 :: logical → physical :: seq₁_b₀ → GPU_block_3，seq₁_b₁ → GPU_block_7
+物理显存 :: [block₀][block₁][block₂]…[blockₙ] :: 非连续，按需分配
+注意力 :: 按块表取物理块 :: 对计算本身透明，用完即还
+$ 显存利用率 ~96%（传统预分配约 45%）
+> 前缀相同的请求可让块表指向同一批物理块，共享部分只存一份`,
     code: `# PagedAttention 核心思想 (简化伪代码)
 
 class PagedKVCache:
@@ -1211,23 +2262,35 @@ class PagedKVCache:
     hot: 2,
     difficulty: 4,
     oneLiner: '小模型草稿，大模型验证，加速 2-3x',
-    principle: '用一个小模型（draft model）快速生成多个候选 token，然后用大模型一次性验证。接受的 token 可以并行确认，拒绝则从拒绝位置重新开始。',
+    principle: '用一个小模型（draft model）快速生成多个候选 token，然后用大模型一次性验证。相比标准自回归每步只生成 1 token 很慢，投机解码一次验证多个 token，可加速 2-3x，且输出分布与只用大模型完全一致（无损）。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '小模型快速生成 γ 个候选 token，大模型一次性前向验证所有位置。通过接受/拒绝机制保证输出分布不变：accept if r < p_target(xᵢ) / p_draft(xᵢ)。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          'Draft model 生成 γ 个候选 token',
+          'Target model 一次性前向，得到所有位置的概率',
+          '逐 token 接受/拒绝：比较 p_target 和 p_draft',
+          '拒绝时从修正分布重新采样',
+          '全部接受时额外采样一个 bonus token',
+        ],
+      },
+    ],
     formula: '1. Draft model 生成 γ 个 token: x₁, x₂, ..., x_γ\n2. Target model 一次性前向，得到所有位置的概率\n3. 逐 token 接受/拒绝:\n   accept if r < p_target(xᵢ) / p_draft(xᵢ)\n4. 保证输出分布与只用 target model 完全一致!',
-    flowDiagram: `Draft model (小, 快):
-  prompt → x₁ → x₂ → x₃ → x₄ → x₅   (γ=5 个候选)
-           ↓      ↓      ↓      ↓      ↓
-Target model (大, 慢, 并行验证):
-  p(x₁)  p(x₂)  p(x₃)  p(x₄)  p(x₅)
-  │
-  ├── accept x₁ (p_t/p_d ≥ r) ✓
-  ├── accept x₂ ✓
-  ├── accept x₃ ✓
-  ├── reject x₄ (p_t/p_d < r) ✗ → 从 x₄ 重新采样
-  └── x₅ 不需要验证
-
-结果: 一次大模型前向 → 获得 3-4 个 token
-vs 标准: 一次大模型前向 → 只获得 1 个 token
-→ 加速 2-3x!`,
+    flowDiagram: `# Draft 先猜，Target 一次验证
+Draft model :: 小、快，自回归生成 γ 个候选
+x₁ → x₂ → x₃ → x₄ → x₅ :: 候选 token :: γ = 5，逐个猜出来
+Target model :: 大、慢，prompt 加候选一起喂进去，一次前向
+p(x₁) … p(x₅) :: 每个位置的概率 :: 一次算完，验证几乎是白送的
+! ✓ accept x₁、x₂、x₃：满足 r < p_target / p_draft
+! ✗ reject x₄：从 x₄ 按修正后的分布重新采样，x₅ 直接丢弃
+$ 一次大模型前向产出 3~4 个 token，而标准解码只有 1 个
+> 拒绝采样保证输出分布与「只用大模型」逐位一致，属于无损加速`,
     code: `import torch, torch.nn.functional as F
 
 @torch.no_grad()
@@ -1297,21 +2360,38 @@ def speculative_decode(draft_model, target_model, prompt_ids,
     hot: 3,
     difficulty: 3,
     oneLiner: '因果注意力 + 自回归，现代 LLM 标配',
-    principle: '只有 decoder 的 Transformer 架构。使用因果注意力（只能看到之前的 token），通过自回归方式逐 token 生成。GPT/LLaMA/Mistral 等主流 LLM 都采用此架构。',
+    principle: '只有 decoder 的 Transformer 架构。使用因果注意力（只能看到之前的 token），通过自回归方式逐 token 生成。相比 Encoder-Decoder 架构，Decoder-Only 统一训练和推理（训练时预测下一个 token，推理时生成），因果注意力保证自回归特性，适合生成任务。GPT/LLaMA/Mistral 等主流 LLM 都采用此架构。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '每层包含自注意力（带 causal mask）和 FFN，使用 Pre-Norm 结构（先归一化再进子层）。现代 LLM 标配：RMSNorm + SwiGLU + RoPE。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          'Token Embedding + Position Embedding (RoPE)',
+          '创建因果掩码：mask = tril(ones(S, S))',
+          '逐层处理：x = x + Attn(LN(x), mask); x = x + FFN(LN(x))',
+          '最终归一化：x = RMSNorm(x)',
+          'LM Head：logits = x @ W_vocab',
+          '训练：Shift + CrossEntropy；推理：Sample next token',
+        ],
+      },
+    ],
     formula: '每层:\n  x = x + Attention(LayerNorm(x), causal_mask)\n  x = x + FFN(LayerNorm(x))\n\n生成: P(x₁...xₙ) = Π P(xₜ|x<t)',
-    flowDiagram: `输入 tokens: [B, S]
-       │
-  Token Embedding + Position Embedding (RoPE/ALiBi)
-       │
-  ┌─── Transformer Block ×N ───┐
-  │  x = x + Attn(LN(x), causal) │  ← Pre-Norm
-  │  x = x + FFN(LN(x))          │  ← SwiGLU
-  └──────────────────────────────┘
-       │
-  RMSNorm → LM Head → logits [B, S, V]
-       │
-  Shift + CrossEntropy (训练)
-  Sample next token (推理)`,
+    flowDiagram: `# 一路 decoder 堆到顶
+tokens :: [B, S] :: 输入
+Embedding + RoPE :: [B, S, D] :: 词嵌入叠加位置信息
++ 注意力子层 :: x = x + Attn(LN(x), causal_mask) :: 因果掩码，只能看左边
++ FFN 子层 :: x = x + FFN(LN(x)) :: Pre-Norm 加残差
+Transformer Block × N :: 上述两个子层重复 N 次
+RMSNorm → LM Head :: logits [B, S, V]
+! ✓ 训练 :: shift + CrossEntropy，所有位置一次算完
+! ✓ 推理 :: 取末位采样下一个 token，拼回去再跑一轮
+$ 现代标配：RMSNorm、SwiGLU、RoPE、Pre-Norm
+> 训练与推理共用一套权重，形式统一是 scaling 的前提`,
     code: `import torch, torch.nn as nn
 
 class DecoderBlock(nn.Module):
@@ -1353,6 +2433,101 @@ class GPTModel(nn.Module):
     ],
     source: 'cdhx',
   },
+  {
+    id: 'arch-mtp',
+    title: 'Multi-Token Prediction',
+    titleCn: '多 Token 预测',
+    category: 'Architecture',
+    hot: 3,
+    difficulty: 4,
+    oneLiner: '一次预测未来 n 个 token，同一份数据给出 n 倍训练信号',
+    principle: '在主模型预测下一个 token 之外，串行接上若干 MTP 模块，每个模块用「上一层 MTP 的隐状态 + 第 i+k 个 token 的 embedding」去预测第 i+1+k 个 token。训练时提供更密集的监督信号，迫使隐状态包含更长程的前瞻性；推理时这些模块可以直接当投机解码的 draft，几乎白送一个加速器。Emb 与 lm_head 和主模型共享，参数开销很小；代价是串行结构让模块 k 必须等模块 k-1，训练时还要多算 k 个模块的前向。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '在主干之外串行接上若干 MTP 模块，第 k 个模块预测第 i+1+k 个 token，让同一份数据提供 k 倍的监督信号。模块的输入是「上一层 MTP 的隐状态 + 第 i+k 个 token 的 embedding」，逼着隐状态携带更长程的信息。推理时这些模块天然就是一个 draft 模型，可以直接接投机解码 —— 一份结构两处收益。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '主干输出 h⁰: [B, T, D]，接 lm_head 预测 x₂，这是主损失。',
+          '第 k 个模块：h^k = M_k[RMSNorm(h^{k-1}) ; RMSNorm(Emb(x_{i+k}))]，把上一层隐状态与目标 token 的 embedding 拼起来。',
+          '每个模块各接 lm_head 预测 x_{i+1+k}，得到辅助损失。',
+          '总损失 L = L_main + (λ/D)·Σ_k Σ_i CE(...)，λ 典型取 0.3（前 10T tokens），之后衰减到 0.1。',
+        ],
+      },
+    ],
+    formula: '串行 MTP（DeepSeek-V3 的做法）:\n  第 k 个 MTP 模块:\n    h_i^k = M_k[ RMSNorm(h_i^{k-1}) ; RMSNorm(Emb(x_{i+k})) ]\n    p_{i+k+1} = lm_head(h_i^k)\n\n  损失:\n    L_MTP   = (λ / D) · Σ_k Σ_i CE( p_{i+k+1} , x_{i+1+k} )\n    L_total = L_main + L_MTP\n\n  典型取值: λ = 0.3（前 10T tokens），之后衰减到 0.1',
+    flowDiagram: `# 主干之外串行接若干 MTP 模块
+x :: [x₁, x₂, x₃, x₄, x₅] :: 输入序列
+主干 Transformer :: h⁰ [B, T, D] → lm_head → 预测 x₂ :: 主损失 L_main
++ MTP 模块 1 :: h¹ = M1[h⁰; Emb(x₂)] → 预测 x₃ :: 辅助损失
++ MTP 模块 2 :: h² = M2[h¹; Emb(x₃)] → 预测 x₄ :: 辅助损失
++ MTP 模块 3 :: h³ = M3[h²; Emb(x₄)] → 预测 x₅ :: 辅助损失
+$ L = L_main + (λ/D)·Σ_k Σ_i CE(第 k 个预测, 目标)，λ 典型 0.3
+> Emb 与 lm_head 与主模型共享，参数开销很小
+> 推理时这些模块直接当 draft，几乎白送一个投机解码加速器`,
+    code: `import torch, torch.nn as nn, torch.nn.functional as F
+
+class RMSNorm(nn.Module):
+    def __init__(self, d, eps=1e-6):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(d))
+        self.eps = eps
+
+    def forward(self, x):
+        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps) * self.weight
+
+class MTPModule(nn.Module):
+    """一个 MTP 模块: 拼接上一层隐状态与下一个 token 的 embedding，再过一个 Transformer 块"""
+
+    def __init__(self, d_model, n_heads=8):
+        super().__init__()
+        self.norm_h = RMSNorm(d_model)
+        self.norm_e = RMSNorm(d_model)
+        self.proj = nn.Linear(2 * d_model, d_model, bias=False)   # 2d → d
+        self.block = nn.TransformerEncoderLayer(
+            d_model, n_heads, dim_feedforward=4 * d_model,
+            batch_first=True, norm_first=True)
+
+    def forward(self, h_prev, tok_emb):
+        # h_prev:  [B, T, D] 上一层 MTP 的隐状态
+        # tok_emb: [B, T, D] 第 i+k 个 token 的 embedding
+        x = self.proj(torch.cat([self.norm_h(h_prev), self.norm_e(tok_emb)], dim=-1))
+        return self.block(x)                                      # [B, T, D]
+
+def mtp_loss(mtp_modules, h0, input_ids, embed, lm_head, num_heads=1, lam=0.3):
+    """多 token 预测损失; h0: [B, T, D] 主模型最后一层隐状态
+    返回: (MTP 部分损失, 各层预测的 logits 列表)"""
+    total, h_prev, logits_list = 0.0, h0, []
+
+    for k in range(1, num_heads + 1):
+        if input_ids.size(1) - k <= 1:
+            break
+        target = input_ids[:, 1 + k:]             # 目标: x_{i+1+k}
+        tok_emb = embed(input_ids[:, k:-1])       # 输入: x_{i+k}
+        h_prev = mtp_modules[k - 1](h_prev[:, :-1], tok_emb)
+
+        logits = lm_head(h_prev)                  # [B, T-k-1, V]
+        logits_list.append(logits)
+        # 用 sum 再统一除以 D，把 k 个预测的损失归一到同一量级
+        total = total + F.cross_entropy(
+            logits.reshape(-1, logits.size(-1)), target.reshape(-1), reduction="sum")
+
+    return lam * total / input_ids.size(1), logits_list`,
+    keyPoints: [
+      '和「并行预测头」的区别: Meta 的早期方案给每个未来位置一个独立头，彼此不依赖；DeepSeek-V3 的 MTP 是串行的，第 k 层吃第 k-1 层的隐状态，保留了因果链',
+      '为什么能提升效果: 强迫隐状态编码更长程的信息，相当于给模型的「规划能力」加正则',
+      '参数开销很小: embedding 和 lm_head 与主模型共享，每个 MTP 模块只有一个投影 + 一个 Transformer 块',
+      '注意偏移: 模块的输入是 x_{i+k}，目标是 x_{i+1+k} —— 整体比主模型前移 k 步，别把两者搞反',
+      '为什么要除以 D: 把 k 个预测的损失归一化回与主损失同一量级，否则 k 越大辅助损失越压过主损失',
+      'λ 为什么要衰减: 训练后期主损失收敛，辅助信号的边际价值下降，过大反而干扰',
+      '推理时的双重身份: 训练时是辅助损失，推理时是投机解码的 draft —— 一次前向能给多个候选 token',
+    ],
+    source: 'original',
+  },
   // ===================== RL =====================
   {
     id: 'rl-gae',
@@ -1362,22 +2537,37 @@ class GPTModel(nn.Module):
     hot: 3,
     difficulty: 4,
     oneLiner: '偏差-方差折衷的 λ-return 优势估计',
-    principle: '通过 λ 参数在蒙特卡洛（低偏差高方差）和 TD(0)（高偏差低方差）之间折衷。λ=1 等价于 MC，λ=0 等价于 TD(0)。',
+    principle: '通过 λ 参数在蒙特卡洛（低偏差高方差）和 TD(0)（高偏差低方差）之间折衷。λ=1 等价于 MC（无偏差但高方差），λ=0 等价于 TD(0)（高偏差但低方差），GAE 通过 λ 在两者之间取得平衡。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '利用 TD error 的指数加权求和来估计优势函数。通过 λ 参数控制不同时间步 TD error 的权重，实现偏差-方差的折衷。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '计算 TD error：δ_t = r_t + γ·V(s_{t+1}) - V(s_t)',
+          '从后向前递推：A_t = δ_t + γλ·A_{t+1}',
+          '计算 returns：returns = advantages + values[:-1]',
+          '归一化优势（可选）：advantages = (advantages - mean) / std',
+        ],
+      },
+    ],
     formula: 'δ_t = r_t + γV(s_{t+1}) - V(s_t)          # TD error\nA_t = Σ_{l=0}^{T-t} (γλ)^l · δ_{t+l}          # GAE\n\n= δ_t + γλ·δ_{t+1} + (γλ)²·δ_{t+2} + ...\n\nλ=1: A_t = MC return - V(s_t)    (无偏差)\nλ=0: A_t = δ_t = r_t + γV(s_{t+1}) - V(s_t)  (高偏差)',
-    flowDiagram: `轨迹: s₀,a₀,r₁,s₁,a₁,r₂,...,s_T
-
-TD error:  δ_t = r_t + γ·V(s_{t+1}) - V(s_t)
-
-GAE(γ, λ):
-  A_T     = δ_T
-  A_{T-1} = δ_{T-1} + γλ·δ_T
-  A_{T-2} = δ_{T-2} + γλ·δ_{T-1} + (γλ)²·δ_T
-  ...
-
-递推实现:
-  A_T = δ_T
-  for t = T-1, T-2, ..., 0:
-    A_t = δ_t + γλ · A_{t+1}`,
+    flowDiagram: `# 两个端点
+! ✗ MC return：无偏差，但方差随轨迹长度增长
+! ✗ TD(0)：方差小，但严重依赖 V(s) 的准确度，偏差大
+# GAE：各阶 TD 误差的几何加权和
+δ_t = r_t + γ·V(s_{t+1}) - V(s_t) :: TD 误差，GAE 的原子单元
+A_t = Σ_l (γλ)^l · δ_{t+l} :: 从 t 往后所有 TD 误差按 (γλ)^l 加权
+A_t = δ_t + γλ·δ_{t+1} + (γλ)²·δ_{t+2} + … :: 展开形式
+# 反向递推实现
+A_T = δ_T :: 从末端起步
+A_t = δ_t + γλ·A_{t+1} :: 往前推一步，不必真的算级数
+$ λ=1 望远镜式相消 → MC return - V(s_t)；λ=0 → 只剩 δ_t，退化成 TD(0)
+> 通常取 γ=0.99、λ=0.95，等于「几乎 MC 但略带衰减」`,
     code: `import torch
 
 def compute_gae(rewards, values, gamma=0.99, lam=0.95):
@@ -1419,17 +2609,36 @@ def compute_gae(rewards, values, gamma=0.99, lam=0.95):
     hot: 2,
     difficulty: 2,
     oneLiner: '链式法则，深度学习的基石',
-    principle: '反向传播利用链式法则从输出向输入逐层计算梯度。计算图的前向传播保存中间变量，反向传播利用这些变量计算梯度。',
+    principle: '反向传播利用链式法则从输出向输入逐层计算梯度。计算图的前向传播保存中间变量，反向传播利用这些变量计算梯度。相比手动推导梯度，反向传播自动计算且高效（一次前向 + 一次反向），是深度学习训练的基础。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '链式法则：∂L/∂x = ∂L/∂y · ∂y/∂x。前向传播时保存中间变量（计算图），反向传播时利用这些变量和链式法则逐层计算梯度。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          '前向传播：逐层计算并保存中间变量',
+          '计算损失：L = loss(y_pred, y_true)',
+          '反向传播：从输出向输入逐层计算梯度',
+          '常见梯度：y=Wx → ∂L/∂W = ∂L/∂y · xᵀ；ReLU → ∂L/∂x = ∂L/∂y · (x>0)',
+          '参数更新：θ = θ - lr · ∂L/∂θ',
+        ],
+      },
+    ],
     formula: '链式法则: ∂L/∂x = ∂L/∂y · ∂y/∂x\n\n常见梯度:\n  y = Wx:     ∂L/∂W = ∂L/∂y · xᵀ,  ∂L/∂x = Wᵀ · ∂L/∂y\n  y = ReLU(x): ∂L/∂x = ∂L/∂y · (x > 0)\n  y = softmax: ∂L/∂z = y - one_hot(target)  (配合 CE)',
-    flowDiagram: `前向 (计算图):
-  x → [W₁] → h → [ReLU] → a → [W₂] → ŷ → [Loss] → L
-       保存 x,h,a,ŷ 用于反向
-
-反向 (链式法则):
-  ∂L/∂ŷ ← [Loss']
-  ∂L/∂W₂ = ∂L/∂ŷ · aᵀ     ∂L/∂a = W₂ᵀ · ∂L/∂ŷ
-  ∂L/∂h = ∂L/∂a · (a>0)   [ReLU']
-  ∂L/∂W₁ = ∂L/∂h · xᵀ     ∂L/∂x = W₁ᵀ · ∂L/∂h`,
+    flowDiagram: `# 前向：按拓扑顺序算，顺手保存中间量
+x → W₁ → h → ReLU → a → W₂ → ŷ → Loss → L :: 保存 x、h、a、ŷ 供反向使用
+# 反向：从输出往输入逐层乘局部梯度
+∂L/∂ŷ :: 从 Loss 的导数起步
+∂L/∂W₂ = ∂L/∂ŷ · aᵀ :: 权重梯度只需输出的梯度和该层输入
+∂L/∂a = W₂ᵀ · ∂L/∂ŷ :: 继续往左传
+∂L/∂h = ∂L/∂a · (a>0) :: ReLU 的局部导数，负区间直接归零
+∂L/∂W₁ = ∂L/∂h · xᵀ :: 每层模式完全相同，逐层套用
+$ 一次前向 + 一次反向 = 全部参数的梯度，复杂度与前向同阶
+> 代价是中间激活要留到反向，显存随层数线性增长`,
     code: `import torch
 
 # 手动实现简单两层网络的反向传播
@@ -1478,20 +2687,43 @@ class TwoLayerNet:
     category: 'Basics',
     hot: 2,
     difficulty: 1,
-    oneLiner: 'ReLU/GELU/SiLU 及其梯度',
-    principle: '激活函数引入非线性。ReLU 简单高效但有 dead neuron 问题；GELU 平滑更优（Transformer 常用）；SiLU/Swish 用于门控机制。',
+    oneLiner: 'ReLU / GELU / SiLU 及其梯度',
+    principle: '激活函数引入非线性。ReLU 简单高效但有 dead neuron 问题；GELU 平滑更优（Transformer 常用）；SiLU/Swish 用于门控机制。ReLU 实现最便宜，GELU、SiLU 平滑、处处可导、训练更稳，代价是要算 exp 或 erf，比 max 贵一些。',
+    principleSections: [
+      {
+        title: '核心思想',
+        items: [
+          '用一个逐元素的非线性函数把线性层的结果掰弯，让「多层」真正带来表达力 —— 没有激活函数时，多层线性变换叠起来仍然等价于单层线性变换。现代选择集中在平滑版 ReLU 上：负区间给一点非零梯度，避免神经元被永久关死。门控形式的 x·σ(x) 顺带把「通过多少」也变成可学的，这正是 SwiGLU 的基础。',
+        ],
+      },
+      {
+        title: '算法步骤',
+        items: [
+          'ReLU(x) = max(0, x)：正区间导数恒为 1，负区间恒为 0。',
+          'GELU(x) = x·Φ(x)（Φ 是标准正态 CDF）：负区间仍有小梯度，是 ReLU 的平滑版。',
+          'SiLU(x) = x·σ(x)：σ 充当 0~1 的开关，负区间先降后回升，自带门控。',
+          '三者都是逐元素作用，形状完全不变，可以随意替换。',
+        ],
+      },
+    ],
     formula: 'ReLU(x) = max(0, x)            ReLU\'(x) = x > 0\nGELU(x) = x · Φ(x)             Φ = standard normal CDF\nSiLU(x) = x · σ(x)            SiLU\'(x) = SiLU(x) + σ(x)(1-SiLU(x))\nSwish = SiLU (same thing)',
-    flowDiagram: `     ReLU              GELU              SiLU/Swish
-  y │     ╱         y │        ╱      y │        ╱
-    │    ╱             │      ╱         │      ╱
-    │   ╱              │    ╱           │    ╱
-    │──╱────── x        │──╱──────── x    │──╱──────── x
-    │                   │  ╱ (平滑)       │ ╱ (门控)
+    flowDiagram: `# 三种激活函数：形状决定行为
+x :: [..., D] :: 输入张量
++ ReLU :: max(0, x) :: 负区间恒为 0，正区间线性
++ GELU :: x·Φ(x) :: 平滑版 ReLU，负区间仍有小梯度
++ SiLU :: x·σ(x) :: 自带门控，负区间先降后回升
+y :: [..., D] :: 逐个元素作用，形状不变
 
-使用场景:
-  ReLU:  标准 FFN (原始 Transformer)
-  GELU:  BERT, GPT-2/3
-  SiLU:  SwiGLU (LLaMA, PaLM)`,
+# 梯度
++ ReLU' :: x > 0 :: 只有 0 / 1 两档，不连续
++ GELU' :: 平滑过渡 :: 处处可导
++ SiLU' :: 平滑 + 门控 :: 处处可导
+
+# 使用场景
++ ReLU :: 原始 Transformer 的标准 FFN
++ GELU :: BERT、GPT-2/3
++ SiLU :: SwiGLU 门控（LLaMA、PaLM）
+> ReLU 负区间梯度为 0，神经元长期落在负区间就再也学不动（dead neuron）`,
     code: `import torch
 import torch.nn.functional as F
 
@@ -1546,4 +2778,5 @@ export const categories: { name: Category; icon: string; description: string }[]
 export const sources = {
   ckd0817: { name: 'LLM-Interview-Code', url: 'https://github.com/ckd0817/LLM-Interview-Code', stars: 879 },
   cdhx: { name: 'LLM-Code-Hot-100', url: 'https://github.com/cdhx/LLM-Code-Hot-100', stars: 48 },
+  original: { name: '本项目原创', url: 'https://github.com/zeng-yirong/awesome-llm-interview-code', stars: 0 },
 };

@@ -34,18 +34,23 @@ PPO 的简化版：对同一问题生成 G 个回答，用组内归一化的奖�
 ## 📊 张量流程图
 
 ```
-对同一问题 q 生成 G 个回答: o₁, o₂, ..., o_G
-  │
-  ├── reward model → r₁, r₂, ..., r_G: [G]
-  │
-  ├── 组内归一化: Aᵢ = (rᵢ - mean) / (std + ε)
-  │
-  └── PPO clip loss(Aᵢ) + β · KL penalty
-       (不需要 Critic 网络!)
+# 组内采样：同一个问题采 G 个回答
+问题 q :: 同一个 prompt
++ 回答 o₁ :: 奖励 r₁
++ 回答 o₂ :: 奖励 r₂
++ 回答 o_G :: 奖励 r_G（共 G 个，共享同一个 mean/std）
+组内归一化 :: Aᵢ = (rᵢ - mean) / (std + ε) :: 有正有负才有梯度方向
+$ 组内统计量代替 Critic：整个训练不需要 Value Head
 
-对比 PPO:
-  PPO:  需要 Critic 估计 V(s) → A = r + γV - V
-  GRPO: 组内归一化 → A = (r - mean) / std
+# 策略更新（PPO 的 clip 目标）
+比率 ρᵢ :: πθ(oᵢ|q) / πθ_old(oᵢ|q)
+做 clip :: clip(ρᵢ, 1-ε, 1+ε) :: 限制单步更新幅度
+$ L = -E[min(ρᵢAᵢ, clip(ρᵢ)·Aᵢ)] + β·KL(π‖π_ref)
+> 显式 KL 惩罚拉住参考策略，防止跑偏
+
+# 与 PPO 的对比
+> PPO:  需要 Critic 估计 V(s) → A = r + γV - V
+> GRPO: 组内归一化 → A = (r - mean) / std，省掉 Critic
 ```
 
 ## 💻 代码实现

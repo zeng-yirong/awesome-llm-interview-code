@@ -33,13 +33,15 @@ logits[:, :-1] 预测 labels[:, 1:]
 ## 📊 张量流程图
 
 ```
-logits: [B, S, V]  ─→ logits[:, :-1]  → [B, S-1, V]
-                                           │
-labels: [B, S]       ─→ labels[:, 1:]   → [B, S-1]
-                                           │
-                                    flatten → CE loss
-                                           │
-                                     loss: scalar
+# shift 对齐：位置 t 的输出预测位置 t+1 的 token
+logits :: [B, S, V] :: 每个位置对整个词表的打分
+labels :: [B, S] :: 真实 token 下标，prompt 段置 -100
++ 预测 :: logits[:, :-1] → [B, S-1, V] :: 丢掉最后一个位置，它没有下一个 token
++ 目标 :: labels[:, 1:] → [B, S-1] :: 丢掉第一个位置，它没有被谁预测
+logp = log_softmax(logits, -1) :: [B, S-1, V] :: 直接取对数概率，避免下溢
+loss = -mean(logp[range, 目标]) :: 只取正确 token 那一项，结果是标量
+$ 梯度 = softmax(logits) - one_hot(目标)，预测越离谱梯度越大
+> SFT 时 prompt 段的 label 置 -100，ignore_index 把它们排除出分母
 ```
 
 ## 💻 代码实现

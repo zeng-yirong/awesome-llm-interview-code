@@ -33,15 +33,20 @@ Flash Attention: IO = O(N²d/M)  (M=SRAM大小)
 ## 📊 张量流程图
 
 ```
-标准 Attention:                Flash Attention:
-  Q → scores[N×N] → softmax → @V    Q分块 → 逐块计算 → Online Softmax → 输出
-      ↑ 写入HBM (O(N²))                    ↑ 只在SRAM (O(N))
+# 标准实现：把中间矩阵物化到 HBM
+S = Q·Kᵀ :: [B, H, S, S] :: 一次写完整个分数矩阵
+P = softmax(S) :: [B, H, S, S] :: 再整块读回来做 softmax
+O = P·V :: [B, H, S, Dh] :: 第三次读写 O(S²) 的数据
+$ IO = O(S²)：瓶颈在显存带宽，不在乘加
 
-Online Softmax 三步:
-  Pass 1: 找每行最大值 m (数值稳定)
-  Pass 2: 计算 exp(x-m) 的和 l (分母)
-  Pass 3: 计算 exp(x-m)/l * V (分子)
-  → 不需要存储完整 N×N 矩阵!
+# Flash Attention：分块 + Online Softmax
++ Q 分块 :: [B, H, Br, Dh] :: 常驻 SRAM，反复使用
++ K, V 分块 :: [B, H, Bc, Dh] :: 从 HBM 流式读入，每个 Q 块读一遍
+m = max(m, rowmax(S_block)) :: [B, H, Br] :: 维护每行的 running max
+l = l·exp(m_old - m) + rowsum(exp(S_block - m)) :: [B, H, Br] :: 修正后的分母
+O = O·exp(m_old - m) + exp(S_block - m)·V_block :: [B, H, Br, Dh] :: 旧结果缩放后叠加新块
+> 全程不需要 [S, S] 矩阵，每行只维护 m、l、O 三个状态
+$ IO 从 O(S²) 降到 O(S²d/M)，M 是 SRAM 大小；结果与标准 softmax 数值等价
 ```
 
 ## 💻 代码实现

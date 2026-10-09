@@ -35,22 +35,19 @@ Q 压缩: c_q = W_down_q(x) → W_up_q → [B, S, H, (Dh+Dr)]
 ## 📊 张量流程图
 
 ```
-x: [B, S, D]
-  │
-  ├── kv_down → [B, S, C]  ←── 只缓存这个! (压缩后)
-  │       │
-  │    kv_up → split → k_content, k_rope, v
-  │                                │
-  ├── q_down → [B, S, C]         │
-  │       │                       │
-  │    q_up → split → q_content, q_rope
-  │                                │
-  │    RoPE(q_rope, k_rope) ──────┘
-  │            │
-  │    q = cat(q_content, q_rope)
-  │    k = cat(k_content, k_rope)
-  │            │
-  └── SDPA(q, k, v) → Wo → output
+# 只缓存低维潜变量，用的时候再恢复
+x :: [B, S, D] :: 输入
+c_kv = x·W_dkv :: [B, S, C] :: 下投影到潜空间，C 远小于 H·Dh
+> 进 cache 的只有 c_kv —— 压缩发生在存储维度上，不是头数上
+kv = c_kv·W_ukv :: [B, S, H·(Dh+Dr+Dh)] :: 用时上投影恢复
+split :: k_content, k_rope, v :: 内容分量与 RoPE 分量分开
++ q_content :: [B, S, H, Dh] :: 同样先低秩压缩再上投影
++ q_rope :: [B, S, H, Dr] :: 不压缩，单独留给 RoPE
+q = cat(q_content, q_rope) :: [B, S, H, Dh+Dr] :: 拼成完整的查询
+k = cat(k_content, k_rope) :: [B, S, H, Dh+Dr] :: 键同样拼接
+O = SDPA(q, k, v)·W_o :: [B, S, D] :: 之后与普通注意力完全一致
+$ Cache 从 2·G·Dh 降到 C：DeepSeek-V2 取 C=512，压缩比 10× 以上
+> RoPE 必须单独走不压缩的分量：它是位置相关的，挤进低秩空间会被压坏
 ```
 
 ## 💻 代码实现

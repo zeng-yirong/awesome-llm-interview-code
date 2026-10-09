@@ -34,13 +34,13 @@ loss = -logsigmoid(β · logits)
 ## 📊 张量流程图
 
 ```
-chosen:     policy_logp_w - ref_logp_w  = r_w  (隐式奖励)
-rejected:   policy_logp_l - ref_logp_l  = r_l
-
-logits = r_w - r_l     (chosen 比 rejected 好多少)
-loss = -logsigmoid(β × logits)     (越大越好 → loss 越小)
-
-β 控制偏离参考模型的程度
+# 隐式奖励：策略相对参考策略的对数比率
++ chosen :: policy_logp_w - ref_logp_w = r_w :: 优选回答的隐式奖励
++ rejected :: policy_logp_l - ref_logp_l = r_l :: 拒绝回答的隐式奖励
+logits = r_w - r_l :: chosen 比 rejected 好多少
+loss = -logsigmoid(β · logits) :: logits 越大 loss 越小
+$ r = β·log(π/π_ref) + 常数 —— 把 RLHF 的闭式解代回 Bradley-Terry
+> 参考模型的 logp 必须 no_grad，它只是固定锚点
 ```
 
 ## 💻 代码实现

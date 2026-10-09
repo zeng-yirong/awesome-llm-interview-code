@@ -34,16 +34,19 @@ repeat_kv: K,V → [B, H, S, Dh]   (复制 G→H)
 ## 📊 张量流程图
 
 ```
-Q: [B, H, S, Dh]  ─────────────────────────┐
-                                            │ SDPA
-K: [B, G, S, Dh] → repeat_kv → [B, H, S, Dh] ─┤
-V: [B, G, S, Dh] → repeat_kv → [B, H, S, Dh] ─┘
+# Q 有 H 个头，K/V 只有 G 组
++ Q :: [B, H, S, Dh] :: 全部 H 个头各自独立
++ K, V :: [B, G, S, Dh] :: 只有 G 组，G < H
+repeat_kv :: G → H :: 每份 KV 复制 H/G 次，与 Q 的头数对齐
+SDPA :: [B, H, S, Dh] :: 之后与 MHA 完全相同
+$ KV Cache 降到 G/H；LLaMA 2 70B 取 G=8、H=64，只剩 1/8
 
-repeat_kv 实现:
-  x: [B, G, S, Dh]
-  → x[:,:,None,:,:]          [B, G, 1, S, Dh]
-  → .expand(B, G, H/G, S, Dh) [B, G, H/G, S, Dh]
-  → .reshape(B, H, S, Dh)    [B, H, S, Dh]
+# repeat_kv：unsqueeze → expand → reshape
+x :: [B, G, S, Dh] :: 输入，G 份 KV
+unsqueeze :: [B, G, 1, S, Dh] :: 插一个复制维
+expand :: [B, G, H/G, S, Dh] :: 只建视图，不占新内存
+reshape :: [B, H, S, Dh] :: 到这里才真正复制
+> MHA: G = H；MQA: G = 1；GQA: 1 < G < H
 ```
 
 ## 💻 代码实现

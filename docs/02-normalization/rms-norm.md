@@ -31,13 +31,14 @@ RMSNorm(x) = x / √(mean(x²) + ε) × γ
 ## 📊 张量流程图
 
 ```
-x: [B, S, D]
-  │
-  ├── x.float().pow(2).mean(-1, keepdim=True) → ms: [B,S,1]
-  ├── rsqrt(ms + eps) → rsqrt: [B,S,1]
-  │
-  └── (x.float() * rsqrt).type_as(x) × γ → [B, S, D]
-                                              γ: [D] (只有缩放, 无偏移)
+# 只压尺度，不管中心
+x :: [B, S, D] :: 残差流的输入
+x32 = x.float() :: [B, S, D] :: 升 fp32，bf16 下 x² 动态范围不够
+ms = mean(x32², -1, keepdim=True) :: [B, S, 1] :: 均方，只沿特征维
+r = rsqrt(ms + ε) :: [B, S, 1] :: ε 取 1e-5，纯数值保护
+y = (x32·r).type_as(x)·γ :: [B, S, D] :: 只有一个可学习参数 γ: [D]
+$ 相比 LayerNorm 少了求均值与减均值，归约次数减半、参数量减半
+> LLaMA、PaLM、Qwen 都把它放在每个子层之前
 ```
 
 ## 💻 代码实现

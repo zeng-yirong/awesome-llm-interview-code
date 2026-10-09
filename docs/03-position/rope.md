@@ -34,21 +34,18 @@ rotate_half([x₁, x₂]) = [-x₂, x₁]
 ## 📊 张量流程图
 
 ```
-预计算:
-  inv_freq = 1/(10000^(2i/d)): [d/2]
-  angles = outer(pos, inv_freq): [S, d/2]
-  cos, sin = cos(angles), sin(angles): [S, d]
-  (复制一份匹配完整维度)
+# 预计算：每个位置、每个维度对对应的旋转角
+inv_freq = 1/10000^(2i/d) :: [d/2] :: i = 0..d/2-1，靠后的维度对频率更低
+angles = outer(pos, inv_freq) :: [S, d/2] :: 位置 × 维度对
+cos, sin = cos(angles), sin(angles) :: [S, d] :: 复制一份拼成完整维度，好与 [B,S,H,D] 广播
 
-前向:
-  q: [B, S, H, D] ──┐
-                     ├─ q' = q×cos + rotate_half(q)×sin
-  cos,sin: [1,S,1,D] ┘
-  k: [B, S, H, D] ──→ k' = k×cos + rotate_half(k)×sin
-
-rotate_half(x):
-  x1, x2 = chunk(x, 2, dim=-1)    # 各 [B,S,H,D/2]
-  return cat(-x2, x1, dim=-1)     # 旋转90°
+# 旋转：只作用在 Q、K 上
+rotate_half(x) :: cat(-x₂, x₁) :: 后半段取负拼到前面，等价于旋转 90°
++ q' = q·cos + rotate_half(q)·sin :: [B, S, H, D] :: 查询被旋转
++ k' = k·cos + rotate_half(k)·sin :: [B, S, H, D] :: 键被旋转同样的角度
+> v 不参与旋转：它是被加权求和的内容，本身与位置无关
+$ (R_m q)·(R_n k) = qᵀ·R_{n-m}·k —— 点积里只剩相对位置 n - m
+> 基频 10000 是超参，直接外推到远超训练长度时高频维度会震荡，所以有 NTK-aware、线性插值等改法
 ```
 
 ## 💻 代码实现
