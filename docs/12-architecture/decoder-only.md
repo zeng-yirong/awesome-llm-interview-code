@@ -4,12 +4,19 @@
 
 ## 📌 原理与思想
 
-只有 decoder 的 Transformer 架构。使用因果注意力（只能看到之前的 token），通过自回归方式逐 token 生成。GPT/LLaMA/Mistral 等主流 LLM 都采用此架构。
+### 核心概念
+只有 decoder 的 Transformer 架构。使用因果注意力（只能看到之前的 token），通过自回归方式逐 token 生成。相比 Encoder-Decoder 架构，Decoder-Only 统一训练和推理（训练时预测下一个 token，推理时生成），因果注意力保证自回归特性，适合生成任务。GPT/LLaMA/Mistral 等主流 LLM 都采用此架构。
 
-**为什么用 Decoder-Only？**
-- 统一训练和推理：训练时预测下一个 token，推理时生成
-- 因果注意力保证自回归特性
-- 适合生成任务
+### 核心思想
+每层包含自注意力（带 causal mask）和 FFN，使用 Pre-Norm 结构（先归一化再进子层）。现代 LLM 标配：RMSNorm + SwiGLU + RoPE。
+
+### 算法步骤
+1. Token Embedding + Position Embedding (RoPE)
+2. 创建因果掩码：mask = tril(ones(S, S))
+3. 逐层处理：x = x + Attn(LN(x), mask); x = x + FFN(LN(x))
+4. 最终归一化：x = RMSNorm(x)
+5. LM Head：logits = x @ W_vocab
+6. 训练：Shift + CrossEntropy；推理：Sample next token
 
 ## 📐 核心公式
 

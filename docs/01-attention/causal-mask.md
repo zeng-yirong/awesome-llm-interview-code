@@ -4,12 +4,17 @@
 
 ## 📌 原理与思想
 
-在 decoder 中使用下三角矩阵作为 mask，使得位置 i 只能关注位置 ≤i 的 token。这是自回归生成的基础。
+### 核心概念
+在 decoder 中使用下三角矩阵作为 mask，使得位置 i 只能关注位置 ≤i 的 token。这是自回归生成的基础，相比无 mask 的注意力，确保模型在训练时不会"看到未来"。
 
-**为什么需要因果掩码？**
-- 自回归模型在生成时只能看到之前的 token
-- 训练时通过因果掩码模拟这一过程
-- 使得模型可以并行训练所有位置
+### 核心思想
+通过下三角矩阵屏蔽未来位置的信息，使每个位置只能 attend 到当前及之前的 token。被屏蔽的位置填充 -inf，softmax 后变为 0，从而实现因果约束。
+
+### 算法步骤
+1. 创建下三角矩阵：mask = torch.tril(torch.ones(S, S))
+2. 调整维度：mask = mask.unsqueeze(0).unsqueeze(0) → [1, 1, S, S]
+3. 在注意力计算中应用：scores.masked_fill(mask == 0, -inf)
+4. Softmax 归一化：attn = softmax(scores)
 
 ## 📐 核心公式
 

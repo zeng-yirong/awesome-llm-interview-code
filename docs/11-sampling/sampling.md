@@ -4,12 +4,18 @@
 
 ## 📌 原理与思想
 
-Temperature 控制分布锐度；Top-k 只保留概率最高的 K 个 token；Top-p 保留累积概率达到 P 的最小集合。实践中常组合使用。
+### 核心概念
+Temperature 控制分布锐度；Top-k 只保留概率最高的 K 个 token；Top-p 保留累积概率达到 P 的最小集合。相比 Greedy（确定性但容易重复）和纯 Sampling（多样性但可能低质量），采样策略在质量和多样性之间取得平衡。实践中常组合使用。
 
-**为什么需要采样策略？**
-- Greedy (argmax): 确定性，但容易重复
-- Sampling: 增加多样性，但可能生成低质量 token
-- 采样策略: 在质量和多样性之间平衡
+### 核心思想
+Temperature 通过除以温度参数 T 调整分布锐度（T<1 更确定，T>1 更随机）。Top-k 固定保留 K 个候选，Top-p 动态选择累积概率达到 P 的最小集合，后者更灵活。
+
+### 算法步骤
+1. 应用 Temperature：logits = logits / T
+2. Top-k 过滤：只保留最大的 k 个，其余设为 -inf
+3. Top-p 过滤：排序后累积概率超过 p 的设为 -inf
+4. Softmax 归一化：probs = softmax(logits)
+5. 多项式采样：next_token = multinomial(probs)
 
 ## 📐 核心公式
 

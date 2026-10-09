@@ -4,12 +4,18 @@
 
 ## 📌 原理与思想
 
-将 FFN 替换为多个"专家"网络，Router 为每个 token 选择 Top-K 个专家处理。总参数量大但每次只激活部分，计算量可控。
+### 核心概念
+将 FFN 替换为多个"专家"网络，Router 为每个 token 选择 Top-K 个专家处理。总参数量大但每次只激活部分，计算量可控。相比 Dense 模型，MoE 可以增加模型容量但不增加计算量，如 Mixtral 8x7B 有 46.7B 参数但实际计算量仅约 12.9B。
 
-**为什么需要 MoE？**
-- 增加模型容量（参数量）但不增加计算量
-- 每个 token 只激活 K 个专家
-- Mixtral 8x7B: 46.7B 参数，实际计算量约 12.9B
+### 核心思想
+通过 Router 网络为每个 token 动态选择最相关的 K 个专家处理，实现稀疏激活。每个专家是独立的 FFN，只处理分配到的 token，最后加权融合。
+
+### 算法步骤
+1. Router 计算：logits = Router(x)，得到每个专家的得分
+2. Top-K 选择：选出得分最高的 K 个专家
+3. 权重归一化：weights = softmax(top_k_logits)
+4. 专家处理：每个 expert 处理分配到的 token
+5. 加权融合：output = Σ(weights[i] × expert[i](x))
 
 ## 📐 核心公式
 

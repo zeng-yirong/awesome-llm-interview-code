@@ -4,12 +4,20 @@
 
 ## 📌 原理与思想
 
-将 KV 先下投影压缩到低维潜空间（存入 Cache），再上投影恢复。压缩比可达 90%+，远超 GQA。
+### 核心概念
+将 KV 先下投影压缩到低维潜空间（存入 Cache），再上投影恢复。压缩比可达 90%+，远超 GQA 的 75%。相比 GQA，MLA 通过低秩压缩实现更极致的 KV Cache 压缩，是 DeepSeek-V2 的核心创新。
 
-**为什么需要 MLA？**
-- GQA: KV Cache 减少到 25%（8/32）
-- MLA: KV Cache 减少到 <10%
-- 通过低秩压缩实现极致效率
+### 核心思想
+利用低秩矩阵分解压缩 KV：先下投影到 latent_dim（存入 Cache），再上投影恢复完整的 K/V。Q 也使用低秩投影，但不缓存（只用于当前 token）。RoPE 只应用于 k_rope 和 q_rope 部分。
+
+### 算法步骤
+1. KV 下投影压缩：c_kv = W_down(x) → [B, S, latent_dim]
+2. KV 上投影恢复：K,V = W_up(c_kv) → split → k_content, k_rope, v
+3. Q 下投影压缩：c_q = W_down_q(x)
+4. Q 上投影恢复：q = W_up_q(c_q) → split → q_content, q_rope
+5. 应用 RoPE：q_rope, k_rope = rope(q_rope, k_rope)
+6. 合并内容：q = cat(q_content, q_rope), k = cat(k_content, k_rope)
+7. 计算注意力并输出投影
 
 ## 📐 核心公式
 

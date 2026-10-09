@@ -4,12 +4,18 @@
 
 ## 📌 原理与思想
 
-通过截断重要性采样比率 r_t = π_new/π_old 到 [1-ε, 1+ε]，限制策略更新幅度，防止策略崩溃。
+### 核心概念
+通过截断重要性采样比率 r_t = π_new/π_old 到 [1-ε, 1+ε]，限制策略更新幅度，防止策略崩溃。相比普通策略梯度容易更新过大导致崩溃，PPO 通过 clip 机制保证训练稳定性，是 ChatGPT/InstructGPT 的 RLHF 核心算法。
 
-**为什么需要 PPO？**
-- 策略梯度方法容易更新过大导致崩溃
-- PPO 通过 clip 限制更新幅度
-- ChatGPT/InstructGPT 的 RLHF 核心算法
+### 核心思想
+重要性采样比率 r_t 衡量新旧策略的差异。通过 clip 将 r_t 限制在 [1-ε, 1+ε] 范围内，当 A>0 时防止 ratio 过大（过度奖励），当 A<0 时防止 ratio 过小（过度惩罚），实现保守更新。
+
+### 算法步骤
+1. 计算重要性采样比率：ratio = exp(new_logp - old_logp)
+2. 截断比率：clipped = clamp(ratio, 1-ε, 1+ε)
+3. 计算未截断代理损失：surr1 = ratio × advantages
+4. 计算截断代理损失：surr2 = clipped × advantages
+5. 取较小值：loss = -mean(min(surr1, surr2))
 
 ## 📐 核心公式
 

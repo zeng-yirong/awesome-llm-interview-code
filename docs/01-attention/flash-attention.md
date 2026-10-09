@@ -4,12 +4,19 @@
 
 ## 📌 原理与思想
 
-将 Q/K/V 分成块，在 SRAM 中完成注意力计算，避免将 O(N²) 的注意力矩阵写入 HBM。利用 Online Softmax 算法，不需要存储完整的注意力矩阵。
+### 核心概念
+将 Q/K/V 分成块，在 SRAM 中完成注意力计算，避免将 O(N²) 的注意力矩阵写入 HBM。相比标准 Attention 的 O(N²) IO 复杂度，Flash Attention 将其降至 O(N²d/M)，大幅提升长序列训练/推理效率。
 
-**为什么需要 Flash Attention？**
-- 标准 Attention: IO = O(N²)（存注意力矩阵）
-- Flash Attention: IO = O(N²d/M)（M=SRAM大小）
-- GPU SRAM 快但小(20MB), HBM 慢但大(40GB)
+### 核心思想
+利用 Online Softmax 算法，分块计算注意力而不需要存储完整的 N×N 注意力矩阵。GPU SRAM 快但小(20MB)，HBM 慢但大(40GB)，算法设计围绕减少 HBM 访问。
+
+### 算法步骤
+1. 将 Q 分成块，逐块处理
+2. 对每个 Q 块，遍历所有 K/V 块
+3. 计算当前块的 attention scores
+4. Online Softmax 更新：维护最大值 m 和分母 l
+5. 累加输出：O = O * exp(m_old - m_new) + P @ V_block
+6. 最终归一化：O = O / l
 
 ## 📐 核心公式
 

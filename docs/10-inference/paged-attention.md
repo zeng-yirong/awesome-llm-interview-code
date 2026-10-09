@@ -4,12 +4,18 @@
 
 ## 📌 原理与思想
 
-借鉴操作系统虚拟内存的分页思想，将 KV Cache 分成固定大小的块（页），通过块表映射到非连续物理内存。消除内存碎片和预分配浪费。
+### 核心概念
+借鉴操作系统虚拟内存的分页思想，将 KV Cache 分成固定大小的块（页），通过块表映射到非连续物理内存。相比传统 KV Cache 预分配 max_len 导致大量浪费和内存碎片，PagedAttention 按需分配，内存利用率可达 ~96%。
 
-**为什么需要 PagedAttention？**
-- 传统 KV Cache: 预分配 max_len → 大量浪费
-- 内存碎片: 不同序列长度不一 → 碎片化
-- PagedAttention: 按需分配 → 利用率 ~96%
+### 核心思想
+逻辑块是连续的 token 块（如 16 tokens/block），物理块是 GPU 显存中的实际存储位置。通过块表（block table）将逻辑块映射到非连续的物理块，消除预分配浪费和内存碎片。
+
+### 算法步骤
+1. 预分配物理块池：physical_blocks = zeros(num_blocks, ...)
+2. 为序列分配物理块：allocate(seq_id, num_tokens)
+3. 写入 KV 到对应物理块：write(seq_id, position, key, value)
+4. 注意力计算时从物理块 gather K/V
+5. 序列结束时释放物理块：free(seq_id)
 
 ## 📐 核心公式
 

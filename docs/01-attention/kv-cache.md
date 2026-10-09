@@ -4,12 +4,19 @@
 
 ## 📌 原理与思想
 
-自回归生成时，每步只处理新 token，但需要与所有历史 token 做注意力。KV Cache 缓存历史的 K/V，避免重复计算。
+### 核心概念
+自回归生成时，每步只处理新 token，但需要与所有历史 token 做注意力。KV Cache 缓存历史的 K/V，避免重复计算。相比每步重新计算所有 token 的 O(N²) 复杂度，KV Cache 将其降至 O(N)，是推理加速的核心技术。
 
-**为什么需要 KV Cache？**
-- 标准做法: 每步重新计算所有 token 的 K/V → O(N²) 计算
-- KV Cache: 只计算新 token 的 K/V，历史的从缓存取 → O(N) 计算
-- 空间换时间: 缓存 O(L × H × Dh) 显存
+### 核心思想
+空间换时间：缓存历史 token 的 K/V，每步只计算新 token 的 K/V，然后与缓存拼接。代价是额外的显存占用 O(L × H × Dh)。
+
+### 算法步骤
+1. **Prefill 阶段**：处理整个 prompt，计算并缓存所有 KV
+2. **Decode 阶段**：每步只处理 1 个新 token
+3. 计算新 token 的 Q, K, V
+4. 拼接历史 KV：K = cat(K_cache, K_new)
+5. 计算注意力：attn(Q, K, V)
+6. 更新 cache，输出下一个 token
 
 ## 📐 核心公式
 

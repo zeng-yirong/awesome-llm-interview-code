@@ -4,12 +4,17 @@
 
 ## 📌 原理与思想
 
-LayerNorm 的简化版：不做均值中心化，只用 RMS (均方根) 归一化。计算更快，效果相当。
+### 核心概念
+LayerNorm 的简化版：不做均值中心化，只用 RMS (均方根) 归一化。相比 LayerNorm 计算更快、参数更少（只有 gamma 无 beta），实践中效果相当。LLaMA/Mistral/PaLM/Gemma 等主流模型都采用。
 
-**为什么用 RMSNorm？**
-- 去掉均值中心化，计算更快
-- 只有一个可学习参数 gamma（无 beta）
-- 实践中效果与 LayerNorm 相当
+### 核心思想
+去掉均值中心化步骤，只用均方根归一化。使用 rsqrt 替代 1/sqrt，计算更高效。在 float32 下计算保证数值稳定性。
+
+### 算法步骤
+1. 计算均方值：ms = mean(x², dim=-1, keepdim=True)
+2. 计算均方根倒数：rsqrt = 1/√(ms + ε)
+3. 归一化：x_norm = x × rsqrt
+4. 缩放：output = x_norm × γ
 
 ## 📐 核心公式
 

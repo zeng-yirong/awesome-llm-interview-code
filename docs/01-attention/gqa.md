@@ -4,12 +4,18 @@
 
 ## 📌 原理与思想
 
-MHA 和 MQA 的折中方案：Q 有 H 个头，KV 只有 G 个头 (G<H)。多个 Q 头共享同一组 KV 头，大幅减少 KV Cache。
+### 核心概念
+MHA 和 MQA 的折中方案：Q 有 H 个头，KV 只有 G 个头 (G<H)。多个 Q 头共享同一组 KV 头，大幅减少 KV Cache。相比 MHA 节省推理显存，相比 MQA 保持更好的模型质量。
 
-**为什么需要 GQA？**
-- MHA: KV Cache 大，推理慢
-- MQA: KV Cache 小，但模型质量下降
-- GQA: 在两者之间取得平衡
+### 核心思想
+通过让多个 Q 头共享同一组 KV 头，在保持模型表达能力的同时大幅减少 KV Cache 大小。核心操作是 repeat_kv：将 G 个 KV 头复制扩展为 H 个，以匹配 Q 的头数。
+
+### 算法步骤
+1. 线性投影：Q → [B, S, H, Dh]，K,V → [B, S, G, Dh]
+2. 复制 KV 头：repeat_kv(K, H/G) → [B, S, H, Dh]
+3. 转置维度：transpose(1, 2) → [B, H, S, Dh]
+4. 计算缩放点积注意力
+5. 合并多头并输出投影
 
 ## 📐 核心公式
 

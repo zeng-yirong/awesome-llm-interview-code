@@ -4,12 +4,18 @@
 
 ## 📌 原理与思想
 
-语言模型的核心训练目标：给定前文预测下一个 token。通过 shift 操作将 logits 和 labels 对齐，计算交叉熵。
+### 核心概念
+语言模型的核心训练目标：给定前文预测下一个 token。通过 shift 操作将 logits 和 labels 对齐，计算交叉熵。交叉熵衡量预测分布与真实分布的差异，梯度计算简洁（softmax + CE 的梯度 = y - one_hot），是 LLM 训练的基础。
 
-**为什么用交叉熵？**
-- 衡量预测分布与真实分布的差异
-- 梯度计算简洁：softmax + CE 的梯度 = y - one_hot
-- 适合分类任务（词表预测）
+### 核心思想
+用前面的 token 预测下一个 token。通过 shift 操作：logits 去尾（去掉最后一个位置的预测），labels 去头（去掉第一个位置的目标），使 logits[:, :-1] 预测 labels[:, 1:]。
+
+### 算法步骤
+1. Shift logits：shift_logits = logits[:, :-1, :]
+2. Shift labels：shift_labels = labels[:, 1:]
+3. 展平：flattened_logits = shift_logits.view(-1, V)
+4. 展平：flattened_labels = shift_labels.view(-1)
+5. 计算交叉熵：loss = CE(flattened_logits, flattened_labels)
 
 ## 📐 核心公式
 
