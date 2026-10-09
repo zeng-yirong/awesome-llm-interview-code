@@ -18,24 +18,25 @@
 
 ## 📐 核心公式
 
-```
-损失: L_OPD = E_{y ~ π_S(·|x)} [ (1/|y|) Σ_t D( p_T(·|x, y_<t) ‖ p_S(·|x, y_<t) ) ]
+$$
+\mathcal{L}_{\text{OPD}}=\mathbb{E}_{y\sim\pi_S(\cdot\mid x)}\left[\frac{1}{|y|}\sum_t D\!\left(p_T(\cdot\mid x,y_{<t})\ \|\ p_S(\cdot\mid x,y_{<t})\right)\right]
+$$
 
-广义 JSD 插值 (β ∈ [0, 1]):
-  M = β·p_T + (1 - β)·p_S
-  D_GJS(β) = (1 - β)·KL(p_T ‖ M) + β·KL(p_S ‖ M)
+$$
+\begin{aligned}
+M&=\beta\,p_T+(1-\beta)\,p_S\\[2pt]
+D_{\text{GJS}}(\beta)&=(1-\beta)\operatorname{KL}(p_T\|M)+\beta\operatorname{KL}(p_S\|M),
+\qquad \beta\in[0,1]
+\end{aligned}
+$$
 
-端点 (可用代码断言验证):
-  β = 0   → KL(p_T ‖ p_S)   前向 KL (mode-covering，Hinton 蒸馏的方向)
-  β = 1   → KL(p_S ‖ p_T)   反向 KL (mode-seeking，只学教师的高概率模式)
-  β = 0.5 → 标准 JSD
-```
-
-其中:
-- `y`: **学生自己采样**出来的序列（不是教师生成的，这是 on-policy 的关键）
-- `p_T` / `p_S`: 教师 / 学生在位置 t 的 next-token 分布，均在词表 V 上
-- `D`: 逐 token 的散度，在词表维度上求和
-- `β`: 控制 KL 方向；实践里常用反向 KL 一侧，它只要求学生匹配教师的高概率模式
+$$
+\begin{aligned}
+\beta=0 &\Rightarrow \operatorname{KL}(p_T\|p_S) && \text{forward KL (mode-covering)}\\[2pt]
+\beta=1 &\Rightarrow \operatorname{KL}(p_S\|p_T) && \text{reverse KL (mode-seeking)}\\[2pt]
+\beta=0.5 &\Rightarrow \text{standard JSD}
+\end{aligned}
+$$
 
 ## 📊 张量流程图
 

@@ -19,15 +19,16 @@
 
 ## 📐 核心公式
 
-```
-Attention(Q, K, V) = softmax(QKᵀ / √d_k) · V
+$$
+\operatorname{Attention}(Q,K,V)=\operatorname{softmax}\!\left(\frac{QK^{\top}}{\sqrt{d_k}}\right)V
+$$
 
-其中:
-- Q: Query 矩阵 [batch, num_heads, seq_len_q, head_dim]
-- K: Key 矩阵 [batch, num_heads, seq_len_k, head_dim]
-- V: Value 矩阵 [batch, num_heads, seq_len_k, head_dim]
-- d_k: head_dim，缩放因子
-```
+$$
+\operatorname{softmax}(z)_i=\frac{e^{z_i}}{\sum_j e^{z_j}},\qquad
+\operatorname{Var}(q\cdot k)=d_k,\qquad
+Q,K,V\in\mathbb{R}^{n\times d_k},\qquad
+d_k=\frac{D}{H}
+$$
 
 ## 📊 张量流程图
 

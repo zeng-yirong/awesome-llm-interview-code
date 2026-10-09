@@ -19,18 +19,22 @@ Temperature 通过除以温度参数 T 调整分布锐度（T<1 更确定，T>1 
 
 ## 📐 核心公式
 
-```
-Temperature: P(xᵢ) = softmax(zᵢ/T)
-  T<1: 更确定  T>1: 更随机  T→0: greedy
+$$
+P(x_i)=\frac{\exp(z_i/T)}{\sum_j\exp(z_j/T)}
+$$
 
-Top-k: 只保留 top-k 个 token, 其余设为 -∞
-Top-p: 按概率降序排列, 保留累积概率≥p 的最小集合
+$$
+T<1:\ \text{sharper},\qquad T>1:\ \text{flatter},\qquad T\to 0:\ \text{greedy}
+$$
 
-对比:
-  Greedy:  T→0, 确定性输出
-  Top-k:   固定数量, 简单但不够灵活
-  Top-p:   动态集合, 更灵活
-```
+$$
+\text{top-}k:\quad \mathcal{S}_k=\{i:\ \operatorname{rank}(z_i)\le k\},
+\qquad p_i\leftarrow 0\ \text{for}\ i\notin\mathcal{S}_k
+$$
+
+$$
+\text{top-}p:\quad \mathcal{S}_p=\min\left\{V'\subseteq V:\ \sum_{i\in V'}p_i\ge p\right\}
+$$
 
 ## 📊 张量流程图
 

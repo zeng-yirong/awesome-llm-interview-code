@@ -18,16 +18,17 @@
 
 ## 📐 核心公式
 
-```
-LN(x) = (x - μ) / √(σ² + ε) × γ + β
+$$
+\mu=\operatorname{mean}(x,\ \dim=-1),\qquad
+\sigma^{2}=\operatorname{var}(x,\ \dim=-1,\ \text{unbiased}=\text{False})
+$$
 
-其中:
-μ = mean(x, dim=-1)
-σ² = var(x, dim=-1, unbiased=False)
-γ: 缩放参数 [D] (可学习)
-β: 偏移参数 [D] (可学习)
-ε: 数值稳定性常数，通常 1e-5
-```
+$$
+\operatorname{LN}(x)=\frac{x-\mu}{\sqrt{\sigma^{2}+\epsilon}}\odot\gamma+\beta,
+\qquad
+\gamma,\beta\in\mathbb{R}^{D},\qquad
+\epsilon=10^{-5}
+$$
 
 ## 📊 张量流程图
 

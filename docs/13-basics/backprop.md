@@ -19,14 +19,18 @@
 
 ## 📐 核心公式
 
-```
-链式法则: ∂L/∂x = ∂L/∂y · ∂y/∂x
+$$
+\frac{\partial\mathcal{L}}{\partial x}=\frac{\partial\mathcal{L}}{\partial y}\cdot\frac{\partial y}{\partial x}
+$$
 
-常见梯度:
-  y = Wx:     ∂L/∂W = ∂L/∂y · xᵀ,  ∂L/∂x = Wᵀ · ∂L/∂y
-  y = ReLU(x): ∂L/∂x = ∂L/∂y · (x > 0)
-  y = softmax: ∂L/∂z = y - one_hot(target)  (配合 CE)
-```
+$$
+\begin{aligned}
+y=Wx: &\quad \frac{\partial\mathcal{L}}{\partial W}=\frac{\partial\mathcal{L}}{\partial y}\,x^{\top},\quad
+\frac{\partial\mathcal{L}}{\partial x}=W^{\top}\frac{\partial\mathcal{L}}{\partial y}\\[3pt]
+y=\operatorname{ReLU}(x): &\quad \frac{\partial\mathcal{L}}{\partial x}=\frac{\partial\mathcal{L}}{\partial y}\odot(x>0)\\[3pt]
+y=\operatorname{softmax}(z): &\quad \frac{\partial\mathcal{L}}{\partial z}=y-\text{one\_hot}(\text{target})\quad(\text{with CE})
+\end{aligned}
+$$
 
 ## 📊 张量流程图
 

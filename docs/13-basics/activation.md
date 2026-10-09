@@ -18,17 +18,22 @@
 
 ## 📐 核心公式
 
-```
-ReLU(x) = max(0, x)            ReLU'(x) = x > 0
-GELU(x) = x · Φ(x)             Φ = standard normal CDF
-SiLU(x) = x · σ(x)            SiLU'(x) = SiLU(x) + σ(x)(1-SiLU(x))
-Swish = SiLU (same thing)
+$$
+\operatorname{ReLU}(x)=\max(0,x),\qquad \operatorname{ReLU}^{\prime}(x)=(x>0)
+$$
 
-使用场景:
-  ReLU:  标准 FFN (原始 Transformer)
-  GELU:  BERT, GPT-2/3
-  SiLU:  SwiGLU (LLaMA, PaLM)
-```
+$$
+\operatorname{GELU}(x)=x\,\Phi(x),\qquad \Phi=\text{standard normal CDF}
+$$
+
+$$
+\operatorname{SiLU}(x)=x\,\sigma(x),\qquad
+\operatorname{SiLU}^{\prime}(x)=\operatorname{SiLU}(x)+\sigma(x)\left(1-\operatorname{SiLU}(x)\right)
+$$
+
+$$
+\text{Swish}\equiv\operatorname{SiLU}
+$$
 
 ## 📊 张量流程图
 

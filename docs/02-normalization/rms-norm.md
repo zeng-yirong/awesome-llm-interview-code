@@ -18,15 +18,18 @@ LayerNorm 的简化版：不做均值中心化，只用 RMS (均方根) 归一�
 
 ## 📐 核心公式
 
-```
-RMSNorm(x) = x / √(mean(x²) + ε) × γ
+$$
+\operatorname{RMSNorm}(x)=\frac{x}{\sqrt{\operatorname{mean}(x^{2})+\epsilon}}\odot\gamma,
+\qquad
+\epsilon=10^{-5}
+$$
 
-对比 LayerNorm:
-  LN:  (x - mean) / √(var + ε) × γ + β
-  RMS: x / √(mean(x²) + ε) × γ
-  
-  → 去掉 mean centering 和 bias
-```
+$$
+\begin{aligned}
+\text{LayerNorm}: &\quad \frac{x-\mu}{\sqrt{\sigma^{2}+\epsilon}}\odot\gamma+\beta\\[2pt]
+\text{RMSNorm}: &\quad \frac{x}{\sqrt{\operatorname{mean}(x^{2})+\epsilon}}\odot\gamma
+\end{aligned}
+$$
 
 ## 📊 张量流程图
 

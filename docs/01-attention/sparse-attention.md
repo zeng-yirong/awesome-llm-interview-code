@@ -19,29 +19,30 @@
 
 ## 📐 核心公式
 
-```
-NSA（三分支 + 门控）:
-  压缩块:  K_cmp_j = mean_pool(K_{j·l : (j+1)·l})               # 块内均值池化
-  选择块:  p_j = score(q_t, K_cmp_j) → top-n 个块               # 用压缩表示粗选
-  滑窗:    最近 w 个 token 的完整 KV
+$$
+\begin{aligned}
+K_{\text{cmp},j} &= \operatorname{mean}\!\left(K_{jl:(j+1)l}\right)\\[2pt]
+p_j &= \operatorname{score}\!\left(q_t,K_{\text{cmp},j}\right),\qquad
+\mathcal{B}_{\text{slc}}=\operatorname{top}_{n}(p)\\[2pt]
+\mathcal{B}_{\text{win}} &= \{t-w,\dots,t\}
+\end{aligned}
+$$
 
-  o_t = Σ_{b ∈ {cmp, slc, win}} g_b · Attn(q_t, K_b, V_b)
-  g = σ(wᵀ · [q_t ; ...])                                    # 学习到的门控
+$$
+o_t=\sum_{b\in\{\text{cmp},\text{slc},\text{win}\}} g_b\,\operatorname{Attn}(q_t,K_b,V_b),
+\qquad
+g=\sigma\!\left(w^{\top}[q_t;\dots]\right)
+$$
 
-DSA（Lightning Indexer + top-k）:
-  k_s = W^{K,l} · h_s                                       # 轻量 key 投影，d^I ≪ d
-  I_{t,s} = Σ_j w_{t,j} · ReLU(q_{t,j} · k_s)                # 各 indexer head 加权求和
-  S_t = top-k(I_{t,:})                                      # 只保留 k 个历史 token
-  再在选中的 k 个 token 上做 MLA 注意力
-```
+$$
+k_s=W^{K,l}h_s,\qquad
+I_{t,s}=\sum_j w_{t,j}\operatorname{ReLU}(q_{t,j}\cdot k_s),\qquad
+\mathcal{S}_t=\operatorname{top}_{k}\!\left(I_{t,\cdot}\right)
+$$
 
-其中:
-- `l`: 压缩块大小；`n`: 选中的块数；`w`: 滑窗大小
-- `ReLU`: DSA 的 indexer 用 ReLU 而不是 softmax，因此可以在 FP8 上算，开销极低
-- `d^I`: indexer 的 key 维度，刻意做得很小（几十维量级），这是「lightning」的来源
-- `k`: DSA 的 top-k，DeepSeek-V3.2 用 `k = 2048`
-- 因果性: 只能从当前 token 往前的历史里选，未来的块要被屏蔽
-- 复杂度: `O(S²)` → `O(S·k)`；`k` 固定时随序列长度线性增长
+$$
+\mathcal{S}_t\subseteq\{s\le t\},\qquad k=2048,\qquad O(S^{2})\to O(S\,k)
+$$
 
 ## 📊 张量流程图
 

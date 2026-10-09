@@ -18,29 +18,32 @@
 
 ## 📐 核心公式
 
-```
-缩放因子（块内 amax）:
-  scale = amax(block) / 448                # 448 是 e4m3 的可表示上界
+$$
+s=\frac{\operatorname{amax}(\text{block})}{448},\qquad 448=\text{e4m3 max}
+$$
 
-量化 / 反量化:
-  x_q = clamp(x / scale, -448, 448).to(fp8)      # 只保留 3 位尾数
-  x̂  = x_q · scale
+$$
+x_q=\operatorname{clamp}\!\left(\frac{x}{s},\ -448,\ 448\right)\to\text{FP8},
+\qquad
+\hat{x}=x_q\,s
+$$
 
-块级矩阵乘法（缩放因子提到块外）:
-  y = Σ_block (x_q · s_x) · (w_q · s_w)
-    = Σ_block s_x · s_w · (x_q · w_q)       # FP8 乘 + 高精度累加
+$$
+y=\sum_{\text{block}}(x_qs_x)(w_qs_w)=\sum_{\text{block}}s_xs_w\,(x_qw_q)
+$$
 
-DeepSeek-V3 的配置:
-  激活: 1×128 的块（per-token per-128-channel）
-  权重: 128×128 的块
-  累加: 提升到高精度（FP32 / 张量核内高精度累加）
-```
+$$
+\begin{aligned}
+\text{e4m3}: &\quad 1+4+3\ \text{bits},\quad \max=448 && \text{(activations, weights)}\\[2pt]
+\text{e5m2}: &\quad 1+5+2\ \text{bits},\quad \max=57344 && \text{(gradients)}
+\end{aligned}
+$$
 
-其中:
-- `e4m3`: 1 符号 + 4 指数 + 3 尾数，动态范围小但精度高 → 用于前向的激活和权重
-- `e5m2`: 1 符号 + 5 指数 + 2 尾数，动态范围大但精度低 → 用于反向的梯度
-- `448`: e4m3 的最大可表示值（e5m2 是 57344）
-- 累加必须高精度：FP8 乘积本身的精度就低，累加若也用 FP8 会迅速累积误差
+$$
+\text{DeepSeek-V3}:\quad \text{activations }1\times128,\qquad
+\text{weights }128\times128,\qquad
+\text{accumulate in FP32}
+$$
 
 ## 📊 张量流程图
 

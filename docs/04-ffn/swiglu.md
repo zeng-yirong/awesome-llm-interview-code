@@ -18,15 +18,20 @@
 
 ## 📐 核心公式
 
-```
-SwiGLU(x) = W_down · (SiLU(W_gate · x) ⊙ W_up · x)
+$$
+\operatorname{SwiGLU}(x)=W_{\text{down}}\!\left(\operatorname{SiLU}(W_{\text{gate}}x)\odot W_{\text{up}}x\right)
+$$
 
-SiLU(x) = x · σ(x)  (也称 Swish)
-⊙ = 逐元素乘法
+$$
+\operatorname{SiLU}(x)=x\,\sigma(x),\qquad d_{ff}=\tfrac{8}{3}D
+$$
 
-参数量: 3 个矩阵 (vs 标准 FFN 2 个)
-d_ff 通常取 8/3 × d_model（保持总参数量相当）
-```
+$$
+\begin{aligned}
+\text{SwiGLU}: &\quad 3D\,d_{ff}\approx 8D^{2}\\[2pt]
+\text{FFN}: &\quad 8D^{2}
+\end{aligned}
+$$
 
 ## 📊 张量流程图
 

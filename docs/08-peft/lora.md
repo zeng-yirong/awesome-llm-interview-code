@@ -19,16 +19,26 @@
 
 ## 📐 核心公式
 
-```
-h = W₀x + ΔWx = W₀x + (B·A)x · (α/r)
+$$
+h=W_0x+\Delta Wx=W_0x+\frac{\alpha}{r}BAx
+$$
 
-W₀: [d, k] 冻结
-A:  [r, k] 可训练 (kaiming 初始化)
-B:  [d, r] 可训练 (零初始化)
-r ≪ min(d, k)
+$$
+W_0\in\mathbb{R}^{d\times k}\ \text{(frozen)},\qquad
+A\in\mathbb{R}^{r\times k},\qquad
+B\in\mathbb{R}^{d\times r},\qquad
+r\ll\min(d,k)
+$$
 
-推理时可合并: W_new = W₀ + B·A·(α/r)  → 无额外开销
-```
+$$
+A\sim\text{kaiming},\qquad B=\mathbf{0}\ \Rightarrow\ BA=0\ \text{at init}
+$$
+
+$$
+\frac{\text{trainable}}{\text{total}}=\frac{r(d+k)}{dk}\approx 0.1\%,
+\qquad
+W_{\text{new}}=W_0+\frac{\alpha}{r}BA\ \ \text{(mergeable at inference)}
+$$
 
 ## 📊 张量流程图
 

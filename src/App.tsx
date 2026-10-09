@@ -3,6 +3,7 @@ import { ThemeProvider, useTheme } from './contexts/ThemeContext';
 import { problems, categories, Category } from './data/problems';
 import ProblemCard from './components/ProblemCard';
 import SearchFilter from './components/SearchFilter';
+import { plainMath } from './lib/mathBlock';
 import { Sun, Moon, BookOpen } from 'lucide-react';
 
 function ThemeToggle() {
@@ -40,7 +41,8 @@ function AppContent() {
           p.titleCn.includes(q) ||
           p.oneLiner.includes(q) ||
           p.principle.includes(q) ||
-          p.formula.toLowerCase().includes(q) ||
+          // formula 现在是 LaTeX，先投影成纯文本，否则 \operatorname{softmax} 这类搜不到
+          plainMath(p.formula).toLowerCase().includes(q) ||
           p.keyPoints.some(kp => kp.includes(q)) ||
           p.category.toLowerCase().includes(q);
         if (!match) return false;

@@ -19,18 +19,28 @@
 
 ## 📐 核心公式
 
-```
-1. Draft model 生成 γ 个 token: x₁, x₂, ..., x_γ
-2. Target model 一次性前向，得到所有位置的概率
-3. 逐 token 接受/拒绝:
-   accept if r < p_target(xᵢ) / p_draft(xᵢ)
-4. 保证输出分布与只用 target model 完全一致!
+$$
+\text{accept } x_i\ \text{iff}\ r<\frac{p_{\text{target}}(x_i)}{p_{\text{draft}}(x_i)},
+\qquad r\sim U[0,1]
+$$
 
-加速比:
-  标准: 1 次大模型前向 → 1 token
-  投机: 1 次大模型前向 → 3-4 tokens (平均)
-  → 加速 2-3x
-```
+$$
+\mathbb{E}\left[\#\text{accepted}\right]=\sum_{t=1}^{\gamma}\prod_{i=1}^{t}\alpha_i,
+\qquad
+\alpha_i=\min\!\left(1,\ \frac{p_{\text{target}}(x_i)}{p_{\text{draft}}(x_i)}\right)
+$$
+
+$$
+\gamma=5,\qquad
+\mathbb{E}\left[\#\text{accepted}\right]\sim 3\text{ to }4,\qquad
+\text{speedup}\sim 2\text{ to }3\times
+$$
+
+$$
+\text{standard}: 1\ \text{forward}\to 1\ \text{token},
+\qquad
+\text{speculative}: 1\ \text{forward}\to 3\text{ to }4\ \text{tokens}
+$$
 
 ## 📊 张量流程图
 

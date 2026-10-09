@@ -79,7 +79,16 @@ export const problems: Problem[] = [
         ],
       },
     ],
-    formula: 'Attention(Q, K, V) = softmax(QKᵀ / √d_k) · V',
+    formula: String.raw`$$
+\operatorname{Attention}(Q,K,V)=\operatorname{softmax}\!\left(\frac{QK^{\top}}{\sqrt{d_k}}\right)V
+$$
+
+$$
+\operatorname{softmax}(z)_i=\frac{e^{z_i}}{\sum_j e^{z_j}},\qquad
+\operatorname{Var}(q\cdot k)=d_k,\qquad
+Q,K,V\in\mathbb{R}^{n\times d_k},\qquad
+d_k=\frac{D}{H}
+$$`,
     flowDiagram: `# 打分：一次 matmul 得到所有位置对的相关性
 + Q :: [B, H, Sq, D] :: 查询
 + K :: [B, H, Sk, D] :: 键
@@ -108,6 +117,7 @@ def scaled_dot_product_attention(q, k, v, mask=None):
       '缩放 1/√d_k: 当 d_k 大时点积方差大，softmax 进入饱和区梯度消失',
       'mask=0 位置填 -1e9 → softmax 后≈0，实现因果/填充屏蔽',
       '这是 MHA / GQA / MQA / Flash Attention 的公共基础',
+      '时间复杂度: O(n²d)，空间复杂度 O(n²)',
     ],
     source: 'both',
   },
@@ -138,7 +148,15 @@ def scaled_dot_product_attention(q, k, v, mask=None):
         ],
       },
     ],
-    formula: 'MultiHead(Q,K,V) = Concat(head₁…headₕ) · Wₒ\nheadᵢ = Attention(QWᵢQ, KWᵢK, VWᵢV)',
+    formula: String.raw`$$
+\operatorname{MultiHead}(Q,K,V)=\operatorname{Concat}\!\left(\text{head}_1,\dots,\text{head}_H\right)W_O
+$$
+
+$$
+\text{head}_i=\operatorname{Attention}\!\left(QW_i^{Q},\ KW_i^{K},\ VW_i^{V}\right),
+\qquad
+D_h=\frac{D}{H}
+$$`,
     flowDiagram: `# 一次投影，再把 D 拆成 H 个头
 x :: [B, S, D] :: 输入
 + Q = x·W_qᵀ :: [B, S, D] :: 查询投影
@@ -180,6 +198,7 @@ class MultiHeadAttention(nn.Module):
       '合并操作: transpose(1,2).contiguous().view(B,S,D)',
       '自注意力 Q=K=V=x; 交叉注意力 Q=x_dec, K=V=x_enc',
       'head_dim = d_model / n_heads，通常 64 或 128',
+      '参数量: 4 × d_model² (Wq, Wk, Wv, Wo)',
     ],
     source: 'both',
   },
@@ -209,7 +228,15 @@ class MultiHeadAttention(nn.Module):
         ],
       },
     ],
-    formula: 'mask[i][j] = 1  if j ≤ i\n           0  if j > i\nscores = scores.masked_fill(mask == 0, -inf)',
+    formula: String.raw`$$
+M_{ij}=\begin{cases}1, & j\le i\\[2pt] 0, & j>i\end{cases}
+\qquad
+S'_{ij}=S_{ij}-\infty\,(1-M_{ij})
+$$
+
+$$
+A=\operatorname{softmax}(S'),\qquad A_{ij}=0\ \text{ for }\ j>i
+$$`,
     flowDiagram: `# 只改 softmax 的输入，不改任何形状
 scores = Q·Kᵀ/√D :: [B, H, S, S] :: 与普通注意力完全一样
 mask = tril(ones(S, S)) :: [S, S] :: 下三角含对角线为 1（可见），上三角为 0（屏蔽）
@@ -263,7 +290,23 @@ def create_causal_mask(seq_len, device='cpu'):
         ],
       },
     ],
-    formula: 'Q: [B, H, S, Dh]     (H 个头)\nK,V: [B, G, S, Dh]   (G 个头, G < H)\nrepeat_kv: K,V → [B, H, S, Dh]   (复制 G→H)',
+    formula: String.raw`$$
+Q\in\mathbb{R}^{B\times H\times S\times D_h},\qquad
+K,V\in\mathbb{R}^{B\times G\times S\times D_h},\qquad
+1\le G\le H
+$$
+
+$$
+\text{KV cache}=2\,n_{\text{layers}}\,G\,S\,D_h\,b
+$$
+
+$$
+\begin{aligned}
+G=H &\Rightarrow \text{MHA}, & \text{one KV per query head}\\[2pt]
+1<G<H &\Rightarrow \text{GQA}, & H/G \text{ query heads share one KV}\\[2pt]
+G=1 &\Rightarrow \text{MQA}, & \text{all query heads share one KV}
+\end{aligned}
+$$`,
     flowDiagram: `# Q 有 H 个头，K/V 只有 G 组
 + Q :: [B, H, S, Dh] :: 全部 H 个头各自独立
 + K, V :: [B, G, S, Dh] :: 只有 G 组，G < H
@@ -349,7 +392,24 @@ class GQA(nn.Module):
         ],
       },
     ],
-    formula: '标准 Attention:  IO = O(N²)  (存注意力矩阵)\nFlash Attention: IO = O(N²d/M)  (M=SRAM大小)\n\n核心: Online Softmax\n  m_new = max(m_old, max(S_block))\n  l_new = l_old * exp(m_old - m_new) + sum(exp(S_block - m_new))\n  O_new = O_old * exp(m_old - m_new) + exp(S_block - m_new) @ V_block',
+    formula: String.raw`$$
+\begin{aligned}
+\text{standard}: &\quad \mathrm{IO}=O(S^{2})\\[2pt]
+\text{FlashAttention}: &\quad \mathrm{IO}=O\!\left(\frac{S^{2}d}{M}\right),\qquad M=\text{SRAM size}
+\end{aligned}
+$$
+
+$$
+\begin{aligned}
+m^{(\text{new})} &= \max\!\left(m^{(\text{old})},\ \operatorname{rowmax}(S_{\text{blk}})\right)\\[2pt]
+\ell^{(\text{new})} &= \ell^{(\text{old})}e^{\,m^{(\text{old})}-m^{(\text{new})}}+\operatorname{rowsum}\!\left(e^{\,S_{\text{blk}}-m^{(\text{new})}}\right)\\[2pt]
+O^{(\text{new})} &= O^{(\text{old})}e^{\,m^{(\text{old})}-m^{(\text{new})}}+e^{\,S_{\text{blk}}-m^{(\text{new})}}V_{\text{blk}}
+\end{aligned}
+$$
+
+$$
+O=\frac{O^{(\text{final})}}{\ell^{(\text{final})}},\qquad \text{memory}: O(S^{2})\to O(S)
+$$`,
     flowDiagram: `# 标准实现：把中间矩阵物化到 HBM
 S = Q·Kᵀ :: [B, H, S, S] :: 一次写完整个分数矩阵
 P = softmax(S) :: [B, H, S, S] :: 再整块读回来做 softmax
@@ -433,7 +493,23 @@ def flash_attention_qk(Q, K, V, block_size=64):
         ],
       },
     ],
-    formula: 'Prefill:  处理整个 prompt → 缓存所有 KV\nDecode:   每步只处理 1 token → K_new = cat(K_cache, K_new)\n\nKV Cache 大小 = 2 × n_layers × n_kv_heads × seq_len × head_dim × bytes',
+    formula: String.raw`$$
+\text{KV cache}=2\,n_{\text{layers}}\,n_{\text{kv}}\,S\,D_h\,b
+$$
+
+$$
+\text{LLaMA 2 70B:}\quad 2\times 80\times 8\times 4096\times 128\times 2\ \mathrm{B}=80\ \mathrm{GB}
+$$
+
+$$
+\text{decode}: \quad K\leftarrow\operatorname{concat}(K,\,k_{\text{new}}),\qquad
+V\leftarrow\operatorname{concat}(V,\,v_{\text{new}})
+$$
+
+$$
+\text{no cache}: \sum_{t=1}^{S}t=O(S^{2}),\qquad
+\text{cache}: O(S)\ \text{per step}
+$$`,
     flowDiagram: `# Prefill：整段算完，把每层的 K/V 留下来
 prompt :: [1, S_prompt, D] :: 整段输入，一次前向
 Q, K, V 投影 :: [1, H_kv, S_prompt, Dh] :: 只有 K、V 会被留下
@@ -511,7 +587,26 @@ class KVCacheAttention(nn.Module):
         ],
       },
     ],
-    formula: 'KV 压缩: c_kv = W_down(x)  → [B, S, latent_dim]  (存入 Cache)\nKV 恢复: K,V = W_up(c_kv)  → [B, S, H, (Dh+Dr+Dh)]\nQ 压缩: c_q = W_down_q(x) → W_up_q → [B, S, H, (Dh+Dr)]',
+    formula: String.raw`$$
+c^{KV}=x\,W^{DKV}\in\mathbb{R}^{B\times S\times C},\qquad
+[K;V]=\operatorname{split}\!\left(c^{KV}W^{UK}\right)
+$$
+
+$$
+c^{Q}=x\,W^{DQ},\qquad
+Q=\operatorname{split}\!\left(c^{Q}W^{UQ}\right)
+$$
+
+$$
+k=[k_{\text{content}};k_{\text{rope}}],\qquad q=[q_{\text{content}};q_{\text{rope}}]
+$$
+
+$$
+\begin{aligned}
+\text{GQA}: &\quad \text{KV cache}=2\,G\,D_h\\[2pt]
+\text{MLA}: &\quad \text{KV cache}=C\qquad (C=512,\ D_h=128)
+\end{aligned}
+$$`,
     flowDiagram: `# 只缓存低维潜变量，用的时候再恢复
 x :: [B, S, D] :: 输入
 c_kv = x·W_dkv :: [B, S, C] :: 下投影到潜空间，C 远小于 H·Dh
@@ -562,7 +657,6 @@ class MLA(nn.Module):
       '压缩比可达 90%+ (vs GQA 75%)',
       'Q 也使用低秩投影，但不缓存（只用于当前 token）',
       'DeepSeek-V2 用 MLA + MoE 实现极高效率',
-      '面试重点：理解低秩压缩的思想，不要求完整实现',
     ],
     source: 'ckd0817',
   },
@@ -593,7 +687,30 @@ class MLA(nn.Module):
         ],
       },
     ],
-    formula: 'NSA 三分支 + 门控:\n  o_t = Σ_{b ∈ {cmp, slc, win}} g_b · Attn(q_t, K_b, V_b)\n  压缩块: K_cmp_j = mean_pool(K_{j·l : (j+1)·l})      选择: top-n 个块      滑窗: 最近 w 个 token\n  门控: g = σ(wᵀ · [q_t ; ...])                     # 学习到的权重\n\nDSA (Lightning Indexer + top-k):\n  k_s = W^{K,l} · h_s                              # 轻量 key 投影，d^I ≪ d\n  I_{t,s} = Σ_j w_{t,j} · ReLU(q_{t,j} · k_s)      # indexer head 加权求和，可用 FP8 算\n  S_t = top-k(I_{t,:})                             # 只保留 k 个历史 token（如 k = 2048）\n\n复杂度: O(S²) → O(S·k)',
+    formula: String.raw`$$
+\begin{aligned}
+K_{\text{cmp},j} &= \operatorname{mean}\!\left(K_{jl:(j+1)l}\right)\\[2pt]
+p_j &= \operatorname{score}\!\left(q_t,K_{\text{cmp},j}\right),\qquad
+\mathcal{B}_{\text{slc}}=\operatorname{top}_{n}(p)\\[2pt]
+\mathcal{B}_{\text{win}} &= \{t-w,\dots,t\}
+\end{aligned}
+$$
+
+$$
+o_t=\sum_{b\in\{\text{cmp},\text{slc},\text{win}\}} g_b\,\operatorname{Attn}(q_t,K_b,V_b),
+\qquad
+g=\sigma\!\left(w^{\top}[q_t;\dots]\right)
+$$
+
+$$
+k_s=W^{K,l}h_s,\qquad
+I_{t,s}=\sum_j w_{t,j}\operatorname{ReLU}(q_{t,j}\cdot k_s),\qquad
+\mathcal{S}_t=\operatorname{top}_{k}\!\left(I_{t,\cdot}\right)
+$$
+
+$$
+\mathcal{S}_t\subseteq\{s\le t\},\qquad k=2048,\qquad O(S^{2})\to O(S\,k)
+$$`,
     flowDiagram: `# NSA：压缩 + 选择 + 滑窗，三路门控加权
 K, V :: [B, H, S, D] :: 输入
 + 压缩分支 :: [B, H, S/l, D] :: mean_pool 按块大小 l 池化，给粗粒度全局
@@ -712,7 +829,17 @@ class LightningIndexer(nn.Module):
         ],
       },
     ],
-    formula: 'LN(x) = (x - μ) / √(σ² + ε) × γ + β\nμ = mean(x, dim=-1)\nσ² = var(x, dim=-1, unbiased=False)',
+    formula: String.raw`$$
+\mu=\operatorname{mean}(x,\ \dim=-1),\qquad
+\sigma^{2}=\operatorname{var}(x,\ \dim=-1,\ \text{unbiased}=\text{False})
+$$
+
+$$
+\operatorname{LN}(x)=\frac{x-\mu}{\sqrt{\sigma^{2}+\epsilon}}\odot\gamma+\beta,
+\qquad
+\gamma,\beta\in\mathbb{R}^{D},\qquad
+\epsilon=10^{-5}
+$$`,
     flowDiagram: `# 沿特征维归一化：每个 token 独立统计
 x :: [B, S, D] :: 残差流的输入
 μ = mean(x, -1, keepdim=True) :: [B, S, 1] :: 只沿最后一维求均值
@@ -771,7 +898,18 @@ class LayerNorm(nn.Module):
         ],
       },
     ],
-    formula: 'RMSNorm(x) = x / √(mean(x²) + ε) × γ\n\n对比 LayerNorm:\n  LN:  (x - mean) / √(var + ε) × γ + β\n  RMS: x / √(mean(x²) + ε) × γ\n  → 去掉 mean centering 和 bias',
+    formula: String.raw`$$
+\operatorname{RMSNorm}(x)=\frac{x}{\sqrt{\operatorname{mean}(x^{2})+\epsilon}}\odot\gamma,
+\qquad
+\epsilon=10^{-5}
+$$
+
+$$
+\begin{aligned}
+\text{LayerNorm}: &\quad \frac{x-\mu}{\sqrt{\sigma^{2}+\epsilon}}\odot\gamma+\beta\\[2pt]
+\text{RMSNorm}: &\quad \frac{x}{\sqrt{\operatorname{mean}(x^{2})+\epsilon}}\odot\gamma
+\end{aligned}
+$$`,
     flowDiagram: `# 只压尺度，不管中心
 x :: [B, S, D] :: 残差流的输入
 x32 = x.float() :: [B, S, D] :: 升 fp32，bf16 下 x² 动态范围不够
@@ -833,7 +971,23 @@ class RMSNorm(nn.Module):
         ],
       },
     ],
-    formula: 'f(q, m) = q × cos(mθ) + rotate_half(q) × sin(mθ)\n\nrotate_half([x₁, x₂]) = [-x₂, x₁]\n\n等价旋转矩阵: [cos(mθ), -sin(mθ)] [x₁]\n               [sin(mθ),  cos(mθ)] [x₂]\n\nθᵢ = 1/10000^(2i/d)',
+    formula: String.raw`$$
+f(q,m)=q\odot\cos(m\theta)+\operatorname{rotate\_half}(q)\odot\sin(m\theta)
+$$
+
+$$
+\operatorname{rotate\_half}([x_1,x_2])=[-x_2,\ x_1],
+\qquad
+R(m\theta)=\begin{pmatrix}\cos m\theta & -\sin m\theta\\[2pt] \sin m\theta & \cos m\theta\end{pmatrix}
+$$
+
+$$
+(R_mq)\cdot(R_nk)=q^{\top}R_{n-m}\,k
+$$
+
+$$
+\theta_i=10000^{-2i/d},\qquad i=0,\dots,\frac{d}{2}-1
+$$`,
     flowDiagram: `# 预计算：每个位置、每个维度对对应的旋转角
 inv_freq = 1/10000^(2i/d) :: [d/2] :: i = 0..d/2-1，靠后的维度对频率更低
 angles = outer(pos, inv_freq) :: [S, d/2] :: 位置 × 维度对
@@ -907,7 +1061,20 @@ class RotaryEmbedding(nn.Module):
         ],
       },
     ],
-    formula: 'FFN(x) = W₂ · ReLU(W₁ · x + b₁) + b₂\n\n参数量: D × 4D + 4D × D = 8D² (vs Attention: 4D²)',
+    formula: String.raw`$$
+\operatorname{FFN}(x)=W_2\operatorname{ReLU}(W_1x+b_1)+b_2
+$$
+
+$$
+W_1\in\mathbb{R}^{D\times 4D},\qquad W_2\in\mathbb{R}^{4D\times D}
+$$
+
+$$
+\begin{aligned}
+\text{FFN}: &\quad D\cdot 4D+4D\cdot D=8D^{2}\\[2pt]
+\text{Attention}: &\quad 4D^{2}
+\end{aligned}
+$$`,
     flowDiagram: `# 两层全连接 + 中间一层逐元素非线性
 x :: [B, S, D] :: 残差流的输入
 h = x·W₁ᵀ :: [B, S, 4D] :: 上投影，中间维度通常取 4 倍
@@ -961,7 +1128,20 @@ class FFN(nn.Module):
         ],
       },
     ],
-    formula: 'SwiGLU(x) = W_down · (SiLU(W_gate · x) ⊙ W_up · x)\n\nSiLU(x) = x · σ(x)  (也称 Swish)\n⊙ = 逐元素乘法\n\n参数量: 3 个矩阵 (vs 标准 FFN 2 个)',
+    formula: String.raw`$$
+\operatorname{SwiGLU}(x)=W_{\text{down}}\!\left(\operatorname{SiLU}(W_{\text{gate}}x)\odot W_{\text{up}}x\right)
+$$
+
+$$
+\operatorname{SiLU}(x)=x\,\sigma(x),\qquad d_{ff}=\tfrac{8}{3}D
+$$
+
+$$
+\begin{aligned}
+\text{SwiGLU}: &\quad 3D\,d_{ff}\approx 8D^{2}\\[2pt]
+\text{FFN}: &\quad 8D^{2}
+\end{aligned}
+$$`,
     flowDiagram: `# 门控 FFN：两路上投影，一路当门
 x :: [B, S, D] :: 残差流的输入
 + gate = SiLU(x·W_gateᵀ) :: [B, S, d_ff] :: 门，过激活
@@ -1020,7 +1200,17 @@ class SwiGLU(nn.Module):
         ],
       },
     ],
-    formula: 'MoE(x) = Σᵢ∈TopK softmax(Router(x))ᵢ · Eᵢ(x)\n\nMixtral 8x7B: 8 个专家选 2 个\n实际计算量 ≈ 12.9B (vs 46.7B 总参数)',
+    formula: String.raw`$$
+\operatorname{MoE}(x)=\sum_{i\in\operatorname{TopK}}\operatorname{softmax}\!\left(\operatorname{Router}(x)\right)_i E_i(x)
+$$
+
+$$
+\operatorname{Router}(x)=W_rx,\qquad W_r\in\mathbb{R}^{D\times N},\qquad K=2
+$$
+
+$$
+\text{Mixtral 8x7B:}\quad N=8,\ K=2,\qquad \text{FLOPs}\approx 12.9\text{B}\ \text{vs}\ 46.7\text{B total}
+$$`,
     flowDiagram: `# 按 token 路由到 Top-K 个专家
 x = reshape(x, [B*S, D]) :: [B*S, D] :: 摊平序列维，路由是逐 token 的
 logits = Router(x) :: [B*S, N] :: Router 只是一个 [D, N] 的线性层
@@ -1095,7 +1285,22 @@ class MoE(nn.Module):
         ],
       },
     ],
-    formula: 'L = -Σ log P(xₜ | x<t)\n\n实现: CE(shift(logits), shift(labels))\nlogits[:, :-1] 预测 labels[:, 1:]',
+    formula: String.raw`$$
+\mathcal{L}_{\text{CE}}=-\frac{1}{|x|}\sum_{t=1}^{|x|}\log P_\theta(x_t\mid x_{<t})
+$$
+
+$$
+\text{CE}\!\left(\operatorname{shift}(\text{logits}),\ \operatorname{shift}(\text{labels})\right),
+\qquad
+\text{logits}[:,:-1]\ \text{predicts}\ \text{labels}[:,1:]
+$$
+
+$$
+\begin{aligned}
+\text{Pretrain}: &\quad \text{all tokens counted}\\[2pt]
+\text{SFT}: &\quad \text{label}_{\text{prompt}}=-100,\qquad \text{ignore\_index}=-100
+\end{aligned}
+$$`,
     flowDiagram: `# shift 对齐：位置 t 的输出预测位置 t+1 的 token
 logits :: [B, S, V] :: 每个位置对整个词表的打分
 labels :: [B, S] :: 真实 token 下标，prompt 段置 -100
@@ -1154,7 +1359,19 @@ def lm_loss(logits, labels, ignore_index=-100):
         ],
       },
     ],
-    formula: 'L_DPO = -E[log σ(β · (log πθ(yw|x)/πref(yw|x) - log πθ(yl|x)/πref(yl|x)))]\n\n简化: logits = (logp_chosen - ref_logp_chosen) - (logp_rejected - ref_logp_rejected)\nloss = -logsigmoid(β · logits)',
+    formula: String.raw`$$
+\mathcal{L}_{\text{DPO}}=-\mathbb{E}_{(x,y_w,y_l)\sim\mathcal{D}}\left[\log\sigma\!\left(\beta\left(\log\frac{\pi_\theta(y_w\mid x)}{\pi_{\text{ref}}(y_w\mid x)}-\log\frac{\pi_\theta(y_l\mid x)}{\pi_{\text{ref}}(y_l\mid x)}\right)\right)\right]
+$$
+
+$$
+\text{logits}=\left(\log p_\theta^{w}-\log p_{\text{ref}}^{w}\right)-\left(\log p_\theta^{l}-\log p_{\text{ref}}^{l}\right),
+\qquad
+\mathcal{L}=-\log\sigma\!\left(\beta\cdot\text{logits}\right)
+$$
+
+$$
+y_w:\ \text{chosen},\qquad y_l:\ \text{rejected},\qquad \beta\in[0.1,\ 0.5]
+$$`,
     flowDiagram: `# 隐式奖励：策略相对参考策略的对数比率
 + chosen :: policy_logp_w - ref_logp_w = r_w :: 优选回答的隐式奖励
 + rejected :: policy_logp_l - ref_logp_l = r_l :: 拒绝回答的隐式奖励
@@ -1214,7 +1431,24 @@ def dpo_loss(policy_chosen_logps, policy_rejected_logps,
         ],
       },
     ],
-    formula: 'L_PPO = E[min(r_t · A_t, clip(r_t, 1-ε, 1+ε) · A_t)]\n\nr_t = exp(log_π_new - log_π_old)\nA_t: 优势函数 (GAE 估计)\nε: 截断参数，通常 0.2',
+    formula: String.raw`$$
+\mathcal{L}_{\text{PPO}}=-\mathbb{E}_t\left[\min\!\left(r_tA_t,\ \operatorname{clip}(r_t,\,1-\epsilon,\,1+\epsilon)\,A_t\right)\right]
+$$
+
+$$
+r_t=\exp\!\left(\log\pi_\theta^{\text{new}}-\log\pi_\theta^{\text{old}}\right),
+\qquad
+A_t=\text{GAE advantage},
+\qquad
+\epsilon=0.2
+$$
+
+$$
+\begin{aligned}
+A_t>0:\ &\quad r_t>1+\epsilon\ \Rightarrow\ r_tA_t\ \text{capped at}\ (1+\epsilon)A_t\\[2pt]
+A_t<0:\ &\quad r_t<1-\epsilon\ \Rightarrow\ r_tA_t\ \text{floored at}\ (1-\epsilon)A_t
+\end{aligned}
+$$`,
     flowDiagram: `# 截断重要性比率，给更新幅度设上界
 old_logp :: π_old 对已采样动作的对数概率
 new_logp :: π_new 的对数概率，需要梯度
@@ -1277,7 +1511,23 @@ def ppo_loss(old_logp, new_logp, advantages, eps=0.2):
         ],
       },
     ],
-    formula: '优势: Aᵢ = (rᵢ - mean(r)) / (std(r) + ε)    # 组内归一化\n\n损失: L = -E[min(ρᵢAᵢ, clip(ρᵢ)Aᵢ)] + β·KL(π‖π_ref)\n\nρᵢ = πθ(oᵢ|q) / πθ_old(oᵢ|q)',
+    formula: String.raw`$$
+\hat{A}_i=\frac{r_i-\operatorname{mean}(\mathbf{r})}{\operatorname{std}(\mathbf{r})+\epsilon},
+\qquad
+\{o_1,\dots,o_G\}\sim\pi_{\theta_{\text{old}}}(\cdot\mid q)
+$$
+
+$$
+\mathcal{L}(\theta)=-\mathbb{E}\!\left[\min\!\left(\rho_i\hat{A}_i,\ \operatorname{clip}(\rho_i,1-\epsilon,1+\epsilon)\,\hat{A}_i\right)\right]
++\beta\,\mathrm{KL}\!\left(\pi_\theta\,\|\,\pi_{\text{ref}}\right)
+$$
+
+$$
+\begin{aligned}
+\text{GRPO (sequence-level):}\quad & \rho_i=\frac{\pi_\theta(o_i\mid q)}{\pi_{\theta_{\text{old}}}(o_i\mid q)}\\
+\text{PPO (token-level):}\quad & \rho_{i,t}=\frac{\pi_\theta(o_{i,t}\mid x,y_{<t})}{\pi_{\theta_{\text{old}}}(o_{i,t}\mid x,y_{<t})}
+\end{aligned}
+$$`,
     flowDiagram: `# 组内采样：同一个问题采 G 个回答
 问题 q :: 同一个 prompt
 + 回答 o₁ :: 奖励 r₁
@@ -1351,7 +1601,20 @@ def kl_penalty(logp, ref_logp):
         ],
       },
     ],
-    formula: '组内优势 (同 GRPO): Â_i = (r_i - mean(r)) / (std(r) + ε)\n\n序列级重要性比率 (长度归一化):\n  s_i(θ) = ( π_θ(y_i|x) / π_old(y_i|x) )^(1/|y_i|)\n         = exp( (1/|y_i|) · Σ_t log( π_θ(y_{i,t}|x, y_{i,<t}) / π_old(y_{i,t}|x, y_{i,<t}) ) )\n\n目标: J(θ) = E[ min( s_i(θ)·Â_i , clip(s_i(θ), 1-ε, 1+ε)·Â_i ) ]\n\nε 典型取 3e-4（比率已长度归一化，偏离 1 的幅度很小，比 PPO 的 0.2 小几个数量级）',
+    formula: String.raw`$$
+\hat{A}_i=\frac{r_i-\operatorname{mean}(r)}{\operatorname{std}(r)+\epsilon}
+$$
+
+$$
+s_i(\theta)=\left(\frac{\pi_\theta(y_i\mid x)}{\pi_{\text{old}}(y_i\mid x)}\right)^{1/|y_i|}
+=\exp\!\left(\frac{1}{|y_i|}\sum_t\log\frac{\pi_\theta(y_{i,t}\mid x,y_{i,<t})}{\pi_{\text{old}}(y_{i,t}\mid x,y_{i,<t})}\right)
+$$
+
+$$
+\mathcal{L}_{\text{GSPO}}=-\mathbb{E}\left[\min\!\left(s_i\hat{A}_i,\ \operatorname{clip}(s_i,\,1-\epsilon,\,1+\epsilon)\,\hat{A}_i\right)\right],
+\qquad
+\epsilon=3\times10^{-4}
+$$`,
     flowDiagram: `# 把重要性比率从 token 级提到序列级
 逐 token 对数比 :: [B, G, T] :: log(π_θ / π_old)，每个 token 一个
 Σ_t :: 按 mask 求和 → [B, G] :: padding 不参与
@@ -1413,7 +1676,31 @@ def gspo_loss(per_token_logp_new, per_token_logp_old, completion_mask,
         ],
       },
     ],
-    formula: '1. clip-higher（解耦上下界）:\n   L^clip = min( ρ_{i,t}·Â_i , clip(ρ_{i,t}, 1-ε_low, 1+ε_high)·Â_i )\n   ε_high > ε_low（典型 ε_low = 0.2, ε_high = 0.28）→ 抬高熵的下界\n\n2. 动态采样: 丢弃 Â 全为 0 的组（组内奖励全相同 = 全对或全错）\n\n3. token 级损失（不再按 |y_i| 各自归一化）:\n   L = - 1/Σ_i|y_i| · Σ_i Σ_t min( ρ_{i,t}·Â_i , clip(ρ_{i,t})·Â_i )\n\n4. 超长奖励塑形: R̃(y) = R(y) - α·max(0, |y| - L_max)',
+    formula: String.raw`$$
+\rho_{i,t}=\frac{\pi_\theta(y_{i,t}\mid x,y_{i,<t})}{\pi_{\text{old}}(y_{i,t}\mid x,y_{i,<t})},
+\qquad
+\hat{A}_i=\frac{r_i-\operatorname{mean}(r)}{\operatorname{std}(r)+\epsilon}
+$$
+
+$$
+\text{clip-higher}:\quad
+\min\!\left(\rho_{i,t}\hat{A}_i,\ \operatorname{clip}(\rho_{i,t},\,1-\epsilon_{\text{low}},\,1+\epsilon_{\text{high}})\,\hat{A}_i\right),
+\qquad
+\epsilon_{\text{low}}=0.2,\quad \epsilon_{\text{high}}=0.28
+$$
+
+$$
+\text{dynamic sampling}:\quad \text{discard groups with } \hat{A}_i\equiv 0
+$$
+
+$$
+\text{token-level loss}:\quad
+\mathcal{L}=-\frac{1}{\sum_i|y_i|}\sum_i\sum_t\min\!\left(\rho_{i,t}\hat{A}_i,\ \operatorname{clip}(\rho_{i,t},\,1-\epsilon_{\text{low}},\,1+\epsilon_{\text{high}})\,\hat{A}_i\right)
+$$
+
+$$
+\text{overlong shaping}:\quad \tilde{R}(y)=R(y)-\alpha\max\!\left(0,\ |y|-L_{\max}\right)
+$$`,
     flowDiagram: `# 一个 batch 里的若干组，先过滤再更新
 ! ✗ group_1  rewards [1,1,1,1] → std = 0 → Â 全 0，无梯度信号
 ! ✗ group_2  rewards [0,0,0,0] → std = 0 → Â 全 0，无梯度信号
@@ -1488,7 +1775,25 @@ def dapo_loss(per_token_logp_new, per_token_logp_old, completion_mask,
         ],
       },
     ],
-    formula: '损失: L = E_{y ~ π_S(·|x)} [ (1/|y|) Σ_t D( p_T(·|x, y_<t) ‖ p_S(·|x, y_<t) ) ]\n\n广义 JSD 插值 (β ∈ [0, 1]):\n  M = β·p_T + (1 - β)·p_S\n  D_GJS(β) = (1 - β)·KL(p_T ‖ M) + β·KL(p_S ‖ M)\n\n端点 (可用代码断言验证):\n  β = 0   → KL(p_T ‖ p_S)   前向 KL (mode-covering，Hinton 蒸馏的方向)\n  β = 1   → KL(p_S ‖ p_T)   反向 KL (mode-seeking，只学教师的高概率模式)\n  β = 0.5 → 标准 JSD',
+    formula: String.raw`$$
+\mathcal{L}_{\text{OPD}}=\mathbb{E}_{y\sim\pi_S(\cdot\mid x)}\left[\frac{1}{|y|}\sum_t D\!\left(p_T(\cdot\mid x,y_{<t})\ \|\ p_S(\cdot\mid x,y_{<t})\right)\right]
+$$
+
+$$
+\begin{aligned}
+M&=\beta\,p_T+(1-\beta)\,p_S\\[2pt]
+D_{\text{GJS}}(\beta)&=(1-\beta)\operatorname{KL}(p_T\|M)+\beta\operatorname{KL}(p_S\|M),
+\qquad \beta\in[0,1]
+\end{aligned}
+$$
+
+$$
+\begin{aligned}
+\beta=0 &\Rightarrow \operatorname{KL}(p_T\|p_S) && \text{forward KL (mode-covering)}\\[2pt]
+\beta=1 &\Rightarrow \operatorname{KL}(p_S\|p_T) && \text{reverse KL (mode-seeking)}\\[2pt]
+\beta=0.5 &\Rightarrow \text{standard JSD}
+\end{aligned}
+$$`,
     flowDiagram: `# 两条路的对比
 ! ✗ 离线蒸馏：教师生成 y_T，学生拟合 y_T，训练分布 ≠ 推理分布
 ! ✓ on-policy 蒸馏：学生自己采样，教师在自己的轨迹上逐 token 打分
@@ -1575,7 +1880,25 @@ def opd_loss(student_logits, teacher_logits, loss_mask=None,
         ],
       },
     ],
-    formula: '学生: π_θ(·|x)            只有 prompt，需要真采样 (rollout)\n教师: π_θ(·|x ⊕ c)        同一份权重，额外拼接特权上下文 c，只需一次前向\n\n损失: L = E_{y ~ π_θ(·|x)} [ (1/|y|) Σ_t KL( π_θ(·|x, y_<t) ‖ π_θ(·|x ⊕ c, y_<t) ) ]\n\n反向 KL: mode-seeking，学生只对齐「信息更全的自己」的高概率模式\n\n特权上下文 c 的典型形式:\n  完整参考答案 / 关键提示 (hint) / 解题策略名 / 工具返回结果 / 用户纠正',
+    formula: String.raw`$$
+\text{student}: \pi_\theta(\cdot\mid x)\ \ \text{(rollout, gradient)},
+\qquad
+\text{teacher}: \pi_\theta(\cdot\mid x\oplus c)\ \ \text{(one forward, no\_grad)}
+$$
+
+$$
+\mathcal{L}=\mathbb{E}_{y\sim\pi_\theta(\cdot\mid x)}\left[\frac{1}{|y|}\sum_t\operatorname{KL}\!\left(\pi_\theta(\cdot\mid x,y_{<t})\ \|\ \pi_\theta(\cdot\mid x\oplus c,y_{<t})\right)\right]
+$$
+
+$$
+\text{forward KL}: \operatorname{KL}(\pi_T\|\pi_S)
+\qquad\text{vs}\qquad
+\text{reverse KL}: \operatorname{KL}(\pi_S\|\pi_T)
+$$
+
+$$
+c\in\{\text{reference answer},\ \text{hint},\ \text{strategy name},\ \text{tool output},\ \text{user correction}\}
+$$`,
     flowDiagram: `# 同一份权重 θ，两条路径
 学生路径 :: x → π_θ(·|x) :: 需要真采样 rollout，带着自己的错误
 教师路径 :: x ⊕ c → π_θ(·|x ⊕ c) :: 同一份权重多拼一段上下文，no_grad
@@ -1651,7 +1974,19 @@ def self_opd_loss(model, input_ids, privileged_ids, answer_mask):
         ],
       },
     ],
-    formula: 'm_t = β₁m_{t-1} + (1-β₁)g_t          # 一阶矩\nv_t = β₂v_{t-1} + (1-β₂)g_t²         # 二阶矩\nm̂_t = m_t/(1-β₁ᵗ)                     # 偏差修正\nv̂_t = v_t/(1-β₂ᵗ)\n\nθ_t = θ_{t-1} - lr · (m̂_t/(√v̂_t + ε) + λθ_{t-1})\n                                ↑ 解耦权重衰减',
+    formula: String.raw`$$
+\begin{aligned}
+m_t &= \beta_1 m_{t-1}+(1-\beta_1)\,g_t\\[2pt]
+v_t &= \beta_2 v_{t-1}+(1-\beta_2)\,g_t^{2}\\[2pt]
+\hat{m}_t &= \frac{m_t}{1-\beta_1^{t}},\qquad
+\hat{v}_t=\frac{v_t}{1-\beta_2^{t}}\\[2pt]
+\theta_t &= \theta_{t-1}-\eta\left(\frac{\hat{m}_t}{\sqrt{\hat{v}_t}+\epsilon}+\lambda\,\theta_{t-1}\right)
+\end{aligned}
+$$
+
+$$
+\eta=3\times10^{-4},\qquad (\beta_1,\beta_2)=(0.9,\ 0.95),\qquad \lambda=0.1,\qquad \epsilon=10^{-8}
+$$`,
     flowDiagram: `# 一阶矩与二阶矩
 g_t :: 当前梯度
 m_t = β₁·m + (1-β₁)·g_t :: 一阶矩，动量
@@ -1724,7 +2059,29 @@ class AdamW:
         ],
       },
     ],
-    formula: 'Muon 更新（只对 ≥ 2 维的隐藏层权重）:\n  M_t = μ·M_{t-1} + G_t                  # 累积动量\n  O_t = NS5(M_t)                          # 正交化，逼近极分解 UVᵀ\n  θ_t = θ_{t-1} - η·O_t\n\nNewton-Schulz 五次迭代（求「零次幂」）:\n  X_0 = G / (‖G‖_F + ε)                   # 先归一化，保证谱范数 ≤ 1\n  重复 5 次:\n      A = X·Xᵀ\n      X ← a·X + (b·A + c·A²)·X\n  系数 (a, b, c) = (3.4445, -4.7750, 2.0315)\n\nMuonClip = Muon + QK-Clip（Kimi K2 的做法）:\n  S_max = 每个 head 在本 batch 上的最大注意力 logit\n  若 S_max > τ:  γ = τ / S_max ;  W_q ← √γ·W_q ,  W_k ← √γ·W_k\n  (典型 τ = 100)',
+    formula: String.raw`$$
+\begin{aligned}
+M_t &= \mu M_{t-1}+G_t,\qquad \mu\approx 0.95\\
+O_t &= \operatorname{NS}_5(M_t)\\
+\theta_t &= \theta_{t-1}-\eta\,O_t
+\end{aligned}
+$$
+
+$$
+\begin{aligned}
+X_0 &= \frac{M_t}{\|M_t\|_F+\epsilon}\\
+A &= X_kX_k^{\top}\\
+X_{k+1} &= aX_k+(bA+cA^{2})X_k,\qquad k=0,\dots,4\\
+(a,b,c) &= (3.4445,\ -4.7750,\ 2.0315)
+\end{aligned}
+$$
+
+$$
+\text{MuonClip:}\quad S_{\max}>\tau\Rightarrow\gamma=\frac{\tau}{S_{\max}},\qquad
+W_q\leftarrow\sqrt{\gamma}\,W_q,\qquad
+W_k\leftarrow\sqrt{\gamma}\,W_k,\qquad
+\tau\approx 100
+$$`,
     flowDiagram: `# 参数分组：Muon 只吃 2D 隐藏层权重
 + emb / lm_head / bias / norm :: 交给 AdamW
 + attn & mlp 的 2D 权重矩阵 :: 交给 Muon
@@ -1840,7 +2197,26 @@ def qk_clip_(model, tau=100.0):
         ],
       },
     ],
-    formula: 'h = W₀x + ΔWx = W₀x + (B·A)x · (α/r)\n\nW₀: [d, k] 冻结\nA:  [r, k] 可训练 (kaiming 初始化)\nB:  [d, r] 可训练 (零初始化)\nr ≪ min(d, k)',
+    formula: String.raw`$$
+h=W_0x+\Delta Wx=W_0x+\frac{\alpha}{r}BAx
+$$
+
+$$
+W_0\in\mathbb{R}^{d\times k}\ \text{(frozen)},\qquad
+A\in\mathbb{R}^{r\times k},\qquad
+B\in\mathbb{R}^{d\times r},\qquad
+r\ll\min(d,k)
+$$
+
+$$
+A\sim\text{kaiming},\qquad B=\mathbf{0}\ \Rightarrow\ BA=0\ \text{at init}
+$$
+
+$$
+\frac{\text{trainable}}{\text{total}}=\frac{r(d+k)}{dk}\approx 0.1\%,
+\qquad
+W_{\text{new}}=W_0+\frac{\alpha}{r}BA\ \ \text{(mergeable at inference)}
+$$`,
     flowDiagram: `# 主干冻结，旁路低秩可训练
 x :: [B, S, k] :: 输入
 W₀ :: [d, k] :: 预训练权重，冻结
@@ -1912,7 +2288,22 @@ class LoRALinear(nn.Module):
         ],
       },
     ],
-    formula: 'Temperature: P(xᵢ) = softmax(zᵢ/T)\n  T<1: 更确定  T>1: 更随机  T→0: greedy\n\nTop-k: 只保留 top-k 个 token, 其余设为 -∞\nTop-p: 按概率降序排列, 保留累积概率≥p 的最小集合',
+    formula: String.raw`$$
+P(x_i)=\frac{\exp(z_i/T)}{\sum_j\exp(z_j/T)}
+$$
+
+$$
+T<1:\ \text{sharper},\qquad T>1:\ \text{flatter},\qquad T\to 0:\ \text{greedy}
+$$
+
+$$
+\text{top-}k:\quad \mathcal{S}_k=\{i:\ \operatorname{rank}(z_i)\le k\},
+\qquad p_i\leftarrow 0\ \text{for}\ i\notin\mathcal{S}_k
+$$
+
+$$
+\text{top-}p:\quad \mathcal{S}_p=\min\left\{V'\subseteq V:\ \sum_{i\in V'}p_i\ge p\right\}
+$$`,
     flowDiagram: `# 三步：调形状 → 截长尾 → 采样
 logits :: [V] :: 模型对词表的原始打分
 logits = logits / T :: [V] :: 温度只做一次除法，却改变整个分布的熵
@@ -1982,7 +2373,33 @@ def top_k_top_p_sampling(logits, temperature=0.7, top_k=50, top_p=0.9):
         ],
       },
     ],
-    formula: '前向/反向: FP16 (半精度, 2 bytes)\n主权重: FP32 (全精度, 4 bytes)\n梯度: FP16 → loss_scale → 转 FP32 → 更新主权重\n\nBF16: 指数位更多 (8 vs 5), 不需要 loss scaling',
+    formula: String.raw`$$
+\text{value}=(-1)^{s}\cdot 2^{\,e-\text{bias}}\cdot(1.m)
+$$
+
+$$
+\begin{aligned}
+\text{FP32}: &\quad 1+8+23\ \text{bits}\\[2pt]
+\text{FP16}: &\quad 1+5+10\ \text{bits}\\[2pt]
+\text{BF16}: &\quad 1+8+7\ \text{bits}
+\end{aligned}
+$$
+
+$$
+\begin{aligned}
+\text{forward / backward}: &\quad \text{FP16}\ (2\ \text{B})\\[2pt]
+\text{master weights}: &\quad \text{FP32}\ (4\ \text{B})\\[2pt]
+\text{gradient}: &\quad g_{\text{FP16}}\ \longrightarrow\ \text{FP32}
+\end{aligned}
+$$
+
+$$
+\mathcal{L}'\leftarrow S\cdot\mathcal{L},
+\qquad
+g\leftarrow\frac{\operatorname{cast}\!\left(g_{\text{FP16}}\right)}{S},
+\qquad
+\text{BF16}:\ e_{\text{bits}}=8\ \Rightarrow\ S=1
+$$`,
     flowDiagram: `# 计算走半精度，参数留全精度
 FP32 主权重 :: 唯一被更新的真身
 FP16 权重 :: 每次前向前从主权重 cast 一份
@@ -2049,7 +2466,17 @@ optimizer.step()`,
         ],
       },
     ],
-    formula: '标准: 保存所有层激活 → 显存 O(L)\nCheckpoint: 只保存 √L 个检查点 → 显存 O(√L)\n\n代价: 反向传播需要重新计算 → 训练时间 +20%',
+    formula: String.raw`$$
+\text{activations}: O(L)\ \longrightarrow\ O\!\left(\sqrt{L}\right)
+$$
+
+$$
+\text{memory}: L\,B\,S\,d\cdot 4\ \text{B}\ \longrightarrow\ \sqrt{L}\,B\,S\,d\cdot 4\ \text{B}
+$$
+
+$$
+\text{checkpoints}=\sqrt{L},\qquad \text{time overhead}\approx 20\%
+$$`,
     flowDiagram: `# 标准训练：全部激活都留着
 + 标准 :: Layer₁ → act₁ → Layer₂ → act₂ → … → Layer_L → act_L :: 每层激活全部保存
 ! ✗ 标准代价：激活显存 O(L)，层数一多就成了显存大头
@@ -2116,7 +2543,32 @@ class CheckpointBlock(nn.Module):
         ],
       },
     ],
-    formula: '缩放因子（块内 amax）:\n  scale = amax(block) / 448                # 448 是 e4m3 的可表示上界\n\n量化 / 反量化:\n  x_q = clamp(x / scale, -448, 448).to(fp8)      # 只保留 3 位尾数\n  x̂  = x_q · scale\n\n块级矩阵乘法（缩放因子提到块外）:\n  y = Σ_block (x_q · s_x) · (w_q · s_w) = Σ_block s_x · s_w · (x_q · w_q)\n\nDeepSeek-V3 的配置:\n  激活: 1×128 的块（per-token per-128-channel）\n  权重: 128×128 的块\n  累加: 提升到高精度（FP32 / 张量核内高精度累加）',
+    formula: String.raw`$$
+s=\frac{\operatorname{amax}(\text{block})}{448},\qquad 448=\text{e4m3 max}
+$$
+
+$$
+x_q=\operatorname{clamp}\!\left(\frac{x}{s},\ -448,\ 448\right)\to\text{FP8},
+\qquad
+\hat{x}=x_q\,s
+$$
+
+$$
+y=\sum_{\text{block}}(x_qs_x)(w_qs_w)=\sum_{\text{block}}s_xs_w\,(x_qw_q)
+$$
+
+$$
+\begin{aligned}
+\text{e4m3}: &\quad 1+4+3\ \text{bits},\quad \max=448 && \text{(activations, weights)}\\[2pt]
+\text{e5m2}: &\quad 1+5+2\ \text{bits},\quad \max=57344 && \text{(gradients)}
+\end{aligned}
+$$
+
+$$
+\text{DeepSeek-V3}:\quad \text{activations }1\times128,\qquad
+\text{weights }128\times128,\qquad
+\text{accumulate in FP32}
+$$`,
     flowDiagram: `# 整张量共用一个 scale：离群值把所有正常值拖下水
 x :: [4096] :: 含离群值 1200
 scale = amax / 448 :: 2.68 :: 为了装下 1200，只能把范围拉到最大
@@ -2199,7 +2651,24 @@ def fp8_gemm_sim(x, w, block_size=128):
         ],
       },
     ],
-    formula: '逻辑块: 连续的 token 块 (如 16 tokens/block)\n物理块: GPU 显存中的实际存储位置\n块表: logical_block → physical_block 映射\n\n内存利用率: ~96% (vs 传统 ~45%)',
+    formula: String.raw`$$
+\text{phys}(s,j)=\text{block\_table}[s][j]
+$$
+
+$$
+\text{utilization}=\frac{\sum_i\ell_i}{N_{\text{blocks}}\cdot B},
+\qquad B=16\ \text{tokens/block}
+$$
+
+$$
+\text{naive}: \text{batch}\times S_{\max}\ \text{preallocated},
+\qquad
+\text{paged}: \sum_i\ell_i\ \text{allocated on demand}
+$$
+
+$$
+\text{utilization}: 45\%\ \longrightarrow\ 96\%
+$$`,
     flowDiagram: `# 传统：每个请求按 max_len 预分配
 ! ✗ seq₁ 预分配 max_len，实际只用了很短一段，其余全程闲置
 ! ✗ 剩余空洞拼不到一起 → 显存碎片化，利用率约 45%
@@ -2281,7 +2750,28 @@ class PagedKVCache:
         ],
       },
     ],
-    formula: '1. Draft model 生成 γ 个 token: x₁, x₂, ..., x_γ\n2. Target model 一次性前向，得到所有位置的概率\n3. 逐 token 接受/拒绝:\n   accept if r < p_target(xᵢ) / p_draft(xᵢ)\n4. 保证输出分布与只用 target model 完全一致!',
+    formula: String.raw`$$
+\text{accept } x_i\ \text{iff}\ r<\frac{p_{\text{target}}(x_i)}{p_{\text{draft}}(x_i)},
+\qquad r\sim U[0,1]
+$$
+
+$$
+\mathbb{E}\left[\#\text{accepted}\right]=\sum_{t=1}^{\gamma}\prod_{i=1}^{t}\alpha_i,
+\qquad
+\alpha_i=\min\!\left(1,\ \frac{p_{\text{target}}(x_i)}{p_{\text{draft}}(x_i)}\right)
+$$
+
+$$
+\gamma=5,\qquad
+\mathbb{E}\left[\#\text{accepted}\right]\sim 3\text{ to }4,\qquad
+\text{speedup}\sim 2\text{ to }3\times
+$$
+
+$$
+\text{standard}: 1\ \text{forward}\to 1\ \text{token},
+\qquad
+\text{speculative}: 1\ \text{forward}\to 3\text{ to }4\ \text{tokens}
+$$`,
     flowDiagram: `# Draft 先猜，Target 一次验证
 Draft model :: 小、快，自回归生成 γ 个候选
 x₁ → x₂ → x₃ → x₄ → x₅ :: 候选 token :: γ = 5，逐个猜出来
@@ -2380,7 +2870,19 @@ def speculative_decode(draft_model, target_model, prompt_ids,
         ],
       },
     ],
-    formula: '每层:\n  x = x + Attention(LayerNorm(x), causal_mask)\n  x = x + FFN(LayerNorm(x))\n\n生成: P(x₁...xₙ) = Π P(xₜ|x<t)',
+    formula: String.raw`$$
+x\leftarrow x+\operatorname{Attn}\!\left(\operatorname{LN}(x),\ \text{causal mask}\right),
+\qquad
+x\leftarrow x+\operatorname{FFN}\!\left(\operatorname{LN}(x)\right)
+$$
+
+$$
+P(x_1,\dots,x_n)=\prod_{t=1}^{n}P(x_t\mid x_{<t})
+$$
+
+$$
+\{\text{RMSNorm},\ \text{SwiGLU},\ \text{RoPE},\ \text{Pre-Norm}\}
+$$`,
     flowDiagram: `# 一路 decoder 堆到顶
 tokens :: [B, S] :: 输入
 Embedding + RoPE :: [B, S, D] :: 词嵌入叠加位置信息
@@ -2459,7 +2961,22 @@ class GPTModel(nn.Module):
         ],
       },
     ],
-    formula: '串行 MTP（DeepSeek-V3 的做法）:\n  第 k 个 MTP 模块:\n    h_i^k = M_k[ RMSNorm(h_i^{k-1}) ; RMSNorm(Emb(x_{i+k})) ]\n    p_{i+k+1} = lm_head(h_i^k)\n\n  损失:\n    L_MTP   = (λ / D) · Σ_k Σ_i CE( p_{i+k+1} , x_{i+1+k} )\n    L_total = L_main + L_MTP\n\n  典型取值: λ = 0.3（前 10T tokens），之后衰减到 0.1',
+    formula: String.raw`$$
+h_i^{k}=M_k\!\left[\operatorname{RMSNorm}\!\left(h_i^{k-1}\right);\ \operatorname{RMSNorm}\!\left(\operatorname{Emb}\!\left(x_{i+k}\right)\right)\right],
+\qquad
+p_{i+k+1}=\operatorname{lm\_head}\!\left(h_i^{k}\right)
+$$
+
+$$
+\mathcal{L}_{\text{MTP}}=\frac{\lambda}{D}\sum_k\sum_i \text{CE}\!\left(p_{i+k+1},\ x_{i+1+k}\right),
+\qquad
+\mathcal{L}_{\text{total}}=\mathcal{L}_{\text{main}}+\mathcal{L}_{\text{MTP}}
+$$
+
+$$
+\lambda=0.3\ \text{(first 10T tokens)}\ \longrightarrow\ 0.1,\qquad
+\operatorname{Emb},\ \operatorname{lm\_head}\ \text{shared with the main model}
+$$`,
     flowDiagram: `# 主干之外串行接若干 MTP 模块
 x :: [x₁, x₂, x₃, x₄, x₅] :: 输入序列
 主干 Transformer :: h⁰ [B, T, D] → lm_head → 预测 x₂ :: 主损失 L_main
@@ -2555,7 +3072,29 @@ def mtp_loss(mtp_modules, h0, input_ids, embed, lm_head, num_heads=1, lam=0.3):
         ],
       },
     ],
-    formula: 'δ_t = r_t + γV(s_{t+1}) - V(s_t)          # TD error\nA_t = Σ_{l=0}^{T-t} (γλ)^l · δ_{t+l}          # GAE\n\n= δ_t + γλ·δ_{t+1} + (γλ)²·δ_{t+2} + ...\n\nλ=1: A_t = MC return - V(s_t)    (无偏差)\nλ=0: A_t = δ_t = r_t + γV(s_{t+1}) - V(s_t)  (高偏差)',
+    formula: String.raw`$$
+\delta_t=r_t+\gamma V(s_{t+1})-V(s_t)
+$$
+
+$$
+A_t=\sum_{l=0}^{T-t}(\gamma\lambda)^{l}\,\delta_{t+l}
+=\delta_t+\gamma\lambda\,\delta_{t+1}+(\gamma\lambda)^{2}\delta_{t+2}+\cdots
+$$
+
+$$
+A_t=\delta_t+\gamma\lambda\,A_{t+1},\qquad A_T=\delta_T
+$$
+
+$$
+\begin{aligned}
+\lambda=1: &\quad A_t=\text{MC return}-V(s_t) & \text{(unbiased, high variance)}\\[2pt]
+\lambda=0: &\quad A_t=\delta_t & \text{(low variance, high bias)}
+\end{aligned}
+$$
+
+$$
+\gamma=0.99,\qquad \lambda=0.95
+$$`,
     flowDiagram: `# 两个端点
 ! ✗ MC return：无偏差，但方差随轨迹长度增长
 ! ✗ TD(0)：方差小，但严重依赖 V(s) 的准确度，偏差大
@@ -2628,7 +3167,18 @@ def compute_gae(rewards, values, gamma=0.99, lam=0.95):
         ],
       },
     ],
-    formula: '链式法则: ∂L/∂x = ∂L/∂y · ∂y/∂x\n\n常见梯度:\n  y = Wx:     ∂L/∂W = ∂L/∂y · xᵀ,  ∂L/∂x = Wᵀ · ∂L/∂y\n  y = ReLU(x): ∂L/∂x = ∂L/∂y · (x > 0)\n  y = softmax: ∂L/∂z = y - one_hot(target)  (配合 CE)',
+    formula: String.raw`$$
+\frac{\partial\mathcal{L}}{\partial x}=\frac{\partial\mathcal{L}}{\partial y}\cdot\frac{\partial y}{\partial x}
+$$
+
+$$
+\begin{aligned}
+y=Wx: &\quad \frac{\partial\mathcal{L}}{\partial W}=\frac{\partial\mathcal{L}}{\partial y}\,x^{\top},\quad
+\frac{\partial\mathcal{L}}{\partial x}=W^{\top}\frac{\partial\mathcal{L}}{\partial y}\\[3pt]
+y=\operatorname{ReLU}(x): &\quad \frac{\partial\mathcal{L}}{\partial x}=\frac{\partial\mathcal{L}}{\partial y}\odot(x>0)\\[3pt]
+y=\operatorname{softmax}(z): &\quad \frac{\partial\mathcal{L}}{\partial z}=y-\text{one\_hot}(\text{target})\quad(\text{with CE})
+\end{aligned}
+$$`,
     flowDiagram: `# 前向：按拓扑顺序算，顺手保存中间量
 x → W₁ → h → ReLU → a → W₂ → ŷ → Loss → L :: 保存 x、h、a、ŷ 供反向使用
 # 反向：从输出往输入逐层乘局部梯度
@@ -2706,7 +3256,22 @@ class TwoLayerNet:
         ],
       },
     ],
-    formula: 'ReLU(x) = max(0, x)            ReLU\'(x) = x > 0\nGELU(x) = x · Φ(x)             Φ = standard normal CDF\nSiLU(x) = x · σ(x)            SiLU\'(x) = SiLU(x) + σ(x)(1-SiLU(x))\nSwish = SiLU (same thing)',
+    formula: String.raw`$$
+\operatorname{ReLU}(x)=\max(0,x),\qquad \operatorname{ReLU}^{\prime}(x)=(x>0)
+$$
+
+$$
+\operatorname{GELU}(x)=x\,\Phi(x),\qquad \Phi=\text{standard normal CDF}
+$$
+
+$$
+\operatorname{SiLU}(x)=x\,\sigma(x),\qquad
+\operatorname{SiLU}^{\prime}(x)=\operatorname{SiLU}(x)+\sigma(x)\left(1-\operatorname{SiLU}(x)\right)
+$$
+
+$$
+\text{Swish}\equiv\operatorname{SiLU}
+$$`,
     flowDiagram: `# 三种激活函数：形状决定行为
 x :: [..., D] :: 输入张量
 + ReLU :: max(0, x) :: 负区间恒为 0，正区间线性

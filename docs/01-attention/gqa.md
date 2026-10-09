@@ -19,17 +19,23 @@ MHA 和 MQA 的折中方案：Q 有 H 个头，KV 只有 G 个头 (G<H)。多个
 
 ## 📐 核心公式
 
-```
-Q: [B, H, S, Dh]     (H 个头)
-K,V: [B, G, S, Dh]   (G 个头, G < H)
+$$
+Q\in\mathbb{R}^{B\times H\times S\times D_h},\qquad
+K,V\in\mathbb{R}^{B\times G\times S\times D_h},\qquad
+1\le G\le H
+$$
 
-repeat_kv: K,V → [B, H, S, Dh]   (复制 G→H)
+$$
+\text{KV cache}=2\,n_{\text{layers}}\,G\,S\,D_h\,b
+$$
 
-对比:
-- MHA: G = H (每个 Q 头独立 KV)
-- MQA: G = 1 (所有 Q 头共享一组 KV)
-- GQA: 1 < G < H (折中方案)
-```
+$$
+\begin{aligned}
+G=H &\Rightarrow \text{MHA}, & \text{one KV per query head}\\[2pt]
+1<G<H &\Rightarrow \text{GQA}, & H/G \text{ query heads share one KV}\\[2pt]
+G=1 &\Rightarrow \text{MQA}, & \text{all query heads share one KV}
+\end{aligned}
+$$
 
 ## 📊 张量流程图
 

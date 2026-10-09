@@ -19,16 +19,22 @@
 
 ## 📐 核心公式
 
-```
-L = -Σ log P(xₜ | x<t)
+$$
+\mathcal{L}_{\text{CE}}=-\frac{1}{|x|}\sum_{t=1}^{|x|}\log P_\theta(x_t\mid x_{<t})
+$$
 
-实现: CE(shift(logits), shift(labels))
-logits[:, :-1] 预测 labels[:, 1:]
+$$
+\text{CE}\!\left(\operatorname{shift}(\text{logits}),\ \operatorname{shift}(\text{labels})\right),
+\qquad
+\text{logits}[:,:-1]\ \text{predicts}\ \text{labels}[:,1:]
+$$
 
-其中:
-- Pretrain: 所有 token 参与 loss
-- SFT: prompt 部分 label 设为 -100，只算 response
-```
+$$
+\begin{aligned}
+\text{Pretrain}: &\quad \text{all tokens counted}\\[2pt]
+\text{SFT}: &\quad \text{label}_{\text{prompt}}=-100,\qquad \text{ignore\_index}=-100
+\end{aligned}
+$$
 
 ## 📊 张量流程图
 

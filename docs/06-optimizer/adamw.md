@@ -19,20 +19,19 @@ Adam 的改进版：将权重衰减从梯度中解耦，直接作用于参数。
 
 ## 📐 核心公式
 
-```
-m_t = β₁m_{t-1} + (1-β₁)g_t          # 一阶矩
-v_t = β₂v_{t-1} + (1-β₂)g_t²         # 二阶矩
-m̂_t = m_t/(1-β₁ᵗ)                     # 偏差修正
-v̂_t = v_t/(1-β₂ᵗ)
+$$
+\begin{aligned}
+m_t &= \beta_1 m_{t-1}+(1-\beta_1)\,g_t\\[2pt]
+v_t &= \beta_2 v_{t-1}+(1-\beta_2)\,g_t^{2}\\[2pt]
+\hat{m}_t &= \frac{m_t}{1-\beta_1^{t}},\qquad
+\hat{v}_t=\frac{v_t}{1-\beta_2^{t}}\\[2pt]
+\theta_t &= \theta_{t-1}-\eta\left(\frac{\hat{m}_t}{\sqrt{\hat{v}_t}+\epsilon}+\lambda\,\theta_{t-1}\right)
+\end{aligned}
+$$
 
-θ_t = θ_{t-1} - lr · (m̂_t/(√v̂_t + ε) + λθ_{t-1})
-                                ↑ 解耦权重衰减
-
-LLM 标配超参:
-- lr = 3e-4
-- betas = (0.9, 0.95)
-- weight_decay = 0.1
-```
+$$
+\eta=3\times10^{-4},\qquad (\beta_1,\beta_2)=(0.9,\ 0.95),\qquad \lambda=0.1,\qquad \epsilon=10^{-8}
+$$
 
 ## 📊 张量流程图
 

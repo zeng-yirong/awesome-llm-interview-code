@@ -18,23 +18,25 @@
 
 ## 📐 核心公式
 
-```
-学生: π_θ(·|x)               只有 prompt，需要真采样 (rollout)
-教师: π_θ(·|x ⊕ c)           同一份权重，额外拼接特权上下文 c，只需一次前向
+$$
+\text{student}: \pi_\theta(\cdot\mid x)\ \ \text{(rollout, gradient)},
+\qquad
+\text{teacher}: \pi_\theta(\cdot\mid x\oplus c)\ \ \text{(one forward, no\_grad)}
+$$
 
-损失: L = E_{y ~ π_θ(·|x)} [ (1/|y|) Σ_t KL( π_θ(·|x, y_<t) ‖ π_θ(·|x ⊕ c, y_<t) ) ]
+$$
+\mathcal{L}=\mathbb{E}_{y\sim\pi_\theta(\cdot\mid x)}\left[\frac{1}{|y|}\sum_t\operatorname{KL}\!\left(\pi_\theta(\cdot\mid x,y_{<t})\ \|\ \pi_\theta(\cdot\mid x\oplus c,y_{<t})\right)\right]
+$$
 
-反向 KL: mode-seeking，学生只对齐「信息更全的自己」的高概率模式
+$$
+\text{forward KL}: \operatorname{KL}(\pi_T\|\pi_S)
+\qquad\text{vs}\qquad
+\text{reverse KL}: \operatorname{KL}(\pi_S\|\pi_T)
+$$
 
-特权上下文 c 的典型形式:
-  完整参考答案 / 关键提示 (hint) / 解题策略名 / 工具返回结果 / 用户纠正
-```
-
-其中:
-- `θ`: 教师和学生共享的同一份参数（这是 self 的含义）
-- `c`: 特权上下文（privileged context），只在训练时可得
-- `y`: 学生自己采样的序列 —— rollout 必须是 on-policy 的
-- 教师的 forward 必须 `no_grad`，否则「教师」会被同一步更新带跑
+$$
+c\in\{\text{reference answer},\ \text{hint},\ \text{strategy name},\ \text{tool output},\ \text{user correction}\}
+$$
 
 ## 📊 张量流程图
 

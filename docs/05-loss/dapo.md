@@ -18,27 +18,31 @@ DAPO 不改 GRPO 的骨架，只针对四个已知缺陷动手：(1) clip-higher
 
 ## 📐 核心公式
 
-```
-1. clip-higher（解耦上下界）:
-   L^clip = min( ρ_{i,t}·Â_i , clip(ρ_{i,t}, 1-ε_low, 1+ε_high)·Â_i )
-   ε_high > ε_low（典型 ε_low = 0.2, ε_high = 0.28）→ 抬高熵的下界
+$$
+\rho_{i,t}=\frac{\pi_\theta(y_{i,t}\mid x,y_{i,<t})}{\pi_{\text{old}}(y_{i,t}\mid x,y_{i,<t})},
+\qquad
+\hat{A}_i=\frac{r_i-\operatorname{mean}(r)}{\operatorname{std}(r)+\epsilon}
+$$
 
-2. 动态采样:
-   丢弃 Â 全为 0 的组（组内奖励全相同 = 全对或全错）
+$$
+\text{clip-higher}:\quad
+\min\!\left(\rho_{i,t}\hat{A}_i,\ \operatorname{clip}(\rho_{i,t},\,1-\epsilon_{\text{low}},\,1+\epsilon_{\text{high}})\,\hat{A}_i\right),
+\qquad
+\epsilon_{\text{low}}=0.2,\quad \epsilon_{\text{high}}=0.28
+$$
 
-3. token 级损失（不再按 |y_i| 归一化）:
-   L = - 1/Σ_i|y_i| · Σ_i Σ_t min( ρ_{i,t}·Â_i , clip(ρ_{i,t})·Â_i )
+$$
+\text{dynamic sampling}:\quad \text{discard groups with } \hat{A}_i\equiv 0
+$$
 
-4. 超长奖励塑形:
-   R̃(y) = R(y) - α·max(0, |y| - L_max)
-```
+$$
+\text{token-level loss}:\quad
+\mathcal{L}=-\frac{1}{\sum_i|y_i|}\sum_i\sum_t\min\!\left(\rho_{i,t}\hat{A}_i,\ \operatorname{clip}(\rho_{i,t},\,1-\epsilon_{\text{low}},\,1+\epsilon_{\text{high}})\,\hat{A}_i\right)
+$$
 
-其中:
-- `ρ_{i,t} = π_θ(y_{i,t}|·) / π_old(y_{i,t}|·)`: token 级重要性比率
-- `Â_i`: 组内归一化优势（同 GRPO）
-- `ε_low` / `ε_high`: 分开的下界和上界，这是 clip-higher 的全部内容
-- 第 3 条的分母是**整个 batch 的总 token 数**，不是每条序列各自的长度
-- `α`: 超长惩罚系数，`L_max`: 长度上限
+$$
+\text{overlong shaping}:\quad \tilde{R}(y)=R(y)-\alpha\max\!\left(0,\ |y|-L_{\max}\right)
+$$
 
 ## 📊 张量流程图
 

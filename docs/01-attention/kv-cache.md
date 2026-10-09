@@ -20,16 +20,23 @@
 
 ## 📐 核心公式
 
-```
-Prefill:  处理整个 prompt → 缓存所有 KV
-Decode:   每步只处理 1 token → K_new = cat(K_cache, K_new)
+$$
+\text{KV cache}=2\,n_{\text{layers}}\,n_{\text{kv}}\,S\,D_h\,b
+$$
 
-KV Cache 大小 = 2 × n_layers × n_kv_heads × seq_len × head_dim × bytes
+$$
+\text{LLaMA 2 70B:}\quad 2\times 80\times 8\times 4096\times 128\times 2\ \mathrm{B}=80\ \mathrm{GB}
+$$
 
-例如 LLaMA 2 70B:
-  80 layers × 8 kv_heads × 4096 seq_len × 128 head_dim × 2 bytes (fp16)
-  = 80 GB!
-```
+$$
+\text{decode}: \quad K\leftarrow\operatorname{concat}(K,\,k_{\text{new}}),\qquad
+V\leftarrow\operatorname{concat}(V,\,v_{\text{new}})
+$$
+
+$$
+\text{no cache}: \sum_{t=1}^{S}t=O(S^{2}),\qquad
+\text{cache}: O(S)\ \text{per step}
+$$
 
 ## 📊 张量流程图
 
