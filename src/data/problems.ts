@@ -80,12 +80,12 @@ export const problems: Problem[] = [
       },
     ],
     formula: String.raw`$$
-\operatorname{Attention}(Q,K,V)=\operatorname{softmax}\!\left(\frac{QK^{\top}}{\sqrt{d_k}}\right)V
+\text{Attention}(Q,K,V)=\text{softmax}\!\left(\frac{QK^{\top}}{\sqrt{d_k}}\right)V
 $$
 
 $$
-\operatorname{softmax}(z)_i=\frac{e^{z_i}}{\sum_j e^{z_j}},\qquad
-\operatorname{Var}(q\cdot k)=d_k,\qquad
+\text{softmax}(z)_i=\frac{e^{z_i}}{\sum_j e^{z_j}},\qquad
+\text{Var}(q\cdot k)=d_k,\qquad
 Q,K,V\in\mathbb{R}^{n\times d_k},\qquad
 d_k=\frac{D}{H}
 $$`,
@@ -149,11 +149,11 @@ def scaled_dot_product_attention(q, k, v, mask=None):
       },
     ],
     formula: String.raw`$$
-\operatorname{MultiHead}(Q,K,V)=\operatorname{Concat}\!\left(\text{head}_1,\dots,\text{head}_H\right)W_O
+\text{MultiHead}(Q,K,V)=\text{Concat}\!\left(\text{head}_1,\dots,\text{head}_H\right)W_O
 $$
 
 $$
-\text{head}_i=\operatorname{Attention}\!\left(QW_i^{Q},\ KW_i^{K},\ VW_i^{V}\right),
+\text{head}_i=\text{Attention}\!\left(QW_i^{Q},\ KW_i^{K},\ VW_i^{V}\right),
 \qquad
 D_h=\frac{D}{H}
 $$`,
@@ -235,7 +235,7 @@ S'_{ij}=S_{ij}-\infty\,(1-M_{ij})
 $$
 
 $$
-A=\operatorname{softmax}(S'),\qquad A_{ij}=0\ \text{ for }\ j>i
+A=\text{softmax}(S'),\qquad A_{ij}=0\ \text{ for }\ j>i
 $$`,
     flowDiagram: `# 只改 softmax 的输入，不改任何形状
 scores = Q·Kᵀ/√D :: [B, H, S, S] :: 与普通注意力完全一样
@@ -401,8 +401,8 @@ $$
 
 $$
 \begin{aligned}
-m^{(\text{new})} &= \max\!\left(m^{(\text{old})},\ \operatorname{rowmax}(S_{\text{blk}})\right)\\[2pt]
-\ell^{(\text{new})} &= \ell^{(\text{old})}e^{\,m^{(\text{old})}-m^{(\text{new})}}+\operatorname{rowsum}\!\left(e^{\,S_{\text{blk}}-m^{(\text{new})}}\right)\\[2pt]
+m^{(\text{new})} &= \max\!\left(m^{(\text{old})},\ \text{rowmax}(S_{\text{blk}})\right)\\[2pt]
+\ell^{(\text{new})} &= \ell^{(\text{old})}e^{\,m^{(\text{old})}-m^{(\text{new})}}+\text{rowsum}\!\left(e^{\,S_{\text{blk}}-m^{(\text{new})}}\right)\\[2pt]
 O^{(\text{new})} &= O^{(\text{old})}e^{\,m^{(\text{old})}-m^{(\text{new})}}+e^{\,S_{\text{blk}}-m^{(\text{new})}}V_{\text{blk}}
 \end{aligned}
 $$
@@ -502,8 +502,8 @@ $$
 $$
 
 $$
-\text{decode}: \quad K\leftarrow\operatorname{concat}(K,\,k_{\text{new}}),\qquad
-V\leftarrow\operatorname{concat}(V,\,v_{\text{new}})
+\text{decode}: \quad K\leftarrow\text{concat}(K,\,k_{\text{new}}),\qquad
+V\leftarrow\text{concat}(V,\,v_{\text{new}})
 $$
 
 $$
@@ -589,12 +589,12 @@ class KVCacheAttention(nn.Module):
     ],
     formula: String.raw`$$
 c^{KV}=x\,W^{DKV}\in\mathbb{R}^{B\times S\times C},\qquad
-[K;V]=\operatorname{split}\!\left(c^{KV}W^{UK}\right)
+[K;V]=\text{split}\!\left(c^{KV}W^{UK}\right)
 $$
 
 $$
 c^{Q}=x\,W^{DQ},\qquad
-Q=\operatorname{split}\!\left(c^{Q}W^{UQ}\right)
+Q=\text{split}\!\left(c^{Q}W^{UQ}\right)
 $$
 
 $$
@@ -689,23 +689,23 @@ class MLA(nn.Module):
     ],
     formula: String.raw`$$
 \begin{aligned}
-K_{\text{cmp},j} &= \operatorname{mean}\!\left(K_{jl:(j+1)l}\right)\\[2pt]
-p_j &= \operatorname{score}\!\left(q_t,K_{\text{cmp},j}\right),\qquad
-\mathcal{B}_{\text{slc}}=\operatorname{top}_{n}(p)\\[2pt]
+K_{\text{cmp},j} &= \text{mean}\!\left(K_{jl:(j+1)l}\right)\\[2pt]
+p_j &= \text{score}\!\left(q_t,K_{\text{cmp},j}\right),\qquad
+\mathcal{B}_{\text{slc}}=\text{top}_{n}(p)\\[2pt]
 \mathcal{B}_{\text{win}} &= \{t-w,\dots,t\}
 \end{aligned}
 $$
 
 $$
-o_t=\sum_{b\in\{\text{cmp},\text{slc},\text{win}\}} g_b\,\operatorname{Attn}(q_t,K_b,V_b),
+o_t=\sum_{b\in\{\text{cmp},\text{slc},\text{win}\}} g_b\,\text{Attn}(q_t,K_b,V_b),
 \qquad
 g=\sigma\!\left(w^{\top}[q_t;\dots]\right)
 $$
 
 $$
 k_s=W^{K,l}h_s,\qquad
-I_{t,s}=\sum_j w_{t,j}\operatorname{ReLU}(q_{t,j}\cdot k_s),\qquad
-\mathcal{S}_t=\operatorname{top}_{k}\!\left(I_{t,\cdot}\right)
+I_{t,s}=\sum_j w_{t,j}\text{ReLU}(q_{t,j}\cdot k_s),\qquad
+\mathcal{S}_t=\text{top}_{k}\!\left(I_{t,\cdot}\right)
 $$
 
 $$
@@ -830,12 +830,12 @@ class LightningIndexer(nn.Module):
       },
     ],
     formula: String.raw`$$
-\mu=\operatorname{mean}(x,\ \dim=-1),\qquad
-\sigma^{2}=\operatorname{var}(x,\ \dim=-1,\ \text{unbiased}=\text{False})
+\mu=\text{mean}(x,\ \dim=-1),\qquad
+\sigma^{2}=\text{var}(x,\ \dim=-1,\ \text{unbiased}=\text{False})
 $$
 
 $$
-\operatorname{LN}(x)=\frac{x-\mu}{\sqrt{\sigma^{2}+\epsilon}}\odot\gamma+\beta,
+\text{LN}(x)=\frac{x-\mu}{\sqrt{\sigma^{2}+\epsilon}}\odot\gamma+\beta,
 \qquad
 \gamma,\beta\in\mathbb{R}^{D},\qquad
 \epsilon=10^{-5}
@@ -899,7 +899,7 @@ class LayerNorm(nn.Module):
       },
     ],
     formula: String.raw`$$
-\operatorname{RMSNorm}(x)=\frac{x}{\sqrt{\operatorname{mean}(x^{2})+\epsilon}}\odot\gamma,
+\text{RMSNorm}(x)=\frac{x}{\sqrt{\text{mean}(x^{2})+\epsilon}}\odot\gamma,
 \qquad
 \epsilon=10^{-5}
 $$
@@ -907,7 +907,7 @@ $$
 $$
 \begin{aligned}
 \text{LayerNorm}: &\quad \frac{x-\mu}{\sqrt{\sigma^{2}+\epsilon}}\odot\gamma+\beta\\[2pt]
-\text{RMSNorm}: &\quad \frac{x}{\sqrt{\operatorname{mean}(x^{2})+\epsilon}}\odot\gamma
+\text{RMSNorm}: &\quad \frac{x}{\sqrt{\text{mean}(x^{2})+\epsilon}}\odot\gamma
 \end{aligned}
 $$`,
     flowDiagram: `# 只压尺度，不管中心
@@ -972,11 +972,11 @@ class RMSNorm(nn.Module):
       },
     ],
     formula: String.raw`$$
-f(q,m)=q\odot\cos(m\theta)+\operatorname{rotate\_half}(q)\odot\sin(m\theta)
+f(q,m)=q\odot\cos(m\theta)+\text{rotate\_half}(q)\odot\sin(m\theta)
 $$
 
 $$
-\operatorname{rotate\_half}([x_1,x_2])=[-x_2,\ x_1],
+\text{rotate\_half}([x_1,x_2])=[-x_2,\ x_1],
 \qquad
 R(m\theta)=\begin{pmatrix}\cos m\theta & -\sin m\theta\\[2pt] \sin m\theta & \cos m\theta\end{pmatrix}
 $$
@@ -1062,7 +1062,7 @@ class RotaryEmbedding(nn.Module):
       },
     ],
     formula: String.raw`$$
-\operatorname{FFN}(x)=W_2\operatorname{ReLU}(W_1x+b_1)+b_2
+\text{FFN}(x)=W_2\text{ReLU}(W_1x+b_1)+b_2
 $$
 
 $$
@@ -1129,11 +1129,11 @@ class FFN(nn.Module):
       },
     ],
     formula: String.raw`$$
-\operatorname{SwiGLU}(x)=W_{\text{down}}\!\left(\operatorname{SiLU}(W_{\text{gate}}x)\odot W_{\text{up}}x\right)
+\text{SwiGLU}(x)=W_{\text{down}}\!\left(\text{SiLU}(W_{\text{gate}}x)\odot W_{\text{up}}x\right)
 $$
 
 $$
-\operatorname{SiLU}(x)=x\,\sigma(x),\qquad d_{ff}=\tfrac{8}{3}D
+\text{SiLU}(x)=x\,\sigma(x),\qquad d_{ff}=\frac{8}{3}D
 $$
 
 $$
@@ -1201,11 +1201,11 @@ class SwiGLU(nn.Module):
       },
     ],
     formula: String.raw`$$
-\operatorname{MoE}(x)=\sum_{i\in\operatorname{TopK}}\operatorname{softmax}\!\left(\operatorname{Router}(x)\right)_i E_i(x)
+\text{MoE}(x)=\sum_{i\in\text{TopK}}\text{softmax}\!\left(\text{Router}(x)\right)_i E_i(x)
 $$
 
 $$
-\operatorname{Router}(x)=W_rx,\qquad W_r\in\mathbb{R}^{D\times N},\qquad K=2
+\text{Router}(x)=W_rx,\qquad W_r\in\mathbb{R}^{D\times N},\qquad K=2
 $$
 
 $$
@@ -1290,7 +1290,7 @@ class MoE(nn.Module):
 $$
 
 $$
-\text{CE}\!\left(\operatorname{shift}(\text{logits}),\ \operatorname{shift}(\text{labels})\right),
+\text{CE}\!\left(\text{shift}(\text{logits}),\ \text{shift}(\text{labels})\right),
 \qquad
 \text{logits}[:,:-1]\ \text{predicts}\ \text{labels}[:,1:]
 $$
@@ -1432,7 +1432,7 @@ def dpo_loss(policy_chosen_logps, policy_rejected_logps,
       },
     ],
     formula: String.raw`$$
-\mathcal{L}_{\text{PPO}}=-\mathbb{E}_t\left[\min\!\left(r_tA_t,\ \operatorname{clip}(r_t,\,1-\epsilon,\,1+\epsilon)\,A_t\right)\right]
+\mathcal{L}_{\text{PPO}}=-\mathbb{E}_t\left[\min\!\left(r_tA_t,\ \text{clip}(r_t,\,1-\epsilon,\,1+\epsilon)\,A_t\right)\right]
 $$
 
 $$
@@ -1512,13 +1512,13 @@ def ppo_loss(old_logp, new_logp, advantages, eps=0.2):
       },
     ],
     formula: String.raw`$$
-\hat{A}_i=\frac{r_i-\operatorname{mean}(\mathbf{r})}{\operatorname{std}(\mathbf{r})+\epsilon},
+\hat{A}_i=\frac{r_i-\text{mean}(\mathbf{r})}{\text{std}(\mathbf{r})+\epsilon},
 \qquad
 \{o_1,\dots,o_G\}\sim\pi_{\theta_{\text{old}}}(\cdot\mid q)
 $$
 
 $$
-\mathcal{L}(\theta)=-\mathbb{E}\!\left[\min\!\left(\rho_i\hat{A}_i,\ \operatorname{clip}(\rho_i,1-\epsilon,1+\epsilon)\,\hat{A}_i\right)\right]
+\mathcal{L}(\theta)=-\mathbb{E}\!\left[\min\!\left(\rho_i\hat{A}_i,\ \text{clip}(\rho_i,1-\epsilon,1+\epsilon)\,\hat{A}_i\right)\right]
 +\beta\,\mathrm{KL}\!\left(\pi_\theta\,\|\,\pi_{\text{ref}}\right)
 $$
 
@@ -1602,7 +1602,7 @@ def kl_penalty(logp, ref_logp):
       },
     ],
     formula: String.raw`$$
-\hat{A}_i=\frac{r_i-\operatorname{mean}(r)}{\operatorname{std}(r)+\epsilon}
+\hat{A}_i=\frac{r_i-\text{mean}(r)}{\text{std}(r)+\epsilon}
 $$
 
 $$
@@ -1611,7 +1611,7 @@ s_i(\theta)=\left(\frac{\pi_\theta(y_i\mid x)}{\pi_{\text{old}}(y_i\mid x)}\righ
 $$
 
 $$
-\mathcal{L}_{\text{GSPO}}=-\mathbb{E}\left[\min\!\left(s_i\hat{A}_i,\ \operatorname{clip}(s_i,\,1-\epsilon,\,1+\epsilon)\,\hat{A}_i\right)\right],
+\mathcal{L}_{\text{GSPO}}=-\mathbb{E}\left[\min\!\left(s_i\hat{A}_i,\ \text{clip}(s_i,\,1-\epsilon,\,1+\epsilon)\,\hat{A}_i\right)\right],
 \qquad
 \epsilon=3\times10^{-4}
 $$`,
@@ -1679,12 +1679,12 @@ def gspo_loss(per_token_logp_new, per_token_logp_old, completion_mask,
     formula: String.raw`$$
 \rho_{i,t}=\frac{\pi_\theta(y_{i,t}\mid x,y_{i,<t})}{\pi_{\text{old}}(y_{i,t}\mid x,y_{i,<t})},
 \qquad
-\hat{A}_i=\frac{r_i-\operatorname{mean}(r)}{\operatorname{std}(r)+\epsilon}
+\hat{A}_i=\frac{r_i-\text{mean}(r)}{\text{std}(r)+\epsilon}
 $$
 
 $$
 \text{clip-higher}:\quad
-\min\!\left(\rho_{i,t}\hat{A}_i,\ \operatorname{clip}(\rho_{i,t},\,1-\epsilon_{\text{low}},\,1+\epsilon_{\text{high}})\,\hat{A}_i\right),
+\min\!\left(\rho_{i,t}\hat{A}_i,\ \text{clip}(\rho_{i,t},\,1-\epsilon_{\text{low}},\,1+\epsilon_{\text{high}})\,\hat{A}_i\right),
 \qquad
 \epsilon_{\text{low}}=0.2,\quad \epsilon_{\text{high}}=0.28
 $$
@@ -1695,7 +1695,7 @@ $$
 
 $$
 \text{token-level loss}:\quad
-\mathcal{L}=-\frac{1}{\sum_i|y_i|}\sum_i\sum_t\min\!\left(\rho_{i,t}\hat{A}_i,\ \operatorname{clip}(\rho_{i,t},\,1-\epsilon_{\text{low}},\,1+\epsilon_{\text{high}})\,\hat{A}_i\right)
+\mathcal{L}=-\frac{1}{\sum_i|y_i|}\sum_i\sum_t\min\!\left(\rho_{i,t}\hat{A}_i,\ \text{clip}(\rho_{i,t},\,1-\epsilon_{\text{low}},\,1+\epsilon_{\text{high}})\,\hat{A}_i\right)
 $$
 
 $$
@@ -1782,15 +1782,15 @@ $$
 $$
 \begin{aligned}
 M&=\beta\,p_T+(1-\beta)\,p_S\\[2pt]
-D_{\text{GJS}}(\beta)&=(1-\beta)\operatorname{KL}(p_T\|M)+\beta\operatorname{KL}(p_S\|M),
+D_{\text{GJS}}(\beta)&=(1-\beta)\text{KL}(p_T\|M)+\beta\text{KL}(p_S\|M),
 \qquad \beta\in[0,1]
 \end{aligned}
 $$
 
 $$
 \begin{aligned}
-\beta=0 &\Rightarrow \operatorname{KL}(p_T\|p_S) && \text{forward KL (mode-covering)}\\[2pt]
-\beta=1 &\Rightarrow \operatorname{KL}(p_S\|p_T) && \text{reverse KL (mode-seeking)}\\[2pt]
+\beta=0 &\Rightarrow \text{KL}(p_T\|p_S) && \text{forward KL (mode-covering)}\\[2pt]
+\beta=1 &\Rightarrow \text{KL}(p_S\|p_T) && \text{reverse KL (mode-seeking)}\\[2pt]
 \beta=0.5 &\Rightarrow \text{standard JSD}
 \end{aligned}
 $$`,
@@ -1887,13 +1887,13 @@ def opd_loss(student_logits, teacher_logits, loss_mask=None,
 $$
 
 $$
-\mathcal{L}=\mathbb{E}_{y\sim\pi_\theta(\cdot\mid x)}\left[\frac{1}{|y|}\sum_t\operatorname{KL}\!\left(\pi_\theta(\cdot\mid x,y_{<t})\ \|\ \pi_\theta(\cdot\mid x\oplus c,y_{<t})\right)\right]
+\mathcal{L}=\mathbb{E}_{y\sim\pi_\theta(\cdot\mid x)}\left[\frac{1}{|y|}\sum_t\text{KL}\!\left(\pi_\theta(\cdot\mid x,y_{<t})\ \|\ \pi_\theta(\cdot\mid x\oplus c,y_{<t})\right)\right]
 $$
 
 $$
-\text{forward KL}: \operatorname{KL}(\pi_T\|\pi_S)
+\text{forward KL}: \text{KL}(\pi_T\|\pi_S)
 \qquad\text{vs}\qquad
-\text{reverse KL}: \operatorname{KL}(\pi_S\|\pi_T)
+\text{reverse KL}: \text{KL}(\pi_S\|\pi_T)
 $$
 
 $$
@@ -2062,7 +2062,7 @@ class AdamW:
     formula: String.raw`$$
 \begin{aligned}
 M_t &= \mu M_{t-1}+G_t,\qquad \mu\approx 0.95\\
-O_t &= \operatorname{NS}_5(M_t)\\
+O_t &= \text{NS}_5(M_t)\\
 \theta_t &= \theta_{t-1}-\eta\,O_t
 \end{aligned}
 $$
@@ -2297,7 +2297,7 @@ T<1:\ \text{sharper},\qquad T>1:\ \text{flatter},\qquad T\to 0:\ \text{greedy}
 $$
 
 $$
-\text{top-}k:\quad \mathcal{S}_k=\{i:\ \operatorname{rank}(z_i)\le k\},
+\text{top-}k:\quad \mathcal{S}_k=\{i:\ \text{rank}(z_i)\le k\},
 \qquad p_i\leftarrow 0\ \text{for}\ i\notin\mathcal{S}_k
 $$
 
@@ -2396,7 +2396,7 @@ $$
 $$
 \mathcal{L}'\leftarrow S\cdot\mathcal{L},
 \qquad
-g\leftarrow\frac{\operatorname{cast}\!\left(g_{\text{FP16}}\right)}{S},
+g\leftarrow\frac{\text{cast}\!\left(g_{\text{FP16}}\right)}{S},
 \qquad
 \text{BF16}:\ e_{\text{bits}}=8\ \Rightarrow\ S=1
 $$`,
@@ -2544,11 +2544,11 @@ class CheckpointBlock(nn.Module):
       },
     ],
     formula: String.raw`$$
-s=\frac{\operatorname{amax}(\text{block})}{448},\qquad 448=\text{e4m3 max}
+s=\frac{\text{amax}(\text{block})}{448},\qquad 448=\text{e4m3 max}
 $$
 
 $$
-x_q=\operatorname{clamp}\!\left(\frac{x}{s},\ -448,\ 448\right)\to\text{FP8},
+x_q=\text{clamp}\!\left(\frac{x}{s},\ -448,\ 448\right)\to\text{FP8},
 \qquad
 \hat{x}=x_q\,s
 $$
@@ -2871,9 +2871,9 @@ def speculative_decode(draft_model, target_model, prompt_ids,
       },
     ],
     formula: String.raw`$$
-x\leftarrow x+\operatorname{Attn}\!\left(\operatorname{LN}(x),\ \text{causal mask}\right),
+x\leftarrow x+\text{Attn}\!\left(\text{LN}(x),\ \text{causal mask}\right),
 \qquad
-x\leftarrow x+\operatorname{FFN}\!\left(\operatorname{LN}(x)\right)
+x\leftarrow x+\text{FFN}\!\left(\text{LN}(x)\right)
 $$
 
 $$
@@ -2962,9 +2962,9 @@ class GPTModel(nn.Module):
       },
     ],
     formula: String.raw`$$
-h_i^{k}=M_k\!\left[\operatorname{RMSNorm}\!\left(h_i^{k-1}\right);\ \operatorname{RMSNorm}\!\left(\operatorname{Emb}\!\left(x_{i+k}\right)\right)\right],
+h_i^{k}=M_k\!\left[\text{RMSNorm}\!\left(h_i^{k-1}\right);\ \text{RMSNorm}\!\left(\text{Emb}\!\left(x_{i+k}\right)\right)\right],
 \qquad
-p_{i+k+1}=\operatorname{lm\_head}\!\left(h_i^{k}\right)
+p_{i+k+1}=\text{lm\_head}\!\left(h_i^{k}\right)
 $$
 
 $$
@@ -2975,7 +2975,7 @@ $$
 
 $$
 \lambda=0.3\ \text{(first 10T tokens)}\ \longrightarrow\ 0.1,\qquad
-\operatorname{Emb},\ \operatorname{lm\_head}\ \text{shared with the main model}
+\text{Emb},\ \text{lm\_head}\ \text{shared with the main model}
 $$`,
     flowDiagram: `# 主干之外串行接若干 MTP 模块
 x :: [x₁, x₂, x₃, x₄, x₅] :: 输入序列
@@ -3175,8 +3175,8 @@ $$
 \begin{aligned}
 y=Wx: &\quad \frac{\partial\mathcal{L}}{\partial W}=\frac{\partial\mathcal{L}}{\partial y}\,x^{\top},\quad
 \frac{\partial\mathcal{L}}{\partial x}=W^{\top}\frac{\partial\mathcal{L}}{\partial y}\\[3pt]
-y=\operatorname{ReLU}(x): &\quad \frac{\partial\mathcal{L}}{\partial x}=\frac{\partial\mathcal{L}}{\partial y}\odot(x>0)\\[3pt]
-y=\operatorname{softmax}(z): &\quad \frac{\partial\mathcal{L}}{\partial z}=y-\text{one\_hot}(\text{target})\quad(\text{with CE})
+y=\text{ReLU}(x): &\quad \frac{\partial\mathcal{L}}{\partial x}=\frac{\partial\mathcal{L}}{\partial y}\odot(x>0)\\[3pt]
+y=\text{softmax}(z): &\quad \frac{\partial\mathcal{L}}{\partial z}=y-\text{one\_hot}(\text{target})\quad(\text{with CE})
 \end{aligned}
 $$`,
     flowDiagram: `# 前向：按拓扑顺序算，顺手保存中间量
@@ -3257,20 +3257,20 @@ class TwoLayerNet:
       },
     ],
     formula: String.raw`$$
-\operatorname{ReLU}(x)=\max(0,x),\qquad \operatorname{ReLU}^{\prime}(x)=(x>0)
+\text{ReLU}(x)=\max(0,x),\qquad \text{ReLU}^{\prime}(x)=(x>0)
 $$
 
 $$
-\operatorname{GELU}(x)=x\,\Phi(x),\qquad \Phi=\text{standard normal CDF}
+\text{GELU}(x)=x\,\Phi(x),\qquad \Phi=\text{standard normal CDF}
 $$
 
 $$
-\operatorname{SiLU}(x)=x\,\sigma(x),\qquad
-\operatorname{SiLU}^{\prime}(x)=\operatorname{SiLU}(x)+\sigma(x)\left(1-\operatorname{SiLU}(x)\right)
+\text{SiLU}(x)=x\,\sigma(x),\qquad
+\text{SiLU}^{\prime}(x)=\text{SiLU}(x)+\sigma(x)\left(1-\text{SiLU}(x)\right)
 $$
 
 $$
-\text{Swish}\equiv\operatorname{SiLU}
+\text{Swish}\equiv\text{SiLU}
 $$`,
     flowDiagram: `# 三种激活函数：形状决定行为
 x :: [..., D] :: 输入张量

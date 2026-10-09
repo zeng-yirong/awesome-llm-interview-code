@@ -20,13 +20,13 @@ PPO 的简化版：对同一问题生成 G 个回答，用组内归一化的奖�
 ## 📐 核心公式
 
 $$
-\hat{A}_i=\frac{r_i-\operatorname{mean}(\mathbf{r})}{\operatorname{std}(\mathbf{r})+\epsilon},
+\hat{A}_i=\frac{r_i-\text{mean}(\mathbf{r})}{\text{std}(\mathbf{r})+\epsilon},
 \qquad
 \{o_1,\dots,o_G\}\sim\pi_{\theta_{\text{old}}}(\cdot\mid q)
 $$
 
 $$
-\mathcal{L}(\theta)=-\mathbb{E}\!\left[\min\!\left(\rho_i\hat{A}_i,\ \operatorname{clip}(\rho_i,1-\epsilon,1+\epsilon)\,\hat{A}_i\right)\right]
+\mathcal{L}(\theta)=-\mathbb{E}\!\left[\min\!\left(\rho_i\hat{A}_i,\ \text{clip}(\rho_i,1-\epsilon,1+\epsilon)\,\hat{A}_i\right)\right]
 +\beta\,\mathrm{KL}\!\left(\pi_\theta\,\|\,\pi_{\text{ref}}\right)
 $$
 

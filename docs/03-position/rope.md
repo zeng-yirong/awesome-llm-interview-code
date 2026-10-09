@@ -21,11 +21,11 @@
 ## 📐 核心公式
 
 $$
-f(q,m)=q\odot\cos(m\theta)+\operatorname{rotate\_half}(q)\odot\sin(m\theta)
+f(q,m)=q\odot\cos(m\theta)+\text{rotate\_half}(q)\odot\sin(m\theta)
 $$
 
 $$
-\operatorname{rotate\_half}([x_1,x_2])=[-x_2,\ x_1],
+\text{rotate\_half}([x_1,x_2])=[-x_2,\ x_1],
 \qquad
 R(m\theta)=\begin{pmatrix}\cos m\theta & -\sin m\theta\\[2pt] \sin m\theta & \cos m\theta\end{pmatrix}
 $$

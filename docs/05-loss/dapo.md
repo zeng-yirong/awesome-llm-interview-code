@@ -21,12 +21,12 @@ DAPO 不改 GRPO 的骨架，只针对四个已知缺陷动手：(1) clip-higher
 $$
 \rho_{i,t}=\frac{\pi_\theta(y_{i,t}\mid x,y_{i,<t})}{\pi_{\text{old}}(y_{i,t}\mid x,y_{i,<t})},
 \qquad
-\hat{A}_i=\frac{r_i-\operatorname{mean}(r)}{\operatorname{std}(r)+\epsilon}
+\hat{A}_i=\frac{r_i-\text{mean}(r)}{\text{std}(r)+\epsilon}
 $$
 
 $$
 \text{clip-higher}:\quad
-\min\!\left(\rho_{i,t}\hat{A}_i,\ \operatorname{clip}(\rho_{i,t},\,1-\epsilon_{\text{low}},\,1+\epsilon_{\text{high}})\,\hat{A}_i\right),
+\min\!\left(\rho_{i,t}\hat{A}_i,\ \text{clip}(\rho_{i,t},\,1-\epsilon_{\text{low}},\,1+\epsilon_{\text{high}})\,\hat{A}_i\right),
 \qquad
 \epsilon_{\text{low}}=0.2,\quad \epsilon_{\text{high}}=0.28
 $$
@@ -37,7 +37,7 @@ $$
 
 $$
 \text{token-level loss}:\quad
-\mathcal{L}=-\frac{1}{\sum_i|y_i|}\sum_i\sum_t\min\!\left(\rho_{i,t}\hat{A}_i,\ \operatorname{clip}(\rho_{i,t},\,1-\epsilon_{\text{low}},\,1+\epsilon_{\text{high}})\,\hat{A}_i\right)
+\mathcal{L}=-\frac{1}{\sum_i|y_i|}\sum_i\sum_t\min\!\left(\rho_{i,t}\hat{A}_i,\ \text{clip}(\rho_{i,t},\,1-\epsilon_{\text{low}},\,1+\epsilon_{\text{high}})\,\hat{A}_i\right)
 $$
 
 $$

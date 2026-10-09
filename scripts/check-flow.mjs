@@ -6,6 +6,7 @@
  *   2. 已迁移条目的语法卫生：不含框线字符、每行 `::` 字段 ≤ 3
  *   3. formula 的 LaTeX 普查：哪些题已迁移成 `$$` 块、哪些还走 <pre> 兜底
  *   4. doc ↔ TS 一致性：张量流程图 fence / 核心公式 / oneLiner / 原理首段 / 原理分节 / 面试要点条数
+ *   5. 核心公式的渲染卫生：数学模式里的语法、GitHub 数学渲染器不接受的宏、\text 里的裸 _ ^
  *
  * 用法: node scripts/check-flow.mjs
  */
@@ -21,6 +22,29 @@ const { parseFlow } = await import(new URL('../src/lib/flowDsl.ts', import.meta.
 const { parseMath } = await import(new URL('../src/lib/mathBlock.ts', import.meta.url).href);
 
 const BOX_CHARS = /[│├└┘┐┌┤┬┴─╱╲]/;
+
+/**
+ * GitHub 的数学渲染器会拒绝一批宏，报错形如：
+ *   "The following macros are not allowed: operatorname"
+ * 文档要在 GitHub 上渲染成数学，公式里就不能出现这些宏。
+ *
+ * ⚠️ 这是按【已知案例】维护的黑名单，不是 GitHub 官方清单的完整复刻 ——
+ * 它挡的是已知踩过的坑，不能保证「不报错就一定能渲染」。
+ * 新加宏之前，先去 GitHub 上打开一篇文档目视确认。
+ */
+const GITHUB_BANNED_MACROS = [
+  'operatorname', // 实测被拒；用 \text{} 代替
+  // 会定义/改写命令的一类
+  'DeclareMathOperator', 'newcommand', 'renewcommand', 'providecommand',
+  'def', 'gdef', 'edef', 'xdef', 'let', 'futurelet', 'csname', 'global',
+  // 需要额外包、KaTeX 与 GitHub 都不支持，或能突破沙箱
+  'bm', 'ce', 'tag', 'label', 'ref', 'eqref', 'href', 'url',
+  'color', 'textcolor', 'style', 'class', 'cssId', 'htmlId', 'htmlClass',
+  'htmlStyle', 'require',
+  // amsmath 的分数变体：\frac 够用，不必冒被过滤的风险
+  'tfrac', 'dfrac',
+];
+
 const failures = [];
 const warnings = [];
 
@@ -345,6 +369,25 @@ for (const problem of problems) {
         }
         if (bad.length > 0) {
           failures.push(`[${problem.id}] formula 里有${bad.join(' / ')}`);
+        }
+
+        // GitHub 数学渲染器的宏黑名单（`\operatorname` 就是这样炸的）
+        const banned = GITHUB_BANNED_MACROS.filter((name) =>
+          new RegExp(`\\\\${name}(?![a-zA-Z])`).test(block.latex),
+        );
+        if (banned.length > 0) {
+          failures.push(
+            `[${problem.id}] formula 用了 GitHub 数学渲染器不接受的宏：${banned
+              .map((name) => `\\${name}`)
+              .join(', ')}`,
+          );
+        }
+
+        // `\text{}` 走文本模式，里面出现裸的 _ ^ 会直接报错（要写 \_ \^）
+        for (const match of block.latex.matchAll(/\\text\{([^{}]*)\}/g)) {
+          if (/(^|[^\\])[_^]/.test(match[1])) {
+            failures.push(`[${problem.id}] \\text{${match[1]}} 里有未转义的 _ 或 ^`);
+          }
         }
       }
     }

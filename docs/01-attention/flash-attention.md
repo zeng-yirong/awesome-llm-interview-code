@@ -29,8 +29,8 @@ $$
 
 $$
 \begin{aligned}
-m^{(\text{new})} &= \max\!\left(m^{(\text{old})},\ \operatorname{rowmax}(S_{\text{blk}})\right)\\[2pt]
-\ell^{(\text{new})} &= \ell^{(\text{old})}e^{\,m^{(\text{old})}-m^{(\text{new})}}+\operatorname{rowsum}\!\left(e^{\,S_{\text{blk}}-m^{(\text{new})}}\right)\\[2pt]
+m^{(\text{new})} &= \max\!\left(m^{(\text{old})},\ \text{rowmax}(S_{\text{blk}})\right)\\[2pt]
+\ell^{(\text{new})} &= \ell^{(\text{old})}e^{\,m^{(\text{old})}-m^{(\text{new})}}+\text{rowsum}\!\left(e^{\,S_{\text{blk}}-m^{(\text{new})}}\right)\\[2pt]
 O^{(\text{new})} &= O^{(\text{old})}e^{\,m^{(\text{old})}-m^{(\text{new})}}+e^{\,S_{\text{blk}}-m^{(\text{new})}}V_{\text{blk}}
 \end{aligned}
 $$

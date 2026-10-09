@@ -23,12 +23,12 @@
 
 $$
 c^{KV}=x\,W^{DKV}\in\mathbb{R}^{B\times S\times C},\qquad
-[K;V]=\operatorname{split}\!\left(c^{KV}W^{UK}\right)
+[K;V]=\text{split}\!\left(c^{KV}W^{UK}\right)
 $$
 
 $$
 c^{Q}=x\,W^{DQ},\qquad
-Q=\operatorname{split}\!\left(c^{Q}W^{UQ}\right)
+Q=\text{split}\!\left(c^{Q}W^{UQ}\right)
 $$
 
 $$

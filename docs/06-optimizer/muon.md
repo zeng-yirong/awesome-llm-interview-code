@@ -20,7 +20,7 @@ Muon 只用于二维隐藏层权重：累积动量后，用 Newton-Schulz 迭代
 $$
 \begin{aligned}
 M_t &= \mu M_{t-1}+G_t,\qquad \mu\approx 0.95\\
-O_t &= \operatorname{NS}_5(M_t)\\
+O_t &= \text{NS}_5(M_t)\\
 \theta_t &= \theta_{t-1}-\eta\,O_t
 \end{aligned}
 $$

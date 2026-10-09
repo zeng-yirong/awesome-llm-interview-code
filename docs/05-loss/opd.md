@@ -25,15 +25,15 @@ $$
 $$
 \begin{aligned}
 M&=\beta\,p_T+(1-\beta)\,p_S\\[2pt]
-D_{\text{GJS}}(\beta)&=(1-\beta)\operatorname{KL}(p_T\|M)+\beta\operatorname{KL}(p_S\|M),
+D_{\text{GJS}}(\beta)&=(1-\beta)\text{KL}(p_T\|M)+\beta\text{KL}(p_S\|M),
 \qquad \beta\in[0,1]
 \end{aligned}
 $$
 
 $$
 \begin{aligned}
-\beta=0 &\Rightarrow \operatorname{KL}(p_T\|p_S) && \text{forward KL (mode-covering)}\\[2pt]
-\beta=1 &\Rightarrow \operatorname{KL}(p_S\|p_T) && \text{reverse KL (mode-seeking)}\\[2pt]
+\beta=0 &\Rightarrow \text{KL}(p_T\|p_S) && \text{forward KL (mode-covering)}\\[2pt]
+\beta=1 &\Rightarrow \text{KL}(p_S\|p_T) && \text{reverse KL (mode-seeking)}\\[2pt]
 \beta=0.5 &\Rightarrow \text{standard JSD}
 \end{aligned}
 $$

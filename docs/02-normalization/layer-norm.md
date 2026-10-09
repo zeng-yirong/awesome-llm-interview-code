@@ -19,12 +19,12 @@
 ## 📐 核心公式
 
 $$
-\mu=\operatorname{mean}(x,\ \dim=-1),\qquad
-\sigma^{2}=\operatorname{var}(x,\ \dim=-1,\ \text{unbiased}=\text{False})
+\mu=\text{mean}(x,\ \dim=-1),\qquad
+\sigma^{2}=\text{var}(x,\ \dim=-1,\ \text{unbiased}=\text{False})
 $$
 
 $$
-\operatorname{LN}(x)=\frac{x-\mu}{\sqrt{\sigma^{2}+\epsilon}}\odot\gamma+\beta,
+\text{LN}(x)=\frac{x-\mu}{\sqrt{\sigma^{2}+\epsilon}}\odot\gamma+\beta,
 \qquad
 \gamma,\beta\in\mathbb{R}^{D},\qquad
 \epsilon=10^{-5}

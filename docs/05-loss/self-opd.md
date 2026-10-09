@@ -25,13 +25,13 @@ $$
 $$
 
 $$
-\mathcal{L}=\mathbb{E}_{y\sim\pi_\theta(\cdot\mid x)}\left[\frac{1}{|y|}\sum_t\operatorname{KL}\!\left(\pi_\theta(\cdot\mid x,y_{<t})\ \|\ \pi_\theta(\cdot\mid x\oplus c,y_{<t})\right)\right]
+\mathcal{L}=\mathbb{E}_{y\sim\pi_\theta(\cdot\mid x)}\left[\frac{1}{|y|}\sum_t\text{KL}\!\left(\pi_\theta(\cdot\mid x,y_{<t})\ \|\ \pi_\theta(\cdot\mid x\oplus c,y_{<t})\right)\right]
 $$
 
 $$
-\text{forward KL}: \operatorname{KL}(\pi_T\|\pi_S)
+\text{forward KL}: \text{KL}(\pi_T\|\pi_S)
 \qquad\text{vs}\qquad
-\text{reverse KL}: \operatorname{KL}(\pi_S\|\pi_T)
+\text{reverse KL}: \text{KL}(\pi_S\|\pi_T)
 $$
 
 $$

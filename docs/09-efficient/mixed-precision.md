@@ -42,7 +42,7 @@ $$
 $$
 \mathcal{L}'\leftarrow S\cdot\mathcal{L},
 \qquad
-g\leftarrow\frac{\operatorname{cast}\!\left(g_{\text{FP16}}\right)}{S},
+g\leftarrow\frac{\text{cast}\!\left(g_{\text{FP16}}\right)}{S},
 \qquad
 \text{BF16}:\ e_{\text{bits}}=8\ \Rightarrow\ S=1
 $$

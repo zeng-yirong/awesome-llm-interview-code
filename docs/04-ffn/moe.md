@@ -20,11 +20,11 @@
 ## 📐 核心公式
 
 $$
-\operatorname{MoE}(x)=\sum_{i\in\operatorname{TopK}}\operatorname{softmax}\!\left(\operatorname{Router}(x)\right)_i E_i(x)
+\text{MoE}(x)=\sum_{i\in\text{TopK}}\text{softmax}\!\left(\text{Router}(x)\right)_i E_i(x)
 $$
 
 $$
-\operatorname{Router}(x)=W_rx,\qquad W_r\in\mathbb{R}^{D\times N},\qquad K=2
+\text{Router}(x)=W_rx,\qquad W_r\in\mathbb{R}^{D\times N},\qquad K=2
 $$
 
 $$

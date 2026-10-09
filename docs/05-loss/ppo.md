@@ -20,7 +20,7 @@
 ## 📐 核心公式
 
 $$
-\mathcal{L}_{\text{PPO}}=-\mathbb{E}_t\left[\min\!\left(r_tA_t,\ \operatorname{clip}(r_t,\,1-\epsilon,\,1+\epsilon)\,A_t\right)\right]
+\mathcal{L}_{\text{PPO}}=-\mathbb{E}_t\left[\min\!\left(r_tA_t,\ \text{clip}(r_t,\,1-\epsilon,\,1+\epsilon)\,A_t\right)\right]
 $$
 
 $$
