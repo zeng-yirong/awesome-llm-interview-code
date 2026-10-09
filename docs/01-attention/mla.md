@@ -4,28 +4,20 @@
 
 ## 📌 原理与思想
 
-将 KV 先下投影压缩到低维潜空间（存入 Cache），再上投影恢复。压缩比可达 90%+，远超 GQA。
+### 核心概念
+将 KV 先下投影压缩到低维潜空间（存入 Cache），再上投影恢复。压缩比可达 90%+，远超 GQA 的 75%。相比 GQA，MLA 通过低秩压缩实现更极致的 KV Cache 压缩，是 DeepSeek-V2 的核心创新。
 
-**它解决什么问题**
-- GQA 只是让多个 query 头共享同一份 `K/V`，砍的是头的冗余；每个 `K/V` 向量仍然要存满 `Dh` 维，压缩比有下限。
-- 长上下文下 KV Cache 仍是显存大头，batch 一大就 OOM —— 头数最多减到 1（MQA），这条路已经走到头了。
-- 真正冗余的是「每个 `K/V` 向量本身能由更少的自由度表示」：那就别缓存 `K/V`，改缓存它的低维编码。
+### 核心思想
+利用低秩矩阵分解压缩 KV：先下投影到 latent_dim（存入 Cache），再上投影恢复完整的 K/V。Q 也使用低秩投影，但不缓存（只用于当前 token）。RoPE 只应用于 k_rope 和 q_rope 部分。
 
-**核心思想**
-- 缓存的对象从 `K`、`V` 换成一个共享的低维潜向量 `c_kv`，要用的时候再临时上投影恢复。
-- 压缩发生在「存储维度」上而不是「头数」上，所以压缩比可以远超 GQA：DeepSeek-V2 的潜维度只有 512。
-- `Q` 也做同样的低秩压缩，但只为省训练时的激活显存，它不进 Cache，对推理显存没有贡献。
-
-**算法步骤与推导**
-- `c_kv = x·W_dkv` → `[B, S, C]`，`C` 远小于 `H·Dh`；**只有这个进 cache**。
-- 用时 `kv = c_kv·W_ukv` → `[B, S, H·(Dh+Dr+Dh)]`，再 split 成 `k_content`、`k_rope`、`v`。
-- `k_rope`/`q_rope` 是单独留给 RoPE 的不压缩分量：RoPE 是位置相关的，和内容挤进同一个低秩空间会被压坏。
-- `q = cat(q_content, q_rope)`、`k = cat(k_content, k_rope)` 后做 SDPA，之后的流程与普通注意力一致。
-
-**对比与代价**
-- 对比 GQA：GQA 的 cache 是 `2·G·Dh`，MLA 是 `C`（DeepSeek-V2 取 512，约等于 4 个 `Dh=128` 头的量），压缩比从 4× 提到 10× 以上。
-- 代价是解码时每个 token 都要临时上投影，多了一次矩阵乘；换来的是能开更大的 batch，端到端吞吐反而上升。
-- 另一个代价是实现复杂：RoPE 必须拆出来单独走一路，训练时的激活显存还得靠低秩 `Q` 压回去。
+### 算法步骤
+1. KV 下投影压缩：c_kv = W_down(x) → [B, S, latent_dim]
+2. KV 上投影恢复：K,V = W_up(c_kv) → split → k_content, k_rope, v
+3. Q 下投影压缩：c_q = W_down_q(x)
+4. Q 上投影恢复：q = W_up_q(c_q) → split → q_content, q_rope
+5. 应用 RoPE：q_rope, k_rope = rope(q_rope, k_rope)
+6. 合并内容：q = cat(q_content, q_rope), k = cat(k_content, k_rope)
+7. 计算注意力并输出投影
 
 ## 📐 核心公式
 

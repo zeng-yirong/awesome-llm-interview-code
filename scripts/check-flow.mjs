@@ -120,7 +120,9 @@ function firstFence(body) {
   return match ? match[1] : null;
 }
 
-/** 原理与思想的第一段正文（跳过标题行与 bullet） */
+/** 原理与思想的第一段正文（跳过标题行与 bullet）
+ *  `### 核心概念` 是新版三段式的首段标题：它排在段落前面，跳过即可，不能像
+ *  `**小节标题**` 那样直接 break（那样会得到空段落）。 */
 function firstParagraph(body) {
   const collected = [];
   for (const line of body.split('\n')) {
@@ -129,28 +131,55 @@ function firstParagraph(body) {
       if (collected.length > 0) break;
       continue;
     }
+    if (text.startsWith('### ')) {
+      if (collected.length > 0) break; // 已经收完首段，后面是下一节
+      continue;
+    }
     if (text.startsWith('**') || text.startsWith('- ')) break;
     collected.push(text);
   }
   return stripMarkup(collected.join(' '));
 }
 
-/** 文档里 `**小节标题**` + 紧随的 `- ` bullet */
+/** 文档里的分节。仓库里并存两种写法：
+ *  - 旧版：`**小节标题**` + `- ` bullet
+ *  - 新版三段式：`### 小节标题` + 段落或 `1. ` 编号列表
+ *  两种都解析出来，条目一律剥掉前缀，好与 TS 的 items 逐条比对。 */
 function docSections(body) {
   const sections = [];
   let current = null;
+  let numbered = false; // 新版分节的条目允许不写列表标记（核心思想就是一整段）
+  let leadHeading = false; // 三段式的首个 `### ` 标题
   for (const line of body.split('\n')) {
     const text = line.trim();
     if (text === '') continue;
+    if (text.startsWith('### ')) {
+      // 三段式的第一个标题（`### 核心概念`）标的就是首段本身：站点把 principle
+      // 渲染成不带标题的引导段，所以它不对应任何分节，跳过。
+      if (sections.length === 0 && !leadHeading) {
+        leadHeading = true;
+        current = null;
+        numbered = false;
+        continue;
+      }
+      leadHeading = true;
+      current = { title: text.slice(4).trim(), items: [] };
+      sections.push(current);
+      numbered = true;
+      continue;
+    }
     if (text.startsWith('**') && text.endsWith('**') && text.length > 4) {
       current = { title: text.slice(2, -2), items: [] };
       sections.push(current);
+      numbered = false;
       continue;
     }
     if (text.startsWith('- ')) {
       if (current) current.items.push(stripMarkup(text.slice(2)));
       continue;
     }
+    // 旧版分节里出现无标记的行一律忽略（保持既有行为），新版按条目收下
+    if (current && numbered) current.items.push(stripMarkup(text.replace(/^\d+\.\s+/, '')));
   }
   return sections;
 }

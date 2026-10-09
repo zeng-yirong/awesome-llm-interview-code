@@ -4,23 +4,18 @@
 
 ## 📌 原理与思想
 
-计算 Q 和 K 的点积，除以缩放因子 √d_k 后通过 softmax 得到注意力权重，最后加权求和 V。缩放因子防止点积过大导致 softmax 梯度消失。
+### 核心概念
+计算 Q 和 K 的点积，除以缩放因子 √d_k 后通过 softmax 得到注意力权重，最后加权求和 V。缩放防止点积过大导致梯度消失，是所有注意力变体（MHA/GQA/Flash Attention）的基础。
 
-**它解决什么问题**
-- 全连接层做不到「按内容检索」，参数量还随序列长度增长；点积注意力用一次矩阵乘法算出所有位置对的相关性，零参数、完全可并行。
-- 但不缩放会出事：q、k 各维方差为 1 时点积方差恰好等于 `d_k`，`d_k=512` 时标准差约 23。softmax 输入跨度过大会饱和成 one-hot，梯度趋近 0。
+### 核心思想
+通过点积衡量 Q 和 K 的相似度，softmax 归一化后作为权重对 V 加权求和。缩放因子 1/√d_k 确保方差稳定，使 softmax 不会进入饱和区。
 
-**核心思想**
-- q 与 k 的点积衡量相关性，softmax 把相关性归一化成权重，再对 v 加权求和。
-- 除以 `√d_k` 把点积方差拉回 1，让 softmax 落在梯度健康的区间。
-
-**算法步骤与推导**
-- S = QKᵀ → 除 `√d_k` → 加掩码 → softmax 得权重 A → O = AV，形状全程是 `[B, H, Sq, Sk]` 这一族。
-- 掩码填 `-1e9` 而不是 0，是为了 softmax 之后权重正好变成 0。
-
-**对比与代价**
-- 同分类后续题目都在改它：MHA 拆头、GQA/MQA 复用 KV、Flash Attention 改 IO、MLA 改 KV 存储。
-- 代价是 S 必须显式物化成 `[B, H, Sq, Sk]`，显存 O(S²)；而且 softmax 要整行归约，朴素实现无法流式处理。
+### 算法步骤
+1. 计算 Q 和 K 的点积：scores = Q @ K^T
+2. 缩放：scores = scores / √d_k
+3. 应用 mask（可选）：masked_fill(mask == 0, -inf)
+4. Softmax 归一化：attn_weights = softmax(scores)
+5. 加权求和：output = attn_weights @ V
 
 ## 📐 核心公式
 

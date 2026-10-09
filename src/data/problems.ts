@@ -60,34 +60,22 @@ export const problems: Problem[] = [
     hot: 3,
     difficulty: 3,
     oneLiner: 'softmax(QKᵀ/√d)V — 所有注意力的基础',
-    principle: '计算 Q 和 K 的点积，除以缩放因子 √d_k 后通过 softmax 得到注意力权重，最后加权求和 V。缩放因子防止点积过大导致 softmax 梯度消失。',
+    principle: '计算 Q 和 K 的点积，除以缩放因子 √d_k 后通过 softmax 得到注意力权重，最后加权求和 V。缩放防止点积过大导致梯度消失，是所有注意力变体（MHA/GQA/Flash Attention）的基础。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          '全连接层做不到「按内容检索」，参数量还随序列长度增长；点积注意力用一次矩阵乘法算出所有位置对的相关性，零参数、完全可并行。',
-          '但不缩放会出事：q、k 各维方差为 1 时点积方差恰好等于 d_k，d_k=512 时标准差约 23。softmax 输入跨度过大会饱和成 one-hot，梯度趋近 0。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          'q 与 k 的点积衡量相关性，softmax 把相关性归一化成权重，再对 v 加权求和。',
-          '除以 √d_k 把点积方差拉回 1，让 softmax 落在梯度健康的区间。',
+          '通过点积衡量 Q 和 K 的相似度，softmax 归一化后作为权重对 V 加权求和。缩放因子 1/√d_k 确保方差稳定，使 softmax 不会进入饱和区。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          'S = QKᵀ → 除 √d_k → 加掩码 → softmax 得权重 A → O = AV，形状全程是 [B, H, Sq, Sk] 这一族。',
-          '掩码填 -1e9 而不是 0，是为了 softmax 之后权重正好变成 0。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '同分类后续题目都在改它：MHA 拆头、GQA/MQA 复用 KV、Flash Attention 改 IO、MLA 改 KV 存储。',
-          '代价是 S 必须显式物化成 [B, H, Sq, Sk]，显存 O(S²)；而且 softmax 要整行归约，朴素实现无法流式处理。',
+          '计算 Q 和 K 的点积：scores = Q @ K^T',
+          '缩放：scores = scores / √d_k',
+          '应用 mask（可选）：masked_fill(mask == 0, -inf)',
+          'Softmax 归一化：attn_weights = softmax(scores)',
+          '加权求和：output = attn_weights @ V',
         ],
       },
     ],
@@ -131,39 +119,22 @@ def scaled_dot_product_attention(q, k, v, mask=None):
     hot: 3,
     difficulty: 4,
     oneLiner: '并行多头 → 拼接 → 输出投影',
-    principle: '将输入投影到多个子空间，每个头独立计算注意力，最后拼接并通过线性层融合。不同头可学习不同的注意力模式。',
+    principle: '将输入投影到多个子空间，每个头独立计算注意力，最后拼接并通过线性层融合。相比单头注意力，多头机制允许模型同时关注不同位置的不同表示子空间，捕捉更丰富的语义关系。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          '单头注意力只有一组 Q/K/V 投影，softmax 权重会把「关注哪儿」这件事压成一种模式 —— 同一个位置没法同时对几个不同的位置组合分配注意力。',
-          '所有维度还共用同一套投影权重，无法让不同维度去捕捉不同类型的关系（句法、指代、局部顺序）。',
-          '一个位置常常需要同时盯住多个对象，这是单头结构上做不到的事。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '把 D 维拆成 H 个 Dh = D/H 维的子空间，每个子空间各自独立做一次完整的注意力。',
-          '每个头有自己的 W_q/W_k/W_v，等于把「关注什么」也交给模型自己学。',
-          '最后 concat 回 D 维再过 W_o 融合；W_o 是唯一发生跨头交互的地方。',
+          '通过多个独立的注意力头，每个头学习不同的注意力模式（如语法关系、语义关系等）。最后通过输出投影融合所有头的信息，增强模型的表达能力。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          'x: [B, S, D] 分乘三个投影得到 [B, S, D]，再 view 成 [B, S, H, Dh]、transpose 成 [B, H, S, Dh]。',
-          'transpose 只是把头维提到前面，让每个头在最后两维上是一个独立的矩阵，从而能一次性批量做 SDPA。',
-          '每个头独立算 softmax(QKᵀ/√Dh)·V，归一化只在 Dh 内、每个头各自进行，头与头之间不共享分母。',
-          'transpose + view 变回 [B, S, D]，过 W_o 得到输出。总计算量仍是 O(S²·D)：H 个头各算 S²·Dh，加起来正好等于 S²·D。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '参数量不随 H 增长（H·Dh = D），多头只多出一组中间张量，代价几乎为零。',
-          '代价在显存：中间注意力矩阵是 [B, H, S, S]，与 H 成正比，KV Cache 同理 —— GQA、MQA 砍的正是这一项。',
-          '头也不是越多越好：Dh 太小时单个头的表达空间受限，实践中 Dh 一般取 64~128。',
+          '线性投影：Q = x @ Wq, K = x @ Wk, V = x @ Wv',
+          '分头：view(B, S, H, Dh).transpose(1, 2) → [B, H, S, Dh]',
+          '对每个头计算缩放点积注意力',
+          '合并多头：transpose(1, 2).contiguous().view(B, S, D)',
+          '输出投影：output = concat_output @ Wo',
         ],
       },
     ],
@@ -220,39 +191,21 @@ class MultiHeadAttention(nn.Module):
     hot: 3,
     difficulty: 2,
     oneLiner: '下三角矩阵，防止看到未来信息',
-    principle: '在 decoder 中使用下三角矩阵作为 mask，使得位置 i 只能关注位置 ≤i 的 token。这是自回归生成的基础。',
+    principle: '在 decoder 中使用下三角矩阵作为 mask，使得位置 i 只能关注位置 ≤i 的 token。这是自回归生成的基础，相比无 mask 的注意力，确保模型在训练时不会"看到未来"。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          '自回归的训练目标是「预测第 i 个 token 时只能看到前 i 个」；但注意力天生是全局的，位置 0 会直接看到位置 9 的答案，等于把标签喂给了模型。',
-          '如果老老实实按因果顺序一次前向一个位置，训练要跑 S 遍前向，完全无法并行，等于放弃 GPU。',
-          '掩码让「一次前向算完所有位置」与「每个位置只看到自己的前缀」同时成立 —— 这是 GPT 类模型能高效训练的根基。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '在 softmax 之前把 j > i 的位置填成一个极大的负数，softmax 之后这些位置的权重正好下溢为 0。',
-          '下三角矩阵只是「允许看谁」的形状描述，实现上就是对 score 矩阵做一次 masked_fill。',
-          '输出形状与普通注意力完全一致，因果性只由 mask 的取值保证，不改变任何一步的形状。',
+          '通过下三角矩阵屏蔽未来位置的信息，使每个位置只能 attend 到当前及之前的 token。被屏蔽的位置填充 -inf，softmax 后变为 0，从而实现因果约束。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          '构造 mask = tril(ones(S, S))：1 表示可见（下三角含对角线），0 表示屏蔽（上三角）。',
-          'scores = QKᵀ/√D → [B, H, S, S]，把 mask == 0 的位置填成 -1e9。',
-          '沿最后一维 softmax：被填的位 exp(-1e9) 下溢为 0，权重精确为 0，其余位置按剩余项重新归一化。',
-          'O = A·V，第 i 行只混合了 j ≤ i 的 V —— 因果性由构造保证，不需要额外检查。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '与 padding mask 的区别：padding mask 屏蔽「不存在的 token」，因果 mask 屏蔽「未来的 token」，两者通常叠加成同一个二维掩码。',
-          '填 -1e9 而不是 -inf：整行都被屏蔽时 softmax(-inf) 会得到 NaN，-1e9 在 fp32 下已经下溢到 0，行为更稳。',
-          '代价是 softmax 每行的有效长度不同，无法完全均匀分块；Flash Attention 要专门判断「当前块是否跨越对角线」，跨了就多做一次掩码。',
+          '创建下三角矩阵：mask = torch.tril(torch.ones(S, S))',
+          '调整维度：mask = mask.unsqueeze(0).unsqueeze(0) → [1, 1, S, S]',
+          '在注意力计算中应用：scores.masked_fill(mask == 0, -inf)',
+          'Softmax 归一化：attn = softmax(scores)',
         ],
       },
     ],
@@ -291,39 +244,22 @@ def create_causal_mask(seq_len, device='cpu'):
     hot: 3,
     difficulty: 4,
     oneLiner: '多 Q 头共享 KV 头，LLaMA 2 标配',
-    principle: 'MHA 和 MQA 的折中方案：Q 有 H 个头，KV 只有 G 个头 (G<H)。多个 Q 头共享同一组 KV 头，大幅减少 KV Cache。',
+    principle: 'MHA 和 MQA 的折中方案：Q 有 H 个头，KV 只有 G 个头 (G<H)。多个 Q 头共享同一组 KV 头，大幅减少 KV Cache。相比 MHA 节省推理显存，相比 MQA 保持更好的模型质量。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          'MHA 每个 Q 头都配一组独立的 KV，KV Cache 随头数线性增长，长上下文推理时显存压力很大。',
-          'MQA 把所有 Q 头压到共享一组 KV，Cache 缩到 1/H，但模型质量明显下降、训练也更不稳定。',
-          '两端都不合适，需要的是「省一部分 Cache 但别掉质量」的中间档。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '让 G 个 Q 头共享一组 KV，1 < G < H：Cache 变成 MHA 的 G/H，质量损失远小于 MQA。',
-          '直觉上不同的 Q 头本来就在关注相似的内容，冗余的 KV 头可以合并，保留一部分多样性就够了。',
-          'G = H 退回 MHA，G = 1 退回 MQA，GQA 用一个参数把整个谱系串起来。',
+          '通过让多个 Q 头共享同一组 KV 头，在保持模型表达能力的同时大幅减少 KV Cache 大小。核心操作是 repeat_kv：将 G 个 KV 头复制扩展为 H 个，以匹配 Q 的头数。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          'Q: [B, H, S, Dh] 不变，K, V: [B, G, S, Dh] 只有 G 组。',
-          '做注意力前先把 KV 扩到 H：repeat_kv 依次 unsqueeze → expand → reshape，每份 KV 复制 H/G 次。',
-          'expand 只建视图不占新内存，reshape 才真正复制 —— 复制只发生在前向，Cache 本身仍是 G 份。',
-          '之后与 MHA 完全相同，注意力计算不用改一行。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '相对 MHA：KV Cache 降到 G/H，LLaMA 2 70B 取 G=8、H=64，只剩 1/8；相对 MQA：质量损失小得多。',
-          '代价是 repeat_kv 在前向时多了一次实实在在的复制，属于拿计算换显存。',
-          'G 需要调：太小质量掉，太大省不下多少 Cache，常见取 4~8。',
+          '线性投影：Q → [B, S, H, Dh]，K,V → [B, S, G, Dh]',
+          '复制 KV 头：repeat_kv(K, H/G) → [B, S, H, Dh]',
+          '转置维度：transpose(1, 2) → [B, H, S, Dh]',
+          '计算缩放点积注意力',
+          '合并多头并输出投影',
         ],
       },
     ],
@@ -393,39 +329,23 @@ class GQA(nn.Module):
     hot: 2,
     difficulty: 5,
     oneLiner: '分块计算 + Online Softmax → O(N) 显存',
-    principle: '将 Q/K/V 分成块，在 SRAM 中完成注意力计算，避免将 O(N²) 的注意力矩阵写入 HBM。利用 Online Softmax 算法，不需要存储完整的注意力矩阵。',
+    principle: '将 Q/K/V 分成块，在 SRAM 中完成注意力计算，避免将 O(N²) 的注意力矩阵写入 HBM。相比标准 Attention 的 O(N²) IO 复杂度，Flash Attention 将其降至 O(N²d/M)，大幅提升长序列训练/推理效率。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          '标准注意力要把 [B, H, S, S] 的分数矩阵写回 HBM 再读回来做 softmax；S=8192 时单头就是 6700 万个元素，来回读写三次。',
-          'GPU 的算力远快于显存带宽，这个算子属于典型的 memory-bound：瓶颈全在搬数据，不在乘加。',
-          'SRAM（共享内存）快一个数量级但只有几十 MB，所以问题变成「怎么在不物化完整矩阵的前提下把 softmax 算完」。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '把 Q/K/V 按块切分，让每个块的分数只在 SRAM 里存在，算完立刻消费掉。',
-          '难点是 softmax 需要整行的 max 与 sum，而分块后一次只能看到一段。Online Softmax 用「边遍历边修正」解决：每来一个新块就更新 running max，再把之前累积的结果按 exp(m_old - m_new) 缩回去。',
-          '于是每行只需要在寄存器里维护 m、l、O 三个状态，显存占用从 O(S²) 降到 O(S)。',
+          '利用 Online Softmax 算法，分块计算注意力而不需要存储完整的 N×N 注意力矩阵。GPU SRAM 快但小(20MB)，HBM 慢但大(40GB)，算法设计围绕减少 HBM 访问。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          '把 Q 切成 Tr 块（常驻 SRAM），K/V 切成 Tc 块（从 HBM 流式读入）。',
-          '对每个 Q 块遍历所有 K/V 块，累加三件事：m = max(m, rowmax(S_block))、l = l·exp(m_old - m) + rowsum(exp(S_block - m))、O = O·exp(m_old - m) + exp(S_block - m)·V_block。',
-          '三个式子是同一件事：新块到来后先修正旧的归一化因子，再把新块的贡献加进来，所以中途得到的 O 始终是「已遍历部分」的正确结果。',
-          '全部遍历完再统一除以 l。结果是精确的 softmax，不是近似 —— 只差浮点累加顺序。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          'IO 从 O(S²) 降到 O(S²d/M)：Q 块在 SRAM 里被复用，K/V 只从 HBM 读一遍。',
-          '代价是要自己写 CUDA kernel，还要处理掩码、变长等分支；反向也必须重算注意力而不是读回概率矩阵，用额外算力换显存。',
-          '结果是数值等价的，所以可以逐层替换、不需要重新训练；这也是它能迅速成为标准实现的原因。',
+          '将 Q 分成块，逐块处理',
+          '对每个 Q 块，遍历所有 K/V 块',
+          '计算当前块的 attention scores',
+          'Online Softmax 更新：维护最大值 m 和分母 l',
+          '累加输出：O = O * exp(m_old - m_new) + P @ V_block',
+          '最终归一化：O = O / l',
         ],
       },
     ],
@@ -493,39 +413,23 @@ def flash_attention_qk(Q, K, V, block_size=64):
     hot: 3,
     difficulty: 3,
     oneLiner: '缓存历史 KV，避免自回归重复计算',
-    principle: '自回归生成时，每步只处理新 token，但需要与所有历史 token 做注意力。KV Cache 缓存历史的 K/V，避免重复计算。',
+    principle: '自回归生成时，每步只处理新 token，但需要与所有历史 token 做注意力。KV Cache 缓存历史的 K/V，避免重复计算。相比每步重新计算所有 token 的 O(N²) 复杂度，KV Cache 将其降至 O(N)，是推理加速的核心技术。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          '自回归解码每步只新增 1 个 token，可这个新 token 要和全部历史做注意力；不缓存的话，第 t 步就得重算前 t 个 token 的 K/V。',
-          '总代价从 O(S) 变成 Σt = O(S²) 次投影计算，生成 4096 个 token 时白算了约两千倍。',
-          'K/V 只依赖 token 自身和它的位置，不随「后面来了什么」改变 —— 这正是它可以被缓存的前提（Q 不具备这个性质）。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '用一个显式张量保存每层历史的 K/V，新 token 只算自己的 K/V，再拼到末尾。',
-          'Q 不缓存：每一步只有最新的 Q 有用，历史 Q 不会再被任何计算用到。',
-          '空间换时间：显存随序列长度线性增长，换来每步计算量恒定。',
+          '空间换时间：缓存历史 token 的 K/V，每步只计算新 token 的 K/V，然后与缓存拼接。代价是额外的显存占用 O(L × H × Dh)。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          'Prefill：整段 prompt 一次前向，把每层的 K/V 写进 cache，形状 [B, H_kv, S_prompt, Dh]。',
-          'Decode：新 token 算出 q/k/v，形状都是 [B, H, 1, ·]；只把 k、v 追加到 cache 末尾。',
-          '用 [B, H, 1, Dh] 的 q 去和 [B, H, S+t, Dh] 的 cache 做 SDPA，一步得到一个输出 token，计算量恒定。',
-          'cache 是逐 token 增长的，朴素实现要么预分配最大长度（浪费），要么整块复制（拷贝开销）—— 这正是 PagedAttention 要解决的问题。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '缓存大小 = 2 × n_layers × n_kv_heads × S × Dh × 字节数；LLaMA 2 70B 在 4096 长度、fp16 下约 80GB，比模型本身还大。',
-          '代价是显存成为首要瓶颈：batch size 和上下文长度都被它卡住，所以才有了 MQA/GQA（减头数）和 MLA（压缩存储）。',
-          '每步都要读写整个 cache，decode 阶段是 memory-bound、算力大量闲置；把多个请求 batch 起来正是为了填满这个空。',
+          'Prefill 阶段：处理整个 prompt，计算并缓存所有 KV',
+          'Decode 阶段：每步只处理 1 个新 token',
+          '计算新 token 的 Q, K, V',
+          '拼接历史 KV：K = cat(K_cache, K_new)',
+          '计算注意力：attn(Q, K, V)',
+          '更新 cache，输出下一个 token',
         ],
       },
     ],
@@ -586,39 +490,24 @@ class KVCacheAttention(nn.Module):
     hot: 2,
     difficulty: 5,
     oneLiner: 'KV 低秩压缩到潜空间，DeepSeek-V2 核心',
-    principle: '将 KV 先下投影压缩到低维潜空间（存入 Cache），再上投影恢复。压缩比可达 90%+，远超 GQA。',
+    principle: '将 KV 先下投影压缩到低维潜空间（存入 Cache），再上投影恢复。压缩比可达 90%+，远超 GQA 的 75%。相比 GQA，MLA 通过低秩压缩实现更极致的 KV Cache 压缩，是 DeepSeek-V2 的核心创新。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          'GQA 只是让多个 query 头共享同一份 K/V，砍的是头的冗余；每个 K/V 向量仍然要存满 Dh 维，压缩比有下限。',
-          '长上下文下 KV Cache 仍是显存大头，batch 一大就 OOM —— 头数最多减到 1（MQA），这条路已经走到头了。',
-          '真正冗余的是「每个 K/V 向量本身能由更少的自由度表示」：那就别缓存 K/V，改缓存它的低维编码。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '缓存的对象从 K、V 换成一个共享的低维潜向量 c_kv，要用的时候再临时上投影恢复。',
-          '压缩发生在「存储维度」上而不是「头数」上，所以压缩比可以远超 GQA：DeepSeek-V2 的潜维度只有 512。',
-          'Q 也做同样的低秩压缩，但只为省训练时的激活显存，它不进 Cache，对推理显存没有贡献。',
+          '利用低秩矩阵分解压缩 KV：先下投影到 latent_dim（存入 Cache），再上投影恢复完整的 K/V。Q 也使用低秩投影，但不缓存（只用于当前 token）。RoPE 只应用于 k_rope 和 q_rope 部分。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          'c_kv = x·W_dkv → [B, S, C]，C 远小于 H·Dh；只有这个进 cache。',
-          '用时 kv = c_kv·W_ukv → [B, S, H·(Dh+Dr+Dh)]，再 split 成 k_content、k_rope、v。',
-          'k_rope/q_rope 是单独留给 RoPE 的不压缩分量：RoPE 是位置相关的，和内容挤进同一个低秩空间会被压坏。',
-          'q = cat(q_content, q_rope)、k = cat(k_content, k_rope) 后做 SDPA，之后的流程与普通注意力一致。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '对比 GQA：GQA 的 cache 是 2·G·Dh，MLA 是 C（DeepSeek-V2 取 512，约等于 4 个 Dh=128 头的量），压缩比从 4× 提到 10× 以上。',
-          '代价是解码时每个 token 都要临时上投影，多了一次矩阵乘；换来的是能开更大的 batch，端到端吞吐反而上升。',
-          '另一个代价是实现复杂：RoPE 必须拆出来单独走一路，训练时的激活显存还得靠低秩 Q 压回去。',
+          'KV 下投影压缩：c_kv = W_down(x) → [B, S, latent_dim]',
+          'KV 上投影恢复：K,V = W_up(c_kv) → split → k_content, k_rope, v',
+          'Q 下投影压缩：c_q = W_down_q(x)',
+          'Q 上投影恢复：q = W_up_q(c_q) → split → q_content, q_rope',
+          '应用 RoPE：q_rope, k_rope = rope(q_rope, k_rope)',
+          '合并内容：q = cat(q_content, q_rope), k = cat(k_content, k_rope)',
+          '计算注意力并输出投影',
         ],
       },
     ],
@@ -685,41 +574,22 @@ class MLA(nn.Module):
     hot: 3,
     difficulty: 5,
     oneLiner: '长上下文下 O(S²) 不可行：压缩 + 选择 + 滑窗，或索引器 + top-k',
-    principle: '长上下文注意力是 O(S²)，必须稀疏化。NSA 走三分支路线：压缩块注意力（粗粒度全局）、top-n 块选择（中粒度重要区域）、滑动窗口（局部精确），再用学到的门控加权求和；DSA 走另一条路，用一个极轻的 lightning indexer 给每个历史 token 打分，只对 top-k 个 token 做真正的注意力。两者都要求块对齐以适配硬件。',
+    principle: '长上下文注意力是 O(S²)，必须稀疏化。NSA 走三分支路线：压缩块注意力（粗粒度全局）、top-n 块选择（中粒度重要区域）、滑动窗口（局部精确），再用学到的门控加权求和；DSA 走另一条路，用一个极轻的 lightning indexer 给每个历史 token 打分，只对 top-k 个 token 做真正的注意力。两者都把复杂度降到 O(S·n) 或 O(S·k)，也都要求块对齐以适配硬件 —— 代价是块大小 l 成了超参，太小则选择本身变贵，太大则选得不够精细。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          '长上下文注意力是 O(S²)：S=128K 时单层的注意力矩阵有 160 亿个元素，光存都存不下。',
-          '但注意力权重实际上是稀疏的 —— 绝大多数位置对当前 token 无关，稠密计算在浪费算力。',
-          '难点在「怎么稀疏」：套固定模式（只看滑窗）会丢掉长程依赖，随机或启发式选择非连续，gather 会让 GPU 利用率崩掉。所以能用的方案必须同时满足三条：保住长程信息、选择是学出来的、粒度块对齐。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          'NSA 走三分支并行：压缩块注意力（粗粒度全局）、top-n 块选择（中粒度重要区域）、滑动窗口（局部精确），再用学到的门控加权求和。',
-          'DSA 走另一条路：用一个极轻的 lightning indexer 给每个历史 token 打分，只对 top-k 个 token 做真正的注意力。',
-          '两者都要求块对齐 —— 稀疏必须落在连续的块上，硬件才能高效地做 gather。',
+          '注意力权重实际上是稀疏的 —— 绝大多数位置对当前 token 无关，稠密计算在浪费算力。难点在「怎么稀疏」：套固定模式（只看滑窗）会丢掉长程依赖，随机或启发式选择非连续，gather 会让 GPU 利用率崩掉。所以能用的方案必须同时满足三条：保住长程信息、选择是学出来的、粒度块对齐。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
           'NSA：先把 K/V 按块均值池化成 K_cmp（块大小 l），用压缩后的表示做一次粗粒度注意力。',
           '同一份 K_cmp 的分数用来挑 top-n 个块，再取回这些块的原始 KV 做精注意力；同时保留最近 w 个 token 的滑窗。',
           '三路输出按 g = σ(wᵀ·[q_t ; ...]) 加权求和，门控是学出来的，模型自己决定何时依赖全局、何时只看局部。',
           'DSA：k_s = W^{K,l}·h_s 是一个很轻的 key 投影（d^I 远小于 d），I_{t,s} = Σ_j w_{t,j}·ReLU(q_{t,j}·k_s) 给每个历史 token 打分，取 top-k 后再在这 k 个 token 上做 MLA 注意力。',
           'Indexer 维度极低且能用 FP8 跑，所以「给所有历史 token 打分」这一步的代价可以忽略。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          'NSA 是三分支并行 + 门控，结构复杂但一次覆盖三种粒度；DSA 是「先粗筛再精算」的两阶段，结构更接近标准注意力，实现简单得多。',
-          '复杂度都从 O(S²) 降到 O(S·n) 或 O(S·k)，n、k 都远小于 S。',
-          '代价是块对齐约束了选择粒度：块大小 l 是超参，太小则选择本身变贵，太大则选得不够精细。',
-          '两者都是近似算法，丢掉了一部分精确的稠密注意力；实测质量持平的前提是选择部分确实学到了有用的模式。',
         ],
       },
     ],
@@ -824,36 +694,21 @@ class LightningIndexer(nn.Module):
     hot: 3,
     difficulty: 2,
     oneLiner: '沿特征维度归一化，Transformer 标配',
-    principle: '在每个样本的特征维度上计算均值和方差进行归一化，再通过可学习的 gamma/beta 进行仿射变换。与 BatchNorm 不同，不依赖 batch size。',
+    principle: '在每个样本的特征维度上计算均值和方差进行归一化，再通过可学习的 gamma/beta 进行仿射变换。与 BatchNorm 不同，不依赖 batch size，适合序列模型，能稳定训练并加速收敛。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          '深层网络里激活值的尺度会逐层漂移，梯度要么爆炸要么消失；BatchNorm 用 batch 统计量把它压住，但统计量依赖 batch size —— batch 小、或者序列里 padding 占多数时噪声很大。',
-          'BatchNorm 还要在推理时改用训练期攒下的滑动平均，训练与推理的行为不一致；而 NLP 的变长序列让这件事更麻烦。',
-          'Transformer 的残差流随层数不断累加，没有归一化时深层激活会持续放大到发散。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '归一化该归一化「一个样本自己的特征」，而不是「batch 里同一位置的样本」。',
-          '所以只沿最后一维 D 求均值和方差，得到 [B, S, 1] 再广播回去；每个 token 独立统计，与 batch 里其他样本无关。',
+          '沿特征维度归一化，使每个样本的特征分布稳定在均值为 0、方差为 1 附近。通过 gamma（缩放）和 beta（偏移）两个可学习参数，让模型自适应调整归一化后的分布。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          '沿特征维求 μ、σ² → [B, S, 1]，unbiased=False 用的是总体方差，除以 D 而不是 D-1。',
-          '(x - μ) / √(σ² + ε) 把每个 token 的激活拉成均值 0、方差 1；ε 取 1e-5，只为防除零。',
-          '再用 γ、β 仿射回来：归一化会限制表达力（比如把激活压进线性区），让网络自己决定恢复多少尺度、多少偏移，两者都是 [D]。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '对比 BatchNorm：不依赖 batch size、训练推理完全一致、天然适合变长序列；代价是丢掉了跨样本统计，也就丢了 batch 噪声带来的正则效果。',
-          '代价是每个 token 都要做两次归约，比后续的 RMSNorm 贵一倍；不过相对注意力那 O(S²) 的开销可以忽略。',
+          '计算均值：μ = mean(x, dim=-1, keepdim=True)',
+          '计算方差：σ² = var(x, dim=-1, keepdim=True, unbiased=False)',
+          '归一化：x_norm = (x - μ) / √(σ² + ε)',
+          '仿射变换：output = x_norm × γ + β',
         ],
       },
     ],
@@ -898,36 +753,21 @@ class LayerNorm(nn.Module):
     hot: 3,
     difficulty: 2,
     oneLiner: '去掉均值中心化，LLaMA/Mistral 标配',
-    principle: 'LayerNorm 的简化版：不做均值中心化，只用 RMS (均方根) 归一化。计算更快，效果相当。',
+    principle: 'LayerNorm 的简化版：不做均值中心化，只用 RMS (均方根) 归一化。相比 LayerNorm 计算更快、参数更少（只有 gamma 无 beta），实践中效果相当。LLaMA/Mistral/PaLM/Gemma 等主流模型都采用。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          'LayerNorm 每层要做两次归约（均值 + 方差）外加一次减法，而大模型有几十层，这笔开销被层数放大。',
-          '归一化在 GPU 上会拆成独立的 kernel，前向反向都要多走一趟显存，属于典型的「访存瓶颈」算子。',
-          '实践中发现均值中心化对最终效果贡献很小 —— 去掉它照样能稳定训练，那这部分代价就不必付。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '只控制激活的「尺度」，不管「中心」：除以均方根就够了。',
-          '少了求均值和减均值两步，也少了 β 参数；γ 只做缩放，初始化为全 1 即可。',
+          '去掉均值中心化步骤，只用均方根归一化。使用 rsqrt 替代 1/sqrt，计算更高效。在 float32 下计算保证数值稳定性。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          '先升到 fp32 求 mean(x²)，再 rsqrt 一次得到缩放因子 —— 用 rsqrt(ms + ε) 而不是先开方再倒数，省一次逐元素运算。',
-          '乘回 x 与 γ 就是输出。全程不减去均值，所以没有减法也没有额外的广播。',
-          '升 fp32 是必须的：x² 在 bf16 下动态范围不够，容易溢出或下溢，算完再转回原精度。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '对比 LayerNorm：少一次归约、少一个 β，实测精度相当，LLaMA、PaLM、Qwen 都用它。',
-          '代价是失去平移不变性：它只约束尺度不约束中心，等于赌「均值不重要」。实践中这个赌是成立的。',
+          '计算均方值：ms = mean(x², dim=-1, keepdim=True)',
+          '计算均方根倒数：rsqrt = 1/√(ms + ε)',
+          '归一化：x_norm = x × rsqrt',
+          '缩放：output = x_norm × γ',
         ],
       },
     ],
@@ -973,39 +813,23 @@ class RMSNorm(nn.Module):
     hot: 3,
     difficulty: 4,
     oneLiner: '旋转 Q/K 向量注入位置信息，LLaMA 标配',
-    principle: '将位置信息编码为旋转角度，对 Q 和 K 的每对相邻维度施加旋转。旋转后 Q·K 的点积自然包含相对位置信息。',
+    principle: '将位置信息编码为旋转角度，对 Q 和 K 的每对相邻维度施加旋转。旋转后 Q·K 的点积自然包含相对位置信息。相比绝对位置编码（无法处理变长序列）和 ALiBi（需要额外参数），RoPE 无需额外参数即可自然编码相对位置。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          '注意力对位置完全无知：把输入序列打乱，Q·Kᵀ 的结果一模一样 —— 没有位置编码，模型连「谁在谁前面」都不知道。',
-          '可学习的绝对位置编码受限于训练时见过的最大长度，超出就 OOD；而且位置与内容被焊在同一组参数上，外推只能靠插值再微调。',
-          '理想的位置信息应该只以「相对距离」的形式进入点积，这样训练时没见过的长度也能自然泛化。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '给 q、k 各乘一个随位置变化的旋转矩阵 R_m，那么 (R_m q)·(R_n k) = qᵀ·R_{n-m}·k —— 点积里只剩相对位置，绝对位置被自动消掉。',
-          '旋转矩阵是正交的，不改变向量长度，原有的数值尺度不受影响。',
-          '把 D 维拆成 D/2 个二维平面，每个平面用不同频率 θᵢ 旋转：高频维度分辨近邻，低频维度分辨远距离。',
+          '通过旋转矩阵将位置信息注入 Q 和 K。对每对相邻维度 [x₁, x₂] 施加旋转 [-x₂, x₁]，等价于旋转 90°。旋转后 q_m · k_n 只依赖 m-n，天然具有相对位置感知能力。只对 Q 和 K 施加旋转，V 不变。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          '预计算 inv_freq = 1/10000^(2i/d)（i = 0..d/2-1），与位置做外积得到角度矩阵 [S, d/2]，取 cos/sin 后复制拼接成 [S, d]。',
-          '拼成 [S, d] 是为了直接和 [B, S, H, D] 广播，不用在 head 维上重复展开。',
-          'rotate_half(x) 把后半段取负拼到前面，配合 cos/sin 正好等价于乘一个二维旋转矩阵，这样不必真的构造 D×D 的稀疏旋转矩阵。',
-          '只作用在 q 和 k 上，不动 v —— v 是被加权求和的内容，本身与位置无关。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '对比可学习绝对位置编码：零新增参数、天然相对、还能靠改 inv_freq 做外推（NTK-aware、线性插值）。',
-          '对比 ALiBi：ALiBi 直接在注意力分数上加线性偏置，实现更简单；RoPE 把位置编进 Q/K 的方向里，与内容耦合更紧，是目前的主流选择。',
-          '代价是旋转改变了向量方向，后续线性层得重新适应；而且基频 10000 是超参，直接外推到远超训练长度时高频维度会震荡，才需要专门的插值技巧。',
+          '预计算频率：inv_freq = 1/(10000^(2i/d))',
+          '计算角度：angles = outer(positions, inv_freq)',
+          '预计算 cos/sin：cos = cos(angles), sin = sin(angles)',
+          '定义 rotate_half：chunk(x, 2, dim=-1) → cat(-x2, x1)',
+          '应用旋转：q_rot = q × cos + rotate_half(q) × sin',
+          '对 k 同样应用旋转',
         ],
       },
     ],
@@ -1066,38 +890,20 @@ class RotaryEmbedding(nn.Module):
     hot: 2,
     difficulty: 2,
     oneLiner: '两层 MLP，占 Transformer 2/3 参数量',
-    principle: '注意力层之后的两层全连接网络。先上投影扩展维度（通常 4 倍），应用激活函数，再下投影恢复维度。',
+    principle: '注意力层之后的两层全连接网络。先上投影扩展维度（通常 4 倍），应用激活函数，再下投影恢复维度。Attention 捕捉 token 间的关系，FFN 对每个 token 独立做非线性变换，占 Transformer 参数量的 2/3。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          '注意力本质是加权求和，对 V 是线性的；没有 FFN，整个 Transformer 就退化成多层线性变换的叠加，表达力约等于单层。',
-          '注意力负责 token 之间的信息交换，不做单个 token 内部的非线性加工 —— 这件事必须由别的模块来做。',
-          'FFN 也是模型存知识的地方：D=4096 时它占 8D² 参数，是注意力 4D² 的两倍，约占整个 Transformer 的 2/3。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '先用一个大矩阵把 D 维升到 4D，在更高维的空间里做非线性，再压回 D 维。',
-          '升维—非线性—降维，等于在中间层获得一个更宽的特征加工区；逐 token 独立，同一个 W₁ 作用在所有位置上。',
+          '通过上投影将维度从 D 扩展到 4D，在高维空间做非线性变换，再下投影回 D 维。这种"扩展-变换-压缩"的结构增强了模型的表达能力。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          '上投影 W₁: [D, 4D] 得到 [B, S, 4D]，这一步只有乘加，不含非线性。',
-          '过 ReLU 逐元素取 max(0, x)：这是整个模块里唯一引入非线性的地方。',
-          '下投影 W₂: [4D, D] 回到 [B, S, D]，与残差流维度对齐，才能和输入相加。',
-          '形状全程是 [B, S, ·]，只有最后一维在 D 与 4D 之间来回，序列维和 batch 维完全不动。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '对比 SwiGLU：门控版把参数拆成三个矩阵、效果更好，代价是多一个矩阵，所以中间维度从 4D 缩到 8/3·D 保持总参数量持平。',
-          '代价是参数量和计算量都集中在这里：4 倍扩展意味着 8D² 参数，推理时这部分是主要的 FLOPs 来源。',
-          'ReLU 在负区间梯度恒为 0，神经元一旦长期落在负区间就再也学不动（dead neuron）；GELU、SiLU 更平滑，现在的模型基本都换掉了 ReLU。',
+          '上投影：h = W₁ · x + b₁，维度 D → 4D',
+          '激活函数：a = ReLU(h)',
+          '下投影：output = W₂ · a + b₂，维度 4D → D',
         ],
       },
     ],
@@ -1137,37 +943,21 @@ class FFN(nn.Module):
     hot: 2,
     difficulty: 3,
     oneLiner: '门控 + SiLU 激活，LLaMA/PaLM 标配',
-    principle: '引入门控机制：一个分支用 SiLU 激活作为门，另一个分支无激活，两者逐元素相乘后下投影。比标准 FFN 效果更好。',
+    principle: '引入门控机制：一个分支用 SiLU 激活作为门，另一个分支无激活，两者逐元素相乘后下投影。相比标准 FFN+ReLU，门控机制让模型学习哪些信息通过，SiLU 激活更平滑，实验证明效果更好。LLaMA/PaLM/Mistral/Qwen 等主流模型都使用。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          'ReLU 只做「截断」，没有任何机制决定「哪些信息该通过」；每一维的增益是固定的，不随输入变化。',
-          '乘法门控带来的是二阶交互：门与内容相乘，相当于让网络自己学会一个「由输入决定」的缩放系数。',
-          '实验一致显示，同等参数量下门控 FFN 的 loss 更低，这个收益稳定且可复现。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '用两路上投影，一路过 SiLU 当门，一路保持线性，两者逐元素相乘再下投影。',
-          'SiLU(x) = x·σ(x) 自带门控：σ(x) 是 0~1 的开关，x 是内容，负区间先降后回升，不会像 ReLU 那样被一刀切死。',
+          '通过门控机制控制信息流：Gate 分支用 SiLU 激活学习"哪些信息应该通过"，Up 分支无激活提供"信息内容"，两者逐元素相乘实现选择性传递。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          'gate = SiLU(x·W_gateᵀ) → [B, S, d_ff]，up = x·W_upᵀ → [B, S, d_ff]，两路必须同维，乘法才是逐元素对齐的。',
-          'g = gate ⊙ up 逐元素相乘：门决定每一维通过多少，内容原样保留。',
-          'y = g·W_downᵀ → [B, S, D]。d_ff 取 8/3·D，三个矩阵合起来 3·D·d_ff ≈ 8D²，正好和标准 FFN 的参数量持平。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '对比标准 FFN：多一个矩阵换到更低的 loss；为了参数量对齐，中间维度从 4D 缩到 8/3·D，实际宽度反而变小了。',
-          '代价是矩阵乘法从 2 个变 3 个，算子数量增加，推理时略慢一点点，但相比收益可以忽略。',
-          'LLaMA、PaLM 都用它替换 ReLU FFN，GELU 版的 GeGLU 同理。',
+          '门控分支：gate = SiLU(W_gate · x)',
+          '值分支：up = W_up · x',
+          '门控相乘：activated = gate ⊙ up（逐元素乘法）',
+          '下投影：output = W_down · activated',
         ],
       },
     ],
@@ -1211,40 +1001,22 @@ class SwiGLU(nn.Module):
     hot: 2,
     difficulty: 4,
     oneLiner: '稀疏激活，大参数量小计算量',
-    principle: '将 FFN 替换为多个"专家"网络，Router 为每个 token 选择 Top-K 个专家处理。总参数量大但每次只激活部分，计算量可控。',
+    principle: '将 FFN 替换为多个"专家"网络，Router 为每个 token 选择 Top-K 个专家处理。总参数量大但每次只激活部分，计算量可控。相比 Dense 模型，MoE 可以增加模型容量但不增加计算量，如 Mixtral 8x7B 有 46.7B 参数但实际计算量仅约 12.9B。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          '稠密模型里参数和计算是绑死的：想把 7B 变成 70B，FLOPs 也跟着涨约 10 倍。',
-          '但推理时并非每个 token 都需要全部容量 —— 代码、中文、数学符号该由不同的参数来处理。',
-          '条件计算把「参数量」和「计算量」解耦：参数量决定容量上限，每个 token 实际激活多少专家决定开销。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '把一个大 FFN 切成 N 个专家，每个 token 只走 Top-K 个（通常 K=2）。',
-          'Router 只是一个 [D, N] 的极小的线性层，为每个 token 打分，softmax 后取 Top-K 的权重。',
-          '总参数是 N 份专家，但每个 token 只做 K 份专家的矩阵乘法，所以 FLOPs 只有 K/N。',
+          '通过 Router 网络为每个 token 动态选择最相关的 K 个专家处理，实现稀疏激活。每个专家是独立的 FFN，只处理分配到的 token，最后加权融合。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          '先把 [B, S, D] 摊平成 [B·S, D] —— 路由是逐 token 的，序列维在这里没有意义。',
-          'Router 给出 logits: [B·S, N]，softmax 后取 Top-K，得到专家下标与路由权重。',
-          '每个专家只处理分到自己的那些 token（gather 成连续块再分组做矩阵乘），算完按权重加权求和。',
-          '最后 reshape 回 [B, S, D] 与残差流对齐；没被选中的专家这一步完全不参与计算。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          'Mixtral 8x7B：8 个专家选 2 个，46.7B 总参数，但每个 token 实际只算约 12.9B。',
-          '代价是显存：所有专家都得加载，总参数量一份都不能少，小 batch 推理时性价比尤其差。',
-          '训练要额外加 load balance loss，否则所有 token 会挤到同一两个专家上，其余专家永远得不到训练。',
-          '分布式训练的主要瓶颈是通信：专家分散在不同卡上，token 要 all-to-all 发过去再发回来。',
+          'Router 计算：logits = Router(x)，得到每个专家的得分',
+          'Top-K 选择：选出得分最高的 K 个专家',
+          '权重归一化：weights = softmax(top_k_logits)',
+          '专家处理：每个 expert 处理分配到的 token',
+          '加权融合：output = Σ(weights[i] × expert[i](x))',
         ],
       },
     ],
@@ -1304,39 +1076,22 @@ class MoE(nn.Module):
     hot: 3,
     difficulty: 2,
     oneLiner: '下一个 token 预测，LLM 训练基础',
-    principle: '语言模型的核心训练目标：给定前文预测下一个 token。通过 shift 操作将 logits 和 labels 对齐，计算交叉熵。',
+    principle: '语言模型的核心训练目标：给定前文预测下一个 token。通过 shift 操作将 logits 和 labels 对齐，计算交叉熵。交叉熵衡量预测分布与真实分布的差异，梯度计算简洁（softmax + CE 的梯度 = y - one_hot），是 LLM 训练的基础。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          '语言模型要学的只有一件事：给定前文，下一个 token 应该是什么。这件事必须落成一个可求导、可批量计算的标量损失。',
-          '直接最大化整句的联合概率要连乘几十个小于 1 的概率，数值会下溢；取对数变成连加，才是能算的形式。',
-          '词表有几万维，预测本质上是一个超大分类问题，需要一个天然适配分类的损失函数。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '把「下一个 token 的概率」转成「正确 token 的负对数概率」：概率越接近 1，loss 越接近 0。',
-          '每个位置上只有一个正确答案，所以交叉熵退化成取正确 token 那一项的负对数，不必真的构造几万维的 one-hot 向量。',
-          '对每个位置都算一遍，整条序列的 loss 就是这些位置的平均，也就把「预测下一个 token」变成了可微的目标。',
+          '用前面的 token 预测下一个 token。通过 shift 操作：logits 去尾（去掉最后一个位置的预测），labels 去头（去掉第一个位置的目标），使 logits[:, :-1] 预测 labels[:, 1:]。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          'shift 对齐：logits[:, :-1] 配 labels[:, 1:]，位置 t 的输出预测的是位置 t+1 的 token。少这一步就等于把答案直接喂给模型。',
-          '对 logits 做 log_softmax 直接得到对数概率，避免「先 softmax 再 log」在概率极小时下溢成 -inf。',
-          '取出正确 token 位置的对数值、取负、按有效 token 求平均。SFT 时把 prompt 段的 label 置为 -100，ignore_index 会把它们排除出分母。',
-          '梯度形式极简：softmax - one_hot。预测得越离谱梯度越大，且自带归一化，不必额外调损失尺度。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '对比 MSE 这类回归损失：交叉熵的梯度不会在概率饱和后消失，即使 p 已接近 0 仍有量级可观的拉力。',
-          '代价是它只看正确 token 那一项，对剩下几万维的分布毫无约束 —— 想让模型学会完整的分布（蒸馏）就得换成 KL 之类的度量。',
-          '按序列平均会稀释长回答里每个 token 的梯度，DAPO 改成 token 级求和正是为了修掉这一点。',
+          'Shift logits：shift_logits = logits[:, :-1, :]',
+          'Shift labels：shift_labels = labels[:, 1:]',
+          '展平：flattened_logits = shift_logits.view(-1, V)',
+          '展平：flattened_labels = shift_labels.view(-1)',
+          '计算交叉熵：loss = CE(flattened_logits, flattened_labels)',
         ],
       },
     ],
@@ -1381,39 +1136,21 @@ def lm_loss(logits, labels, ignore_index=-100):
     hot: 3,
     difficulty: 4,
     oneLiner: '无需奖励模型，直接优化偏好数据',
-    principle: '将奖励函数参数化为策略与参考策略的对数比率，直接在偏好数据上优化。增加 chosen 概率，降低 rejected 概率。',
+    principle: '将奖励函数参数化为策略与参考策略的对数比率，直接在偏好数据上优化。增加 chosen 概率，降低 rejected 概率。相比 PPO 不需要 reward model 和 critic，训练更简单稳定，效果相当甚至更好。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          'RLHF 的常规流程要先训一个 reward model，再用 PPO 在线优化，两者都得和策略同规模，显存与调参成本都高。',
-          'PPO 那条流水线很脆：奖励尺度、KL 系数、clip 范围都要调，还容易训崩。',
-          '而手里拿到的数据往往只是静态偏好对（A 比 B 好），并没有分数 —— 需要一种直接吃偏好对的算法。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '带 KL 约束的 RLHF 最优策略有闭式解：π* ∝ π_ref · exp(r/β)，反解出来就是 r = β·log(π*/π_ref) + 常数。',
-          '也就是说奖励可以被「策略与参考策略的对数比率」参数化，不必单独训一个 reward model。',
-          '把这个式子代回偏好损失（Bradley-Terry），常数项自动消掉，最后只剩 chosen 和 rejected 两条回答本身。',
+          '利用 RL 的对偶性，将奖励函数隐式表示为 r(x,y) = β · log(πθ(y|x)/πref(y|x))。这样策略优化目标可以直接用策略的对数概率差来表示，无需显式奖励模型。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          '各算两项对数概率：策略与参考策略在 chosen / rejected 上的 logp，四项相减得到隐式奖励差 logits = r_w - r_l。',
-          '参考模型的 logp 必须 no_grad：它只是固定的锚点，不参与更新；只有策略那份需要梯度。',
-          '-logsigmoid(β·logits)：chosen 比 rejected 好得越多，sigmoid 越接近 1，loss 越小。',
-          'β 控制偏离参考模型的程度，越大越激进，通常取 0.1~0.5。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '相对 PPO：省掉 reward model 和在线 rollout，一次前向就能算出 loss，工程复杂度大幅下降。',
-          '代价是完全 off-policy：只能吃固定的偏好数据集，无法在线探索；数据分布一旦偏离当前策略，提升就受限。',
-          '它还需要一份额外的参考模型副本常驻显存，这一点和 PPO 一样躲不掉。',
+          '收集偏好数据：(prompt, chosen_response, rejected_response)',
+          '计算策略与参考策略的对数概率差',
+          '构造损失函数：增加 chosen 概率，降低 rejected 概率',
+          '直接用梯度下降优化策略模型',
         ],
       },
     ],
@@ -1458,39 +1195,22 @@ def dpo_loss(policy_chosen_logps, policy_rejected_logps,
     hot: 3,
     difficulty: 5,
     oneLiner: '截断重要性采样比率，RLHF 核心',
-    principle: '通过截断重要性采样比率 r_t = π_new/π_old 到 [1-ε, 1+ε]，限制策略更新幅度，防止策略崩溃。',
+    principle: '通过截断重要性采样比率 r_t = π_new/π_old 到 [1-ε, 1+ε]，限制策略更新幅度，防止策略崩溃。相比普通策略梯度容易更新过大导致崩溃，PPO 通过 clip 机制保证训练稳定性，是 ChatGPT/InstructGPT 的 RLHF 核心算法。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          '策略梯度是 on-policy 的：采一批数据更新一次就得丢掉，样本效率极低。',
-          '想拿同一批数据多更新几步，就得用重要性采样；但比率一旦偏离 1 太远，估计的方差会爆炸。',
-          '朴素的策略梯度没有约束，一步更新过大就会把策略推到一个再也回不来的坏区域，训练直接崩。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '允许策略偏离旧策略，但把重要性比率 r_t 限制在 [1-ε, 1+ε] 内，超出的部分不再提供梯度。',
-          '取 min(未裁剪, 裁剪) 而不是直接裁剪，是为了拿到悲观下界：真正生效的是两者中更小的那个。',
-          '于是「方向对但步子太大」的更新会被自动刹车，既保住样本效率又不至于崩。',
+          '重要性采样比率 r_t 衡量新旧策略的差异。通过 clip 将 r_t 限制在 [1-ε, 1+ε] 范围内，当 A>0 时防止 ratio 过大（过度奖励），当 A<0 时防止 ratio 过小（过度惩罚），实现保守更新。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          'ratio = exp(new_logp - old_logp)，用对数概率相减再取指数，比直接做除法数值稳定。',
-          '算两支：unclipped = ratio·A、clipped = clamp(ratio, 1-ε, 1+ε)·A，取两者逐元素的最小值。',
-          'A > 0 时 ratio 涨过 1+ε 就被截住，防止一个本来就不错的动作被过度奖励；A < 0 时 ratio 跌到 1-ε 以下也被截住，防止过度惩罚。',
-          'ε 通常取 0.2；取负号后求均值即为 loss，min 的悲观特性保证更新幅度有上界。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '相对朴素策略梯度：每一步的更新幅度有显式上界，训练稳得多；相对 TRPO：用一次 clip 代替二阶约束求解，实现简单很多。',
-          '代价是它只约束了比率的上界，对策略的长期漂移没有约束 —— RLHF 里还得额外加一项 KL 惩罚拉住参考模型。',
-          'ratio 必须用旧策略的 logp 现算，所以 rollout 与更新之间要严格配对，工程上比 off-policy 方法麻烦。',
+          '计算重要性采样比率：ratio = exp(new_logp - old_logp)',
+          '截断比率：clipped = clamp(ratio, 1-ε, 1+ε)',
+          '计算未截断代理损失：surr1 = ratio × advantages',
+          '计算截断代理损失：surr2 = clipped × advantages',
+          '取较小值：loss = -mean(min(surr1, surr2))',
         ],
       },
     ],
@@ -1538,36 +1258,22 @@ def ppo_loss(old_logp, new_logp, advantages, eps=0.2):
     hot: 3,
     difficulty: 4,
     oneLiner: '去掉 Critic，组内归一化优势，DeepSeek-R1',
-    principle: 'PPO 的简化版：对同一问题生成 G 个回答，用组内归一化的奖励作为优势，不需要 Critic 网络。',
+    principle: 'PPO 的简化版：对同一问题生成 G 个回答，用组内归一化的奖励作为优势，不需要 Critic 网络。相比 PPO 节省约 40% 训练显存，是 DeepSeek-R1 使用的强化学习算法。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          'PPO 需要一个与策略同规模的 Critic（Value Head）估计状态价值，它自己也要训练调参，显存约占 40%，估不准还会把策略带偏。',
-          '数学题这类任务只在序列末尾给一个标量奖励（答案对/错），中间步骤的价值几乎学不出来，Critic 退化严重。',
-          '换个思路：同一个问题采样 G 个回答，它们的奖励天然可比 —— 组内均值是难度基线，组内标准差是区分度。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '把「这条回答好不好」换成「它比同组平均好多少」，Critic 被一组统计量取代。',
-          'Aᵢ = (rᵢ - mean) / (std + ε)：减均值让优势有正有负，除标准差让不同难度题目的梯度量级一致。',
+          '对同一问题生成 G 个回答，用组内归一化的奖励代替 Critic 网络的价值估计。优势函数 Aᵢ = (rᵢ - mean(r)) / (std(r) + ε)，结合 PPO clip 机制和显式 KL 惩罚。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          '采样 G 个回答 → 各自打分 → 组内归一化得优势 → 用 PPO 的 clip 目标更新 → 加显式 KL 惩罚拉住参考策略。',
-          '全对/全错的组 std = 0，归一化后优势全 0，本来就没有梯度 —— DAPO 正是据此把它们直接丢弃。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '相对 PPO：省掉 Critic 网络与价值损失，显存和调参成本都下降；代价是每组要多采 G 个回答。',
-          '相对 DPO：DPO 只吃静态偏好对、完全 off-policy；GRPO 是 on-policy，能在线探索，但要求可反复采样并打分。',
-          '三个弱点正是后三题的动机：token 级比率方差大（GSPO 改序列级）、全对全错组白算（DAPO 动态采样）、clip 上下界不对称（DAPO clip-higher）。',
+          '对同一问题 q 生成 G 个回答：o₁, o₂, ..., o_G',
+          '计算每个回答的奖励：r₁, r₂, ..., r_G',
+          '组内归一化优势：Aᵢ = (rᵢ - mean) / (std + ε)',
+          '计算 PPO clip 损失',
+          '添加显式 KL 惩罚：loss += β · KL(π‖π_ref)',
         ],
       },
     ],
@@ -1627,39 +1333,21 @@ def kl_penalty(logp, ref_logp):
     hot: 3,
     difficulty: 3,
     oneLiner: 'GRPO 的比率提到序列级，MoE 训练的稳定解',
-    principle: 'GRPO 的重要性比率是 token 级的，每个 token 各自 clip。当奖励本身是序列级的（整条回答对错）时，这种粒度不匹配会带来高方差：同一条序列内不同方向的更新互相拉扯，在 MoE 模型上还会放大路由抖动导致训练发散。GSPO 把重要性比率定义在序列级——对逐 token 对数比做长度归一化，整条序列共享一个标量比率、只 clip 一次。',
+    principle: 'GRPO 的重要性比率是 token 级的，每个 token 各自 clip；而奖励本身是序列级的（整条回答对错），粒度对不上。这种不匹配带来高方差：同一条序列里一部分 token 被裁掉、另一部分照常更新，序列内部的更新方向互相拉扯，在 MoE 模型上还会放大路由抖动导致训练发散。GSPO 把重要性比率定义在序列级 —— 对逐 token 对数比做长度归一化，整条序列共享一个标量比率、只 clip 一次；代价是粒度变粗，序列内部个别 token 的差异会被平均掉。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          'GRPO 的重要性比率是 token 级的，每个 token 各自 clip；而奖励本身是序列级的（整条回答对错），粒度对不上。',
-          '同一条序列里一部分 token 被裁掉、另一部分照常更新，序列内部的更新方向互相拉扯，长序列尤其严重。',
-          '在 MoE 模型上，token 级比率的高方差还会放大专家路由的抖动，是训练发散的主因之一。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '既然奖励是序列级的一个标量，比率也应该是序列级的一个标量：整条序列共享同一个比率，只 clip 一次。',
-          '把逐 token 的对数比先按 mask 求和、再除以序列长度，得到长度归一化的平均对数比。',
-          '取指数就得到序列级比率 s_i，它衡量的是「整条回答在当前策略下比旧策略平均好多少」。',
+          '既然奖励是序列级的一个标量，比率也应该是序列级的一个标量：整条序列共享同一个比率，只 clip 一次。把逐 token 的对数比先按 mask 求和、再除以序列长度，得到长度归一化的平均对数比；取指数就得到序列级比率 s_i，它衡量的是「整条回答在当前策略下比旧策略平均好多少」。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
           '组内优势 Â_i 与 GRPO 完全一致：(r_i - mean(r)) / (std(r) + ε)。',
           '逐 token 对数比 [B, G, T]，按 mask 求和压掉 padding → [B, G]，再除以 |y_i| 做长度归一化。',
           's_i = exp(长度归一化的对数比)，形状 [B, G] —— 每条序列一个标量，这正是「序列级」的含义。',
           '目标函数与 PPO 同形，只是把 ρ 换成 s_i：min(s_i·Â_i, clip(s_i, 1-ε, 1+ε)·Â_i)。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '相对 GRPO：序列内更新方向一致，长序列的方差显著下降，MoE 上的路由抖动也跟着缓解，训练更稳。',
-          '代价是粒度变粗：整条序列判一个「该不该更新」，对序列内部个别 token 的差异无法区分。',
-          '长度归一化让短序列和长序列的比率可比，但也意味着一条很长的序列里某个极端 token 会被平均掉。',
         ],
       },
     ],
@@ -1707,39 +1395,21 @@ def gspo_loss(per_token_logp_new, per_token_logp_old, completion_mask,
     hot: 3,
     difficulty: 4,
     oneLiner: '四处改动修 GRPO：解耦裁剪、动态采样、token 级损失、超长惩罚',
-    principle: 'DAPO 不改 GRPO 的骨架，只针对四个已知缺陷动手：(1) clip-higher 解耦裁剪上下界，放开低概率 token 的上升空间以维持熵；(2) 动态采样过滤掉全对/全错的组，只留有梯度信号的组；(3) 用 token 级损失替代序列级平均，让长回答的每个 token 权重一致；(4) 超长奖励塑形，惩罚被截断的超长回答。',
+    principle: 'DAPO 不改 GRPO 的骨架，只针对四个已知缺陷动手：(1) clip-higher 解耦裁剪上下界，放开低概率 token 的上升空间以维持熵；(2) 动态采样过滤掉全对/全错的组，只留有梯度信号的组；(3) 用 token 级损失替代序列级平均，让长回答的每个 token 权重一致；(4) 超长奖励塑形，惩罚被截断的超长回答。四个改动互不耦合，最终在长链推理任务上明显更强；代价是超参变多（多一个 ε_high、一个 α、一个 L_max），动态采样在有效组不足时还要额外的重采样逻辑。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          'GRPO 的裁剪上下界是对称的，低概率 token 一旦被选出来，上升空间也被一起压住，熵快速坍缩，输出越来越同质。',
-          '组内奖励全相同（全对或全错）时 Â ≡ 0，这一组不产生任何梯度，算力纯属浪费。',
-          '按序列长度归一化会稀释长序列里每个 token 的梯度，长回答学得慢；而被长度上限硬截断的回答奖励噪声很大，模型学不到「该收尾了」。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '不改 GRPO 的骨架，只针对上面四个已知缺陷定点修补，四个改动互不耦合。',
-          'clip-higher 解耦上下界，把上界放得比下界宽，给低概率 token 留出上升通道以维持熵。',
-          '动态采样过滤掉没有梯度信号的组；损失改为 token 级求和；再对超长回答做奖励塑形。',
+          '不改 GRPO 的骨架，只针对上面四个已知缺陷定点修补。clip-higher 解耦上下界，把上界放得比下界宽，给低概率 token 留出上升通道以维持熵；动态采样过滤掉没有梯度信号的组；损失改为 token 级求和；再对超长回答做奖励塑形。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
           'clip-higher：用 clip(ρ, 1-ε_low, 1+ε_high)，典型 ε_low = 0.2、ε_high = 0.28，抬高的是熵的下界。',
           '动态采样：丢掉 Â 全为 0 的组，只留组内奖励有正有负的组，等于把算力全花在有效样本上。',
-          'token 级损失：L = -1/Σ|y_i| · Σ_i Σ_t min(...)，分母是总 token 数而不是每组平均，长回答的每个 token 权重一致。',
+          'token 级损失：L = -1/Σ_i|y_i| · Σ_i Σ_t min(...)，分母是总 token 数而不是每组平均，长回答的每个 token 权重一致。',
           '超长奖励塑形：R̃(y) = R(y) - α·max(0, |y| - L_max)，超过上限就线性扣分。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '相对 GRPO：熵维持得更好、没有梯度信号的样本不再浪费、长回答的梯度不再被稀释，最终在长链推理任务上明显更强。',
-          '代价是超参变多：多了一个 ε_high、一个 α、一个 L_max，每个都要按任务调。',
-          '动态采样要求一批里能凑够有效组，采样量不足时可能反复过滤到几乎没有样本，需要额外的重采样逻辑。',
         ],
       },
     ],
@@ -1800,39 +1470,21 @@ def dapo_loss(per_token_logp_new, per_token_logp_old, completion_mask,
     hot: 3,
     difficulty: 4,
     oneLiner: '学生自己生成轨迹，教师逐 token 给稠密监督',
-    principle: '让学生模型自己采样生成轨迹，再让教师模型在学生实际走过的每个 token 上给出完整分布作为监督信号。相比用教师生成的静态数据做离线蒸馏，on-policy 训练消除了训练与推理的分布不匹配（exposure bias）。而相比只有稀疏结果奖励的 RL，教师的逐 token 分布本身就是一个稠密奖励，不需要额外的 reward model。',
+    principle: '让学生模型自己采样生成轨迹，再让教师模型在学生实际走过的每个 token 上给出完整分布作为监督信号。相比用教师生成的静态数据做离线蒸馏，on-policy 训练消除了训练与推理的分布不匹配（exposure bias）；相比只有稀疏结果奖励的 RL，教师的逐 token 分布本身就是一个稠密奖励，不需要额外的 reward model。代价是每个 batch 都要现场采样，且必须有一个更强的教师模型可用。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          '离线蒸馏（SFT on teacher data）里，学生训练时见的是教师的完美轨迹，推理时却要基于自己犯过的错继续往下生成，误差沿序列累积。',
-          '只有稀疏结果奖励的 RL 里，整条序列只有一个标量奖励，token 级信用分配困难，还得额外训一个 reward model。',
-          '两条路都缺同一样东西：一个既落在学生自己的分布上、又足够稠密的监督信号。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '让学生自己采样，教师在被采样出来的轨迹上逐 token 给出完整分布 —— 监督落在学生真正会走的路径上。',
-          '教师的分布在每个位置都是一个几万维的概率向量，本身就是一个稠密奖励，不需要 reward model。',
-          '训练分布和推理分布从此一致，exposure bias 被从根上消掉。',
+          '让学生自己采样，教师在被采样出来的轨迹上逐 token 给出完整分布 —— 监督落在学生真正会走的路径上，训练分布与推理分布从此一致，exposure bias 被从根上消掉。教师的分布在每个位置都是一个几万维的概率向量，本身就是一个稠密奖励，不需要 reward model。方向用反向 KL：mode-seeking 让学生只去对齐教师的高概率模式，与 Hinton 蒸馏正好相反。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
           '学生前向并采样得到 y_S，它带着学生自己的错误 —— 这正是要让它学会纠正的地方。',
           '教师在同一批 prompt + y_S 上做一次前向，得到 teacher_logits: [B, T, V]，必须 detach / no_grad。',
           '逐 token 算散度 D(p_T ‖ p_S)，得到 per_token_loss: [B, T]，再按有效 token 数求平均。',
           '用广义 JSD 插值统一方向：β = 0 是前向 KL（mode-covering）、β = 1 是反向 KL（mode-seeking）、β = 0.5 就是标准 JSD。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '相对离线蒸馏：监督落在学生自己的分布上，暴露偏差不再累积；代价是每个 batch 都要现场采样，不能预先把数据处理好。',
-          '相对稀疏奖励 RL：不用训 reward model，token 级信用分配天然解决；代价是必须有一个更强的教师模型可用。',
-          '反向 KL 是 mode-seeking，学生只学教师的高概率模式，不覆盖教师的全部尾巴 —— 方向与 Hinton 蒸馏正好相反。',
         ],
       },
     ],
@@ -1905,39 +1557,21 @@ def opd_loss(student_logits, teacher_logits, loss_mask=None,
     hot: 2,
     difficulty: 4,
     oneLiner: '同一个模型既是教师又是学生，用特权上下文造出更强的自己',
-    principle: '不再依赖外部更强的教师模型：让学生自己采样，同时把同一份权重在特权上下文（参考答案、关键提示、解题方向等）条件下的分布当作教师分布。学生在没有特权信息的条件下学习，把训练时才有的额外信息转成训练信号。教师与学生共享参数，因此既不需要额外的教师显存，也不存在师生能力差距过大导致的负迁移。',
+    principle: '不再依赖外部更强的教师模型：让学生自己采样，同时把同一份权重在特权上下文（参考答案、关键提示、解题方向等）条件下的分布当作教师分布。学生在没有特权信息的条件下学习，把训练时才有的额外信息转成训练信号；教师与学生共享参数，因此既不需要额外的教师显存，也不存在师生能力差距过大导致的负迁移。代价是特权上下文的构造成了新的依赖，它的质量直接决定收益上限。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          'OPD 需要外部更强的教师，可到了 SOTA 之上往往已经没有更强的模型可用。',
-          '特权信息（参考答案、工具返回、用户纠正）推理时拿不到、训练时拿得到，白放着浪费。',
-          '找外部教师还会引入师生能力差距：差距太大时学生学不动，反而出现负迁移。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '把「更强的模型」换成「信息更全的自己」：同一份权重 θ，一边看 prompt，一边额外拼接特权上下文 c。',
-          '两条路径共享参数，教师那条只是多了一段输入，因此既不需要额外显存，也不存在能力差距。',
-          '学生学的是「在没有特权信息的条件下逼近有特权信息时的分布」，等于把训练期才有的信息蒸馏进参数。',
+          '把「更强的模型」换成「信息更全的自己」：同一份权重 θ，一边看 prompt，一边额外拼接特权上下文 c。两条路径共享参数，教师那条只是多了一段输入，因此既不需要额外显存，也不存在能力差距。学生学的是「在没有特权信息的条件下逼近有特权信息时的分布」，等于把训练期才有的信息蒸馏进参数。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
           '学生路径 π_θ(·|x) 必须真采样得到 y ~ π_θ，这条路径需要梯度。',
           '教师路径 π_θ(·|x ⊕ c) 用同一份权重，只需一次前向，no_grad 即可。',
           '逐 token 反向 KL：KL(π_θ(·|x, y_<t) ‖ π_θ(·|x ⊕ c, y_<t))，只在 y 自己的 token 上回传。',
           '用反向 KL（mode-seeking）而不是前向：学生只对齐「信息更全的自己」的高概率模式，不强行覆盖全部尾巴。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '相对 OPD：省掉外部教师模型的显存与部署，也不再有师生能力差距导致的负迁移。',
-          '特权上下文的构造成了新的依赖：参考答案、提示、工具返回都得由数据管线稳定提供，质量直接决定上限。',
-          '教师与学生同源，能提供的额外信息上限就是特权上下文本身 —— 没有外部知识注入时收益明显变小。',
         ],
       },
     ],
@@ -1998,39 +1632,22 @@ def self_opd_loss(model, input_ids, privileged_ids, answer_mask):
     hot: 3,
     difficulty: 3,
     oneLiner: '解耦权重衰减，LLM 训练标配',
-    principle: 'Adam 的改进版：将权重衰减从梯度中解耦，直接作用于参数。正则化效果更好，是 LLM 训练的标准优化器。',
+    principle: 'Adam 的改进版：将权重衰减从梯度中解耦，直接作用于参数。相比 Adam 的权重衰减作用在梯度上正则化效果差，AdamW 解耦后正则化效果更好，是 LLM 训练的标准优化器。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          '原版 Adam 把 L2 正则写成 g ← g + λθ，等于把权重衰减混进梯度里。',
-          '这个梯度接着进 m、v 的滑动平均，再被 1/√v̂ 归一化 —— 衰减项对参数的缩放是自适应且失控的。',
-          '结果就是：有大梯度的参数衰减得轻，小梯度的参数衰减得重，λ 想表达的正则强度被扭曲。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '权重衰减本来就该是「每步把参数往 0 拉一点」，跟梯度的自适应缩放没有关系，那就把它从梯度里拿出来。',
-          '更新式写成 θ ← θ - lr·(m̂/(√v̂+ε) + λθ)：前半是自适应的梯度步，后半是独立的衰减步。',
-          '这样 λ 表达的才是真正的正则强度，与 m̂/v̂ 的尺度无关。',
+          '维护一阶矩（动量）和二阶矩（未中心化的方差），通过偏差修正确保初始阶段的稳定性。权重衰减直接作用于参数而非梯度，实现解耦正则化。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          '一阶矩 m_t = β₁·m + (1-β₁)·g、二阶矩 v_t = β₂·v + (1-β₂)·g²，这一步和 Adam 完全相同。',
-          '偏差修正 m̂ = m/(1-β₁ᵗ)、v̂ = v/(1-β₂ᵗ)，补偿前几步从 0 起步导致的偏小。',
-          '更新 θ ← θ - lr·(m̂/(√v̂+ε) + λθ)，衰减项直接乘 θ 本身，不再经过任何归一化。',
-          'LLM 标配超参：lr = 3e-4、betas = (0.9, 0.95)、weight_decay = 0.1。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '相对 Adam：正则行为可预测，泛化更好，是现在 LLM 训练的事实标准。',
-          '代价是多了 λ 这个要按模型规模调的系数，而且它和 lr 耦合：lr 一变衰减步长也跟着变。',
-          '参数被自适应缩放得越不均匀，解耦的收益越明显；如果本来只用很小的 λ，两者差别不大。',
+          '更新一阶矩：m_t = β₁·m + (1-β₁)·g',
+          '更新二阶矩：v_t = β₂·v + (1-β₂)·g²',
+          '偏差修正：m̂ = m/(1-β₁ᵗ), v̂ = v/(1-β₂ᵗ)',
+          '解耦权重衰减：θ = θ - lr·λ·θ',
+          '参数更新：θ = θ - lr·m̂/(√v̂ + ε)',
         ],
       },
     ],
@@ -2090,37 +1707,20 @@ class AdamW:
     hot: 3,
     difficulty: 4,
     oneLiner: '动量矩阵先正交化再更新，隐藏层权重的谱范数几何',
-    principle: 'Muon 只用于二维隐藏层权重：累积动量后，用 Newton-Schulz 迭代把动量矩阵近似成正交矩阵（极分解 UVᵀ）作为更新方向，让所有奇异方向等步长。嵌入层、输出头和所有一维参数仍交给 AdamW。规模化时 Muon 会把注意力 logit 推到爆炸，Kimi K2 用 QK-Clip 缩放 Q/K 权重从源头压住。',
+    principle: 'Muon 只用于二维隐藏层权重：累积动量后，用 Newton-Schulz 迭代把动量矩阵近似成正交矩阵（极分解 UVᵀ）作为更新方向，让所有奇异方向等步长；嵌入层、输出头和所有一维参数仍交给 AdamW。规模化时 Muon 会把注意力 logit 推到爆炸，Kimi K2 用 QK-Clip 把 Q/K 权重乘 √γ（γ = τ/S_max）从源头压住。代价是每步多 5 次矩阵乘法，换来约 2× token 效率，正则与 RMS 对齐后 Adam 的超参可以直接迁移。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          'AdamW 逐坐标更新，把一个 [4096, 4096] 的权重当成 1600 万个独立标量，完全忽略矩阵的行列结构。',
-          '后果是步长各向异性：某些奇异方向的步子远大于其它方向，训练早期尤其明显。',
-          '换成纯 SGD 也不对：扰动对函数的影响该由谱范数度量，逐元素更新并不对应谱范数下的最速下降。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '在谱范数几何下做最速下降，最优更新方向是动量矩阵的极分解 UVᵀ —— 一个所有奇异值都等于 1 的半正交矩阵。',
-          '直观说就是只留方向、抹掉幅度：每个奇异方向走同样大的一步，幅度交给学习率统一控制。',
-          '求极分解不必真做 SVD（慢且数值敏感），Newton-Schulz 迭代只用矩阵乘法就能逼近。',
+          '在谱范数几何下做最速下降，最优更新方向是动量矩阵的极分解 UVᵀ —— 一个所有奇异值都等于 1 的半正交矩阵。直观说就是只留方向、抹掉幅度：每个奇异方向走同样大的一步，幅度交给学习率统一控制。求极分解不必真做 SVD（慢且数值敏感），Newton-Schulz 迭代只用矩阵乘法就能逼近。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
           '参数分组：只有 ≥2 维的隐藏层权重交给 Muon，embedding、lm_head 和所有 1D 参数（bias、norm）仍用 AdamW。',
           '累积动量 → 除以 F 范数归一化（保证谱范数 ≤ 1，否则迭代发散）→ 5 次 NS 迭代 → θ ← θ - η·O。',
           '5 步后奇异值落在约 [0.5, 1.5] 就够用：系数 (3.4445, -4.7750, 2.0315) 正是为「5 步内尽量压平」调出来的。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '代价是每步多 5 次矩阵乘法；换来更快收敛，实测约 2× token 效率，正则与 RMS 对齐后 Adam 的超参可直接迁移。',
-          '规模化会炸 logit：MuonClip（Kimi K2）周期性把 W_q、W_k 乘 √γ（γ = τ/S_max）压回去。logit ∝ W_q·W_kᵀ，所以权重取 √γ；它只维持数值稳定，不改变表达力。',
         ],
       },
     ],
@@ -2221,39 +1821,22 @@ def qk_clip_(model, tau=100.0):
     hot: 3,
     difficulty: 3,
     oneLiner: 'ΔW = BA，低秩分解高效微调',
-    principle: '冻结预训练权重 W，用低秩矩阵 B·A 近似权重更新 ΔW。A 用高斯初始化，B 用零初始化，保证初始输出不变。',
+    principle: '冻结预训练权重 W，用低秩矩阵 B·A 近似权重更新 ΔW。相比全量微调需要巨大显存，LoRA 只训练少量参数（约 0.1%），效果接近全量微调。A 用高斯初始化，B 用零初始化，保证初始输出不变。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          '全量微调要存优化器状态：AdamW 下每个参数需要 m、v 两份 fp32，加上梯度与参数本身，显存约是参数量的 6~8 倍。',
-          '7B 模型全量微调就要几十 GB，普通显卡根本放不下。',
-          '但下游适配真的需要改那么多参数吗 —— 权重更新 ΔW 的秩往往远低于 min(d, k)。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '既然 ΔW 是低秩的，就不必存整个 [d, k] 矩阵，改存两个小矩阵 B: [d, r] 与 A: [r, k]，r ≪ min(d, k)。',
-          '只训练 B、A，预训练权重 W₀ 冻结 —— 可训练参数量降到约 0.1%。',
-          'B 用零初始化，保证训练开始时 BA = 0，模型初始行为与预训练完全一致，不会一上来就被扰动。',
+          '利用低秩分解近似权重更新：ΔW ≈ B·A，其中 A: [r, k]，B: [d, r]，r ≪ min(d, k)。B 初始化为零保证训练初期 LoRA 贡献为 0，通过 scaling = α/r 控制更新幅度。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          '前向 h = W₀x + (B·A)x·(α/r)：主干那条路冻结，分支那条路可训练。',
-          'A: [r, k] 用高斯（kaiming）初始化，B: [d, r] 用零初始化 —— 一个负责打破对称，一个负责让初始增量为零。',
-          '缩放因子 α/r：调 r 时用它把学习率的影响解耦，换 r 不必重调 lr。',
-          '推理时可以合并：W_new = W₀ + B·A·(α/r)，之后就是一个普通线性层，零额外开销。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '相对全量微调：可训练参数降到约 0.1%，显存与存储都大幅下降，效果接近。',
-          '代价是表达力受限：秩 r 太小就学不下复杂的新任务，r 一调大又收益递减而显存回升。',
-          '能省的是优化器状态和梯度，基线权重 W₀ 本身还得完整加载 —— 它省的是训练显存，不是推理参数量。',
+          '冻结原始权重：linear.requires_grad_(False)',
+          '初始化 LoRA 矩阵：A 用 kaiming 初始化，B 用零初始化',
+          '前向传播：output = linear(x) + (x @ A.T @ B.T) × scaling',
+          '反向传播：只更新 A 和 B',
+          '推理时合并：W_new = W + B·A·scaling（无额外开销）',
         ],
       },
     ],
@@ -2310,39 +1893,22 @@ class LoRALinear(nn.Module):
     hot: 3,
     difficulty: 2,
     oneLiner: '控制输出多样性：Temperature / Top-k / Top-p',
-    principle: 'Temperature 控制分布锐度；Top-k 只保留概率最高的 K 个 token；Top-p 保留累积概率达到 P 的最小集合。实践中常组合使用。',
+    principle: 'Temperature 控制分布锐度；Top-k 只保留概率最高的 K 个 token；Top-p 保留累积概率达到 P 的最小集合。相比 Greedy（确定性但容易重复）和纯 Sampling（多样性但可能低质量），采样策略在质量和多样性之间取得平衡。实践中常组合使用。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          '直接从模型输出的分布里采样，长尾那几万个低概率 token 各有一点机会，偶尔就会蹦出一个明显不合理的词。',
-          '取 argmax（greedy）确定性最强，但同一个 prompt 永远给同一个答案，还容易陷入重复循环。',
-          '需要一个可调的旋钮，在「质量」和「多样性」之间连续滑动。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '先调温度改分布形状，再截断掉长尾，最后在留下的候选里采样 —— 三步各管一件事。',
-          '温度是「锐度旋钮」：T < 1 拉开概率差，T > 1 抹平概率差，T → 0 退化成 greedy。',
-          'Top-k 用固定数量截断，Top-p 用累积概率截断，后者让候选集随分布陡峭程度自动伸缩。',
+          'Temperature 通过除以温度参数 T 调整分布锐度（T<1 更确定，T>1 更随机）。Top-k 固定保留 K 个候选，Top-p 动态选择累积概率达到 P 的最小集合，后者更灵活。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          'logits / T 再 softmax：温度只做了一次除法，却改变了整个分布的熵。',
-          'Top-k 取最大的 k 个，其余置 -inf，softmax 后概率为 0。k 是固定的，分布平坦时可能砍掉合理候选。',
-          'Top-p 按概率降序排序、cumsum，找到累积概率首次超过 p 的位置，之后全部置 -inf。分布陡时候选集自动变小，平坦时自动变大。',
-          '最后 softmax → multinomial 采样。实践中常组合使用：温度在最前面，Top-k 保底，Top-p 收缩。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '相对 greedy：有随机性，不会机械重复；相对纯采样：长尾被砍掉，明显更少出现不合理的 token。',
-          '代价是 Top-p 要排序，比 Top-k 的 topk 略贵，但相对整个前向可以忽略。',
-          '代价是超参依赖任务：代码、数学该低温（0~0.3），创意写作该高温（0.8~1.0），没有一组通用值。',
+          '应用 Temperature：logits = logits / T',
+          'Top-k 过滤：只保留最大的 k 个，其余设为 -inf',
+          'Top-p 过滤：排序后累积概率超过 p 的设为 -inf',
+          'Softmax 归一化：probs = softmax(logits)',
+          '多项式采样：next_token = multinomial(probs)',
         ],
       },
     ],
@@ -2397,39 +1963,22 @@ def top_k_top_p_sampling(logits, temperature=0.7, top_k=50, top_p=0.9):
     hot: 2,
     difficulty: 3,
     oneLiner: 'FP16/BF16 计算 + FP32 主权重',
-    principle: '使用前向/反向用 FP16/BF16 减少显存和加速计算，但保持 FP32 主权重防止精度损失。配合 loss scaling 防止梯度下溢。',
+    principle: '使用前向/反向用 FP16/BF16 减少显存和加速计算，但保持 FP32 主权重防止精度损失。FP16/BF16 只需 2 bytes（显存减半、计算加速），FP32 需 4 bytes（精度高），混合使用实现既快又准。配合 loss scaling 防止梯度下溢。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          'fp32 的权重、激活、梯度各占 4 字节，显存和带宽都被撑满；而 GPU 的张量核在半精度上吞吐高得多。',
-          '全用 fp16 又会出问题：梯度常常小到 1e-8 量级，直接掉进 fp16 的下溢区变成 0，参数再也更新不动。',
-          '精度和速度看起来是二选一，但两者其实可以分工到不同的张量上。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '让计算走半精度、让参数留在全精度：前向反向用 fp16/bf16，主权重用一份 fp32 副本。',
-          '每步更新后把 fp32 主权重重新 cast 成半精度再进下一次前向，累加误差不会写回主权重。',
-          '梯度下溢用 loss scaling 解决：先把 loss 放大 2^k 倍，梯度跟着放大，回传后再除回来。',
+          '前向和反向传播使用低精度（FP16/BF16）加速计算并减少显存，但主权重始终保持 FP32 防止精度损失。BF16 指数位更多（8 vs 5），不需要 loss scaling。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          '从 fp32 主权重 copy 出一份 fp16 权重，前向全程 fp16，得到 fp16 的 loss。',
-          'loss × scale 之后反向，得到的 fp16 梯度数值被抬出了下溢区。',
-          '把梯度 cast 回 fp32、除以 scale 恢复真实尺度，再用它更新 fp32 主权重。',
-          'bf16 的指数位和 fp32 一样是 8 位，动态范围足够，所以用 bf16 时不需要 loss scaling —— 代价是尾数只有 7 位。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '相对纯 fp32：显存和带宽大致减半，张量核吞吐明显提升；相对纯 fp16：没有下溢问题，精度损失可忽略。',
-          '代价是多了一份 fp32 主权重常驻，显存不是真的减半，大约降到 fp32 的六成左右。',
-          'fp16 还要额外维护 loss scaling，并处理 scale 溢出（出现 inf/nan 时跳过该步再调小 scale），工程上更麻烦；所以现在基本首选 bf16。',
+          'FP32 主权重 → copy → FP16 权重',
+          'FP16 前向传播 → FP16 loss',
+          'Loss scaling：loss × loss_scale',
+          'FP16 反向传播 → FP16 梯度',
+          '梯度转 FP32 → 更新 FP32 主权重',
         ],
       },
     ],
@@ -2482,39 +2031,21 @@ optimizer.step()`,
     hot: 2,
     difficulty: 3,
     oneLiner: '时间换空间，重新计算代替存储激活',
-    principle: '不保存所有中间激活值，只保存检查点。反向传播时重新计算需要的激活值。用约 20% 额外计算换取大量显存。',
+    principle: '不保存所有中间激活值，只保存检查点。反向传播时重新计算需要的激活值。相比标准训练保存所有层激活（显存 O(L)），梯度检查点只保存 √L 个检查点（显存 O(√L)），用约 20% 额外计算换取大量显存。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          '反向传播需要前向的中间激活，标准做法是把每一层的激活全存下来，显存随层数按 O(L) 线性增长。',
-          '层数一多，激活本身就变成训练显存的大头，甚至超过参数与优化器状态。',
-          '而算力和显存是一对矛盾：显存不够时只能减 batch、减序列长度，直接拖慢吞吐。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '少存一点，用时再算一遍：只在若干位置留「检查点」，中间那些激活反向时当场重算。',
-          '检查点取 √L 份时总开销最优：存 √L 份激活，重算代价也是 √L 量级，显存降到 O(√L)。',
-          '重算的只是前向的一部分，多出来的计算量远小于把 batch 砍掉带来的损失。',
+          '时间换空间：不保存所有中间激活值，只保存关键检查点。反向传播时从最近的检查点重新计算需要的激活值，大幅减少显存占用。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          '把网络切成若干段，每段边界保存一份激活作为检查点，段内中间的激活一律丢掉。',
-          '前向只算到检查点边界，段内激活用完即弃。',
-          '反向走到某段时，从该段的检查点重新跑一次前向，把需要的激活重建出来，再正常回传。',
-          '段内那一段等于多跑了一遍前向，整体训练时间增加约 20%，而激活显存从 O(L) 降到 O(√L)。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '相对标准训练：激活显存大幅下降，省下来的显存可以直接换成更大的 batch 或更长的序列。',
-          '代价是训练时间增加约 20%，典型的「拿时间换显存」。',
-          '段分得越粗省得越多但重算越贵，√L 是这条曲线上的最优点。',
+          '前向传播时只保存检查点（如每 √L 层保存一次）',
+          '反向传播时从检查点重新计算需要的激活值',
+          '使用 torch.utils.checkpoint 包裹需要检查点的层',
+          'HuggingFace 模型可直接设置 gradient_checkpointing=True',
         ],
       },
     ],
@@ -2567,39 +2098,21 @@ class CheckpointBlock(nn.Module):
     hot: 3,
     difficulty: 3,
     oneLiner: '按 128 一块算缩放因子，FP8 训练的关键全在块级缩放',
-    principle: '训练用 FP8（前向的激活和权重用 e4m3，反向的梯度用 e5m2）能省显存带宽并提高吞吐，但整张量共用一个缩放因子会被少数离群值拖垮——为了覆盖极值，绝大多数正常值被迫压到很低的精度。解决办法是分块：每 128 个元素（或 128×128 的块）单独算 amax 和缩放因子，块内共享一个 scale。矩阵乘法在 FP8 上做，累加仍在高精度。',
+    principle: '训练用 FP8（前向的激活和权重用 e4m3，反向的梯度用 e5m2）能省显存带宽并提高吞吐，但整张量共用一个缩放因子会被少数离群值拖垮 —— 为了覆盖极值，绝大多数正常值被迫压到很低的精度。解决办法是分块：每 128 个元素（或 128×128 的块）单独算 amax 和缩放因子，块内共享一个 scale，矩阵乘法在 FP8 上做、累加仍在高精度。代价是需要 Hopper 及以后专门支持 FP8 的硬件，且块越小精度越好、缩放因子的元数据开销也越大。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          'FP8 只占 1 字节，显存和带宽相对 FP16 再减半，是最直接的吞吐手段。',
-          '但它的动态范围极窄：e4m3 只有 3 位尾数，可表示的最大值只有 ±448。',
-          '而激活值的分布是重尾的，个别通道的幅度能比中位数大几个数量级；整张量共用一个缩放因子时，为了装下离群值，正常值全被压到只剩几档可表示，量化噪声巨大。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '缩放因子不该整张量共用一个，而应该按块各算各的：每 128 个元素单独求 amax 定 scale。',
-          '这样离群值的影响被限制在它自己那一块，其余块按自己的分布正常量化。',
-          '矩阵乘法在 FP8 上做，但累加提到高精度 —— 精度损失只发生在「存」，不发生在「算」。',
+          '缩放因子不该整张量共用一个，而应该按块各算各的：每 128 个元素单独求 amax 定 scale，这样离群值的影响被限制在它自己那一块，其余块按自己的分布正常量化。矩阵乘法在 FP8 上做，但累加提到高精度 —— 精度损失只发生在「存」，不发生在「算」。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
           'scale = amax(block) / 448，448 是 e4m3 的可表示上界，除完正好用满整个范围。',
           '量化 x_q = clamp(x/scale, -448, 448).to(fp8)，只保留 3 位尾数；反量化 x̂ = x_q·scale。',
           '缩放因子可以提到块外：y = Σ_block s_x·s_w·(x_q·w_q)，FP8 相乘、高精度累加，缩放因子不进乘法开销。',
           'DeepSeek-V3 的配置：激活用 1×128 的块（per-token per-128-channel），权重用 128×128 的块。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '相对朴素的整张量缩放：正常值的有效位数不再被离群值挤掉，量化误差大幅下降。',
-          '相对 FP16：显存与带宽再减半；代价是需要专门支持 FP8 的硬件（Hopper 及以后）。',
-          '代价是每块都要算一次 amax，多了归约与 scale 管理的开销；块越小精度越好，但元数据占比也越高。',
         ],
       },
     ],
@@ -2667,39 +2180,22 @@ def fp8_gemm_sim(x, w, block_size=128):
     hot: 2,
     difficulty: 4,
     oneLiner: 'vLLM 核心，分页管理 KV Cache',
-    principle: '借鉴操作系统虚拟内存的分页思想，将 KV Cache 分成固定大小的块（页），通过块表映射到非连续物理内存。消除内存碎片和预分配浪费。',
+    principle: '借鉴操作系统虚拟内存的分页思想，将 KV Cache 分成固定大小的块（页），通过块表映射到非连续物理内存。相比传统 KV Cache 预分配 max_len 导致大量浪费和内存碎片，PagedAttention 按需分配，内存利用率可达 ~96%。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          '传统服务要为每个请求按 max_len 预分配一整块连续显存，而实际生成长度通常远小于上限，预分配的部分全程闲置。',
-          '相邻请求留下的空洞很难拼给新请求用，显存碎片化严重，利用率只有 45% 左右。',
-          '显存利用率低就直接限制并发数，而并发数正是推理吞吐的决定因素。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '把 KV Cache 切成一页一页的固定大小块，按需分配，不再预分配。',
-          '逻辑上连续的序列通过一张「块表」映射到物理上离散的块 —— 和操作系统的虚拟内存完全同构。',
-          '于是显存不再需要连续，碎片问题从根上消失。',
+          '逻辑块是连续的 token 块（如 16 tokens/block），物理块是 GPU 显存中的实际存储位置。通过块表（block table）将逻辑块映射到非连续的物理块，消除预分配浪费和内存碎片。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          '逻辑视图：seq₁ = [block₀, block₁, block₂, …]，从序列视角看仍然是连续的。',
-          '块表记录 logical → physical：seq₁_b₀ → GPU_block_3、seq₁_b₁ → GPU_block_7。',
-          '注意力计算时按块表把物理块取出来，拼成逻辑上连续的 KV —— 对注意力本身完全透明。',
-          '需要新 token 时只分配一个新块，用完即还，利用率因此能到约 96%。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '相对预分配：无浪费、无碎片，利用率约 96%，同样的显存能跑明显更多的并发。',
-          '额外红利是前缀共享：多个请求若 prompt 相同，可让块表指向同一批物理块，共享部分只存一份。',
-          '代价是每次注意力都要走一次块表间接寻址，且 block size 需要调：太小则块表长、开销大，太大则内部碎片回升。',
+          '预分配物理块池：physical_blocks = zeros(num_blocks, ...)',
+          '为序列分配物理块：allocate(seq_id, num_tokens)',
+          '写入 KV 到对应物理块：write(seq_id, position, key, value)',
+          '注意力计算时从物理块 gather K/V',
+          '序列结束时释放物理块：free(seq_id)',
         ],
       },
     ],
@@ -2766,39 +2262,22 @@ class PagedKVCache:
     hot: 2,
     difficulty: 4,
     oneLiner: '小模型草稿，大模型验证，加速 2-3x',
-    principle: '用一个小模型（draft model）快速生成多个候选 token，然后用大模型一次性验证。接受的 token 可以并行确认，拒绝则从拒绝位置重新开始。',
+    principle: '用一个小模型（draft model）快速生成多个候选 token，然后用大模型一次性验证。相比标准自回归每步只生成 1 token 很慢，投机解码一次验证多个 token，可加速 2-3x，且输出分布与只用大模型完全一致（无损）。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          '自回归解码一次前向只产出 1 个 token，而大模型前向的开销并不随序列长度线性增长 —— 短序列上的算力严重浪费。',
-          '推理其实被显存带宽卡住：每个 token 都要把全部权重读一遍，算力却远没跑满。',
-          '结果就是「算力有余、带宽打满」，解码速度上不去。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '用小模型先「猜」出后面 γ 个 token，再让大模型一次前向把这 γ 个位置的概率全算出来。',
-          '大模型一次前向本来就要把所有位置算一遍，顺手验证 γ 个候选几乎是白送的 —— 拿算力换吞吐。',
-          '通过拒绝采样保证输出分布与「只用大模型」逐位一致，是无损加速，不牺牲质量。',
+          '小模型快速生成 γ 个候选 token，大模型一次性前向验证所有位置。通过接受/拒绝机制保证输出分布不变：accept if r < p_target(xᵢ) / p_draft(xᵢ)。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          'Draft model 自回归生成 γ 个候选 token，γ = 5 是常见取值。',
-          'Target model 把 prompt + 候选 一起喂进去，一次前向得到每个位置的概率。',
-          '逐 token 判定：抽一个随机数 r，r < p_target(xᵢ) / p_draft(xᵢ) 就接受，否则拒绝。',
-          '一旦拒绝就从该位置按修正后的分布重新采样，之后的候选全部丢弃；平均能接受 3~4 个。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '相对标准解码：大模型前向次数降到约 1/3，实测加速 2~3 倍，且输出分布完全相同。',
-          '代价是需要额外部署一个 draft 模型；draft 与 target 的分布越接近，接受率越高，加速越明显。',
-          '加速比取决于任务：代码、格式化输出这类可预测文本接受率高，开放的创意文本接受率低，加速会打折。',
+          'Draft model 生成 γ 个候选 token',
+          'Target model 一次性前向，得到所有位置的概率',
+          '逐 token 接受/拒绝：比较 p_target 和 p_draft',
+          '拒绝时从修正分布重新采样',
+          '全部接受时额外采样一个 bonus token',
         ],
       },
     ],
@@ -2881,39 +2360,23 @@ def speculative_decode(draft_model, target_model, prompt_ids,
     hot: 3,
     difficulty: 3,
     oneLiner: '因果注意力 + 自回归，现代 LLM 标配',
-    principle: '只有 decoder 的 Transformer 架构。使用因果注意力（只能看到之前的 token），通过自回归方式逐 token 生成。GPT/LLaMA/Mistral 等主流 LLM 都采用此架构。',
+    principle: '只有 decoder 的 Transformer 架构。使用因果注意力（只能看到之前的 token），通过自回归方式逐 token 生成。相比 Encoder-Decoder 架构，Decoder-Only 统一训练和推理（训练时预测下一个 token，推理时生成），因果注意力保证自回归特性，适合生成任务。GPT/LLaMA/Mistral 等主流 LLM 都采用此架构。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          'Encoder-Decoder 需要两套参数，还要额外设计「源序列如何喂给解码器」的交叉注意力，结构复杂。',
-          '纯 Encoder（BERT 那类）只能双向看，无法自回归生成，天生做不了「接着往下写」。',
-          '而大模型的任务形式高度统一：给一段文本，续写下去 —— 结构也应该收敛到这一个形式上。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '只用 decoder 堆叠，因果掩码保证每个位置只能看到自己和左边，训练与推理的形式完全一致。',
-          '训练时一次前向就能对所有位置算 loss（teacher forcing），推理时逐 token 自回归生成 —— 同一套权重两种用法。',
-          '结构高度规整，层数可以简单堆到几十上百层，这正是 scaling 的前提。',
+          '每层包含自注意力（带 causal mask）和 FFN，使用 Pre-Norm 结构（先归一化再进子层）。现代 LLM 标配：RMSNorm + SwiGLU + RoPE。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          '输入 [B, S] 的 token，过 embedding 并叠加位置信息（现代实现用 RoPE）。',
-          'N 层重复：x = x + Attn(LN(x), causal_mask) 再 x = x + FFN(LN(x))，即 Pre-Norm 加残差。',
-          '末端 RMSNorm → LM Head 得到 logits: [B, S, V]。',
-          '训练走 shift + CE，推理取最后一个位置采样下一个 token 再拼回去，循环。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '相对 Encoder-Decoder：参数减半、结构统一、没有跨注意力的额外设计；相对纯 Encoder：能生成。',
-          '代价是所有位置只能看左边，做双向理解类任务（分类、抽取）不如 BERT 那类结构直接。',
-          '现代标配已固定为 RMSNorm、SwiGLU、RoPE、Pre-Norm 四项，几乎是当前 LLM 的默认配置。',
+          'Token Embedding + Position Embedding (RoPE)',
+          '创建因果掩码：mask = tril(ones(S, S))',
+          '逐层处理：x = x + Attn(LN(x), mask); x = x + FFN(LN(x))',
+          '最终归一化：x = RMSNorm(x)',
+          'LM Head：logits = x @ W_vocab',
+          '训练：Shift + CrossEntropy；推理：Sample next token',
         ],
       },
     ],
@@ -2978,39 +2441,21 @@ class GPTModel(nn.Module):
     hot: 3,
     difficulty: 4,
     oneLiner: '一次预测未来 n 个 token，同一份数据给出 n 倍训练信号',
-    principle: '在主模型预测下一个 token 之外，串行接上若干 MTP 模块，每个模块用「上一层 MTP 的隐状态 + 第 i+k 个 token 的 embedding」去预测第 i+1+k 个 token。训练时提供更密集的监督信号，迫使隐状态包含更长程的前瞻性；推理时这些模块可以直接当投机解码的 draft，几乎白送一个加速器。',
+    principle: '在主模型预测下一个 token 之外，串行接上若干 MTP 模块，每个模块用「上一层 MTP 的隐状态 + 第 i+k 个 token 的 embedding」去预测第 i+1+k 个 token。训练时提供更密集的监督信号，迫使隐状态包含更长程的前瞻性；推理时这些模块可以直接当投机解码的 draft，几乎白送一个加速器。Emb 与 lm_head 和主模型共享，参数开销很小；代价是串行结构让模块 k 必须等模块 k-1，训练时还要多算 k 个模块的前向。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          '只预测下一个 token 的监督信号太稀疏：每个位置只压一个目标，隐状态没有动力去规划更远。',
-          '训练算力大量花在主干上，可同一批数据只被用了一次，利用率不高。',
-          '推理时又需要一个小模型当投机解码的 draft，还得额外训练和部署一个。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '在主干之外串行接上若干 MTP 模块，第 k 个模块预测第 i+1+k 个 token，让同一份数据提供 k 倍的监督信号。',
-          '模块的输入是「上一层 MTP 的隐状态 + 第 i+k 个 token 的 embedding」，逼着隐状态携带更长程的信息。',
-          '推理时这些模块天然就是一个 draft 模型，可以直接接投机解码 —— 一份结构两处收益。',
+          '在主干之外串行接上若干 MTP 模块，第 k 个模块预测第 i+1+k 个 token，让同一份数据提供 k 倍的监督信号。模块的输入是「上一层 MTP 的隐状态 + 第 i+k 个 token 的 embedding」，逼着隐状态携带更长程的信息。推理时这些模块天然就是一个 draft 模型，可以直接接投机解码 —— 一份结构两处收益。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
           '主干输出 h⁰: [B, T, D]，接 lm_head 预测 x₂，这是主损失。',
           '第 k 个模块：h^k = M_k[RMSNorm(h^{k-1}) ; RMSNorm(Emb(x_{i+k}))]，把上一层隐状态与目标 token 的 embedding 拼起来。',
           '每个模块各接 lm_head 预测 x_{i+1+k}，得到辅助损失。',
           '总损失 L = L_main + (λ/D)·Σ_k Σ_i CE(...)，λ 典型取 0.3（前 10T tokens），之后衰减到 0.1。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '相对单 token 预测：同一个 batch 提供更密集的监督，隐状态被迫前瞻，主任务的 loss 也更好。',
-          '代价是训练时多算了 k 个模块的前向，算力开销增加；但额外算力远小于 k 倍，因为模块很浅。',
-          'Emb 与 lm_head 都和主模型共享，参数开销小；串行结构意味着模块 k 必须等模块 k-1，无法完全并行。',
         ],
       },
     ],
@@ -3092,39 +2537,21 @@ def mtp_loss(mtp_modules, h0, input_ids, embed, lm_head, num_heads=1, lam=0.3):
     hot: 3,
     difficulty: 4,
     oneLiner: '偏差-方差折衷的 λ-return 优势估计',
-    principle: '通过 λ 参数在蒙特卡洛（低偏差高方差）和 TD(0)（高偏差低方差）之间折衷。λ=1 等价于 MC，λ=0 等价于 TD(0)。',
+    principle: '通过 λ 参数在蒙特卡洛（低偏差高方差）和 TD(0)（高偏差低方差）之间折衷。λ=1 等价于 MC（无偏差但高方差），λ=0 等价于 TD(0)（高偏差但低方差），GAE 通过 λ 在两者之间取得平衡。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          'MC return 直接取整条轨迹的回报：无偏差，但方差随序列长度增长，长轨迹上估计极不稳定。',
-          'TD(0) 只往前看一步：方差小，但严重依赖 V(s) 的准确度，偏差大。',
-          '优势估计必须同时兼顾这两端，而纯 MC 和纯 TD 都停在极端上。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '不只取端点，而是把从 t 往后的所有 k 步 TD 误差按 (γλ)^k 加权求和。',
-          'λ 就是权重衰减率：λ → 0 只剩最近一步（退化成 TD），λ → 1 权重均匀，等价于 MC。',
-          '指数衰减让越远的时间步影响越小，正好对上「越远越不确定」的直觉。',
+          '利用 TD error 的指数加权求和来估计优势函数。通过 λ 参数控制不同时间步 TD error 的权重，实现偏差-方差的折衷。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          'TD 误差 δ_t = r_t + γ·V(s_{t+1}) - V(s_t)，是 GAE 的原子单元。',
-          'A_t = Σ_l (γλ)^l · δ_{t+l}，即各阶 TD 误差的几何加权和。',
-          '展开成 A_t = δ_t + γλ·δ_{t+1} + (γλ)²·δ_{t+2} + …，λ = 1 时望远镜式相消，退化成 MC return - V(s_t)。',
-          '实现上不必真的算这个级数，用反向递推一步到位：A_t = δ_t + γλ·A_{t+1}，从 A_T = δ_T 往前推。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '相对 MC：方差显著变小，长轨迹上训练稳定得多；相对 TD(0)：偏差更小，对 V 的估计误差没那么敏感。',
-          '代价是多了一个 λ 超参，通常取 0.95 配合 γ = 0.99，等于「几乎 MC 但略带衰减」。',
-          '它仍然依赖 critic 的 V(s)，critic 不准时 GAE 的偏差整体偏高 —— 这也是 GRPO 干脆去掉 critic 的动机之一。',
+          '计算 TD error：δ_t = r_t + γ·V(s_{t+1}) - V(s_t)',
+          '从后向前递推：A_t = δ_t + γλ·A_{t+1}',
+          '计算 returns：returns = advantages + values[:-1]',
+          '归一化优势（可选）：advantages = (advantages - mean) / std',
         ],
       },
     ],
@@ -3182,39 +2609,22 @@ def compute_gae(rewards, values, gamma=0.99, lam=0.95):
     hot: 2,
     difficulty: 2,
     oneLiner: '链式法则，深度学习的基石',
-    principle: '反向传播利用链式法则从输出向输入逐层计算梯度。计算图的前向传播保存中间变量，反向传播利用这些变量计算梯度。',
+    principle: '反向传播利用链式法则从输出向输入逐层计算梯度。计算图的前向传播保存中间变量，反向传播利用这些变量计算梯度。相比手动推导梯度，反向传播自动计算且高效（一次前向 + 一次反向），是深度学习训练的基础。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          '手推每层的梯度不现实：参数量上亿，每改一次结构就要重新推导一遍。',
-          '数值微分（逐参数扰动）要对每个参数各跑一次前向，n 个参数就是 n 次前向，完全不可行。',
-          '需要一种「一次前向 + 一次反向就把所有参数的梯度全拿到」的方法。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '把整个网络看成一个计算图，每个算子只负责「给定输出的梯度，算出输入的梯度」这一件事。',
-          '链式法则保证：只要能从输出往输入逐层把局部梯度乘起来，就得到了每个参数的梯度。',
-          '前向保存的中间量（激活、输入）在反向时就是现成的乘数，省掉大量重算 —— 这是它高效的关键。',
+          '链式法则：∂L/∂x = ∂L/∂y · ∂y/∂x。前向传播时保存中间变量（计算图），反向传播时利用这些变量和链式法则逐层计算梯度。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
-          '前向按拓扑顺序算下去，沿途把 x、h、a、ŷ 等中间量存下来。',
-          '反向从 ∂L/∂ŷ 起步逐层回传：∂L/∂W₂ = ∂L/∂ŷ·aᵀ、∂L/∂a = W₂ᵀ·∂L/∂ŷ。',
-          '过 ReLU 时梯度乘以 (a > 0)，负区间直接归零；再往前 ∂L/∂W₁ = ∂L/∂h·xᵀ、∂L/∂x = W₁ᵀ·∂L/∂h。',
-          '每个参数在轮到它的那一刻就拿到梯度，不需要额外前向次数；复杂度与前向同阶。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          '相对数值微分：一次反向拿到全部梯度，代价与前向同阶，而不是随参数量线性增长。',
-          '代价是中间激活要一直留到反向，显存随层数线性增长 —— 这正是梯度检查点要解决的问题。',
-          '代价是反向依赖前向的完整计算图，动态控制流（.item()、原地修改）会破坏图，是常见的一类训练 bug。',
+          '前向传播：逐层计算并保存中间变量',
+          '计算损失：L = loss(y_pred, y_true)',
+          '反向传播：从输出向输入逐层计算梯度',
+          '常见梯度：y=Wx → ∂L/∂W = ∂L/∂y · xᵀ；ReLU → ∂L/∂x = ∂L/∂y · (x>0)',
+          '参数更新：θ = θ - lr · ∂L/∂θ',
         ],
       },
     ],
@@ -3278,39 +2688,21 @@ class TwoLayerNet:
     hot: 2,
     difficulty: 1,
     oneLiner: 'ReLU / GELU / SiLU 及其梯度',
-    principle: '激活函数引入非线性。ReLU 简单高效但有 dead neuron 问题；GELU 平滑更优（Transformer 常用）；SiLU/Swish 用于门控机制。',
+    principle: '激活函数引入非线性。ReLU 简单高效但有 dead neuron 问题；GELU 平滑更优（Transformer 常用）；SiLU/Swish 用于门控机制。ReLU 实现最便宜，GELU、SiLU 平滑、处处可导、训练更稳，代价是要算 exp 或 erf，比 max 贵一些。',
     principleSections: [
-      {
-        title: '它解决什么问题',
-        items: [
-          '没有激活函数时，多层线性变换叠起来仍然等价于单层线性变换，深度白给。',
-          '反向传播要求处处可导或几乎处处可导，sign、step 这类硬阈值函数没法直接用在深层网络里。',
-          '不同激活的饱和行为差别很大，直接决定训练是否稳定。',
-        ],
-      },
       {
         title: '核心思想',
         items: [
-          '用一个逐元素的非线性函数把线性层的结果掰弯，让「多层」真正带来表达力。',
-          '现代选择集中在平滑版 ReLU 上：负区间给一点非零梯度，避免神经元被永久关死。',
-          '门控形式的 x·σ(x) 顺带把「通过多少」也变成可学的，这正是 SwiGLU 的基础。',
+          '用一个逐元素的非线性函数把线性层的结果掰弯，让「多层」真正带来表达力 —— 没有激活函数时，多层线性变换叠起来仍然等价于单层线性变换。现代选择集中在平滑版 ReLU 上：负区间给一点非零梯度，避免神经元被永久关死。门控形式的 x·σ(x) 顺带把「通过多少」也变成可学的，这正是 SwiGLU 的基础。',
         ],
       },
       {
-        title: '算法步骤与推导',
+        title: '算法步骤',
         items: [
           'ReLU(x) = max(0, x)：正区间导数恒为 1，负区间恒为 0。',
           'GELU(x) = x·Φ(x)（Φ 是标准正态 CDF）：负区间仍有小梯度，是 ReLU 的平滑版。',
           'SiLU(x) = x·σ(x)：σ 充当 0~1 的开关，负区间先降后回升，自带门控。',
           '三者都是逐元素作用，形状完全不变，可以随意替换。',
-        ],
-      },
-      {
-        title: '对比与代价',
-        items: [
-          'ReLU 实现最便宜，但负区间梯度恒为 0，神经元长期落在负区间就再也学不动（dead neuron）。',
-          'GELU、SiLU 平滑、处处可导，训练更稳，代价是都要算 exp 或 erf，比 max 贵一些。',
-          '目前标准 FFN 多用 GELU（BERT、GPT-2/3），门控 FFN 用 SiLU（LLaMA、PaLM）。',
         ],
       },
     ],

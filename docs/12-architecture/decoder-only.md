@@ -4,28 +4,19 @@
 
 ## 📌 原理与思想
 
-只有 decoder 的 Transformer 架构。使用因果注意力（只能看到之前的 token），通过自回归方式逐 token 生成。GPT/LLaMA/Mistral 等主流 LLM 都采用此架构。
+### 核心概念
+只有 decoder 的 Transformer 架构。使用因果注意力（只能看到之前的 token），通过自回归方式逐 token 生成。相比 Encoder-Decoder 架构，Decoder-Only 统一训练和推理（训练时预测下一个 token，推理时生成），因果注意力保证自回归特性，适合生成任务。GPT/LLaMA/Mistral 等主流 LLM 都采用此架构。
 
-**它解决什么问题**
-- Encoder-Decoder 需要两套参数，还要额外设计「源序列如何喂给解码器」的交叉注意力，结构复杂。
-- 纯 Encoder（BERT 那类）只能双向看，无法自回归生成，天生做不了「接着往下写」。
-- 而大模型的任务形式高度统一：给一段文本，续写下去 —— 结构也应该收敛到这一个形式上。
+### 核心思想
+每层包含自注意力（带 causal mask）和 FFN，使用 Pre-Norm 结构（先归一化再进子层）。现代 LLM 标配：RMSNorm + SwiGLU + RoPE。
 
-**核心思想**
-- 只用 decoder 堆叠，因果掩码保证每个位置只能看到自己和左边，训练与推理的形式完全一致。
-- 训练时一次前向就能对所有位置算 loss（teacher forcing），推理时逐 token 自回归生成 —— 同一套权重两种用法。
-- 结构高度规整，层数可以简单堆到几十上百层，这正是 scaling 的前提。
-
-**算法步骤与推导**
-- 输入 `[B, S]` 的 token，过 embedding 并叠加位置信息（现代实现用 RoPE）。
-- `N` 层重复：`x = x + Attn(LN(x), causal_mask)` 再 `x = x + FFN(LN(x))`，即 Pre-Norm 加残差。
-- 末端 `RMSNorm → LM Head` 得到 `logits: [B, S, V]`。
-- 训练走 `shift + CE`，推理取最后一个位置采样下一个 token 再拼回去，循环。
-
-**对比与代价**
-- 相对 Encoder-Decoder：参数减半、结构统一、没有跨注意力的额外设计；相对纯 Encoder：能生成。
-- 代价是所有位置只能看左边，做双向理解类任务（分类、抽取）不如 BERT 那类结构直接。
-- 现代标配已固定为 `RMSNorm`、`SwiGLU`、`RoPE`、`Pre-Norm` 四项，几乎是当前 LLM 的默认配置。
+### 算法步骤
+1. Token Embedding + Position Embedding (RoPE)
+2. 创建因果掩码：mask = tril(ones(S, S))
+3. 逐层处理：x = x + Attn(LN(x), mask); x = x + FFN(LN(x))
+4. 最终归一化：x = RMSNorm(x)
+5. LM Head：logits = x @ W_vocab
+6. 训练：Shift + CrossEntropy；推理：Sample next token
 
 ## 📐 核心公式
 
