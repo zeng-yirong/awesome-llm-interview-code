@@ -6,10 +6,26 @@
 
 自回归生成时，每步只处理新 token，但需要与所有历史 token 做注意力。KV Cache 缓存历史的 K/V，避免重复计算。
 
-**为什么需要 KV Cache？**
-- 标准做法: 每步重新计算所有 token 的 K/V → O(N²) 计算
-- KV Cache: 只计算新 token 的 K/V，历史的从缓存取 → O(N) 计算
-- 空间换时间: 缓存 O(L × H × Dh) 显存
+**它解决什么问题**
+- 自回归解码每步只新增 1 个 token，可这个新 token 要和全部历史做注意力；不缓存的话，第 `t` 步就得重算前 `t` 个 token 的 `K/V`。
+- 总代价从 `O(S)` 变成 `Σt = O(S²)` 次投影计算，生成 4096 个 token 时白算了约两千倍。
+- `K/V` 只依赖 token 自身和它的位置，不随「后面来了什么」改变 —— 这正是它可以被缓存的前提（`Q` 不具备这个性质）。
+
+**核心思想**
+- 用一个显式张量保存每层历史的 `K/V`，新 token 只算自己的 `K/V`，再拼到末尾。
+- `Q` 不缓存：每一步只有最新的 `Q` 有用，历史 `Q` 不会再被任何计算用到。
+- 空间换时间：显存随序列长度线性增长，换来每步计算量恒定。
+
+**算法步骤与推导**
+- Prefill：整段 prompt 一次前向，把每层的 `K/V` 写进 cache，形状 `[B, H_kv, S_prompt, Dh]`。
+- Decode：新 token 算出 `q/k/v`，形状都是 `[B, H, 1, ·]`；只把 `k`、`v` 追加到 cache 末尾。
+- 用 `[B, H, 1, Dh]` 的 `q` 去和 `[B, H, S+t, Dh]` 的 cache 做 SDPA，一步得到一个输出 token，计算量恒定。
+- cache 是逐 token 增长的，朴素实现要么预分配最大长度（浪费），要么整块复制（拷贝开销）—— 这正是 PagedAttention 要解决的问题。
+
+**对比与代价**
+- 缓存大小 = `2 × n_layers × n_kv_heads × S × Dh × 字节数`；LLaMA 2 70B 在 4096 长度、fp16 下约 80GB，比模型本身还大。
+- 代价是显存成为首要瓶颈：batch size 和上下文长度都被它卡住，所以才有了 MQA/GQA（减头数）和 MLA（压缩存储）。
+- 每步都要读写整个 cache，decode 阶段是 memory-bound、算力大量闲置；把多个请求 batch 起来正是为了填满这个空。
 
 ## 📐 核心公式
 
@@ -27,14 +43,19 @@ KV Cache 大小 = 2 × n_layers × n_kv_heads × seq_len × head_dim × bytes
 ## 📊 张量流程图
 
 ```
-Prefill 阶段 (处理 prompt):
-  prompt [1, S_prompt, D] → 模型 → 缓存 KV [1, H, S_prompt, Dh]
+# Prefill：整段算完，把每层的 K/V 留下来
+prompt :: [1, S_prompt, D] :: 整段输入，一次前向
+Q, K, V 投影 :: [1, H_kv, S_prompt, Dh] :: 只有 K、V 会被留下
+cache :: [L, 2, B, H_kv, S, Dh] :: 每层一份，显存随序列长度线性增长
 
-Decode 阶段 (逐 token 生成):
-  token_t [1, 1, D] → Q,K,V
-  K = cat(K_cache, K_t)    → [1, H, S_prompt+t, Dh]
-  V = cat(V_cache, V_t)    → [1, H, S_prompt+t, Dh]
-  attn(Q, K, V) → 输出 → 更新 cache
+# Decode：每步只算新 token，历史 KV 从缓存拼
+token_t :: [1, 1, D] :: 当前步唯一的新输入
++ q_t :: [1, H, 1, Dh] :: 查询，只有这一步用得上，不缓存
++ k_t, v_t :: [1, H_kv, 1, Dh] :: 键值，追加到缓存末尾
+K = cat(K_cache, k_t) :: [1, H_kv, S+t, Dh] :: 拼接即可，历史部分完全不重算
+O = SDPA(q_t, K, V) :: [1, H, S+t, Dh] :: 一个 query 对整个历史
+$ 每步计算量恒定，不缓存则是 Σt = O(S²)
+> LLaMA 2 70B 在 4096 长度、fp16 下缓存约 80GB —— 比模型本身还大
 ```
 
 ## 💻 代码实现

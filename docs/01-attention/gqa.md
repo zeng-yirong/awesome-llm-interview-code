@@ -6,10 +6,26 @@
 
 MHA 和 MQA 的折中方案：Q 有 H 个头，KV 只有 G 个头 (G<H)。多个 Q 头共享同一组 KV 头，大幅减少 KV Cache。
 
-**为什么需要 GQA？**
-- MHA: KV Cache 大，推理慢
-- MQA: KV Cache 小，但模型质量下降
-- GQA: 在两者之间取得平衡
+**它解决什么问题**
+- MHA 每个 Q 头都配一组独立的 KV，KV Cache 随头数线性增长，长上下文推理时显存压力很大。
+- MQA 把所有 Q 头压到共享一组 KV，Cache 缩到 `1/H`，但模型质量明显下降、训练也更不稳定。
+- 两端都不合适，需要的是「省一部分 Cache 但别掉质量」的中间档。
+
+**核心思想**
+- 让 `G` 个 Q 头共享一组 KV，`1 < G < H`：Cache 变成 MHA 的 `G/H`，质量损失远小于 MQA。
+- 直觉上不同的 Q 头本来就在关注相似的内容，冗余的 KV 头可以合并，保留一部分多样性就够了。
+- `G = H` 退回 MHA，`G = 1` 退回 MQA，GQA 用一个参数把整个谱系串起来。
+
+**算法步骤与推导**
+- `Q: [B, H, S, Dh]` 不变，`K, V: [B, G, S, Dh]` 只有 `G` 组。
+- 做注意力前先把 KV 扩到 `H`：`repeat_kv` 依次 `unsqueeze → expand → reshape`，每份 KV 复制 `H/G` 次。
+- `expand` 只建视图不占新内存，`reshape` 才真正复制 —— 复制只发生在前向，Cache 本身仍是 `G` 份。
+- 之后与 MHA 完全相同，注意力计算不用改一行。
+
+**对比与代价**
+- 相对 MHA：KV Cache 降到 `G/H`，LLaMA 2 70B 取 `G=8`、`H=64`，只剩 1/8；相对 MQA：质量损失小得多。
+- 代价是 `repeat_kv` 在前向时多了一次实实在在的复制，属于拿计算换显存。
+- `G` 需要调：太小质量掉，太大省不下多少 Cache，常见取 4~8。
 
 ## 📐 核心公式
 
@@ -28,16 +44,19 @@ repeat_kv: K,V → [B, H, S, Dh]   (复制 G→H)
 ## 📊 张量流程图
 
 ```
-Q: [B, H, S, Dh]  ─────────────────────────┐
-                                            │ SDPA
-K: [B, G, S, Dh] → repeat_kv → [B, H, S, Dh] ─┤
-V: [B, G, S, Dh] → repeat_kv → [B, H, S, Dh] ─┘
+# Q 有 H 个头，K/V 只有 G 组
++ Q :: [B, H, S, Dh] :: 全部 H 个头各自独立
++ K, V :: [B, G, S, Dh] :: 只有 G 组，G < H
+repeat_kv :: G → H :: 每份 KV 复制 H/G 次，与 Q 的头数对齐
+SDPA :: [B, H, S, Dh] :: 之后与 MHA 完全相同
+$ KV Cache 降到 G/H；LLaMA 2 70B 取 G=8、H=64，只剩 1/8
 
-repeat_kv 实现:
-  x: [B, G, S, Dh]
-  → x[:,:,None,:,:]          [B, G, 1, S, Dh]
-  → .expand(B, G, H/G, S, Dh) [B, G, H/G, S, Dh]
-  → .reshape(B, H, S, Dh)    [B, H, S, Dh]
+# repeat_kv：unsqueeze → expand → reshape
+x :: [B, G, S, Dh] :: 输入，G 份 KV
+unsqueeze :: [B, G, 1, S, Dh] :: 插一个复制维
+expand :: [B, G, H/G, S, Dh] :: 只建视图，不占新内存
+reshape :: [B, H, S, Dh] :: 到这里才真正复制
+> MHA: G = H；MQA: G = 1；GQA: 1 < G < H
 ```
 
 ## 💻 代码实现

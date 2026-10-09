@@ -6,10 +6,26 @@
 
 将奖励函数参数化为策略与参考策略的对数比率，直接在偏好数据上优化。增加 chosen 概率，降低 rejected 概率。
 
-**为什么用 DPO？**
-- 比 PPO 简单很多：不需要 reward model 和 critic
-- 直接在偏好数据上训练
-- 效果与 PPO 相当甚至更好
+**它解决什么问题**
+- RLHF 的常规流程要先训一个 reward model，再用 PPO 在线优化，两者都得和策略同规模，显存与调参成本都高。
+- PPO 那条流水线很脆：奖励尺度、KL 系数、clip 范围都要调，还容易训崩。
+- 而手里拿到的数据往往只是静态偏好对（A 比 B 好），并没有分数 —— 需要一种直接吃偏好对的算法。
+
+**核心思想**
+- 带 KL 约束的 RLHF 最优策略有闭式解：`π* ∝ π_ref · exp(r/β)`，反解出来就是 `r = β·log(π*/π_ref) + 常数`。
+- 也就是说奖励可以被「策略与参考策略的对数比率」参数化，不必单独训一个 reward model。
+- 把这个式子代回偏好损失（Bradley-Terry），常数项自动消掉，最后只剩 chosen 和 rejected 两条回答本身。
+
+**算法步骤与推导**
+- 各算两项对数概率：策略与参考策略在 chosen / rejected 上的 `logp`，四项相减得到隐式奖励差 `logits = r_w - r_l`。
+- 参考模型的 `logp` 必须 `no_grad`：它只是固定的锚点，不参与更新；只有策略那份需要梯度。
+- `-logsigmoid(β·logits)`：chosen 比 rejected 好得越多，sigmoid 越接近 1，loss 越小。
+- `β` 控制偏离参考模型的程度，越大越激进，通常取 0.1~0.5。
+
+**对比与代价**
+- 相对 PPO：省掉 reward model 和在线 rollout，一次前向就能算出 loss，工程复杂度大幅下降。
+- 代价是完全 off-policy：只能吃固定的偏好数据集，无法在线探索；数据分布一旦偏离当前策略，提升就受限。
+- 它还需要一份额外的参考模型副本常驻显存，这一点和 PPO 一样躲不掉。
 
 ## 📐 核心公式
 
@@ -29,13 +45,13 @@ loss = -logsigmoid(β · logits)
 ## 📊 张量流程图
 
 ```
-chosen:     policy_logp_w - ref_logp_w  = r_w  (隐式奖励)
-rejected:   policy_logp_l - ref_logp_l  = r_l
-
-logits = r_w - r_l     (chosen 比 rejected 好多少)
-loss = -logsigmoid(β × logits)     (越大越好 → loss 越小)
-
-β 控制偏离参考模型的程度
+# 隐式奖励：策略相对参考策略的对数比率
++ chosen :: policy_logp_w - ref_logp_w = r_w :: 优选回答的隐式奖励
++ rejected :: policy_logp_l - ref_logp_l = r_l :: 拒绝回答的隐式奖励
+logits = r_w - r_l :: chosen 比 rejected 好多少
+loss = -logsigmoid(β · logits) :: logits 越大 loss 越小
+$ r = β·log(π/π_ref) + 常数 —— 把 RLHF 的闭式解代回 Bradley-Terry
+> 参考模型的 logp 必须 no_grad，它只是固定锚点
 ```
 
 ## 💻 代码实现

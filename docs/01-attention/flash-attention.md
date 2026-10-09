@@ -6,10 +6,26 @@
 
 将 Q/K/V 分成块，在 SRAM 中完成注意力计算，避免将 O(N²) 的注意力矩阵写入 HBM。利用 Online Softmax 算法，不需要存储完整的注意力矩阵。
 
-**为什么需要 Flash Attention？**
-- 标准 Attention: IO = O(N²)（存注意力矩阵）
-- Flash Attention: IO = O(N²d/M)（M=SRAM大小）
-- GPU SRAM 快但小(20MB), HBM 慢但大(40GB)
+**它解决什么问题**
+- 标准注意力要把 `[B, H, S, S]` 的分数矩阵写回 HBM 再读回来做 softmax；`S=8192` 时单头就是 6700 万个元素，来回读写三次。
+- GPU 的算力远快于显存带宽，这个算子属于典型的 memory-bound：瓶颈全在搬数据，不在乘加。
+- SRAM（共享内存）快一个数量级但只有几十 MB，所以问题变成「怎么在不物化完整矩阵的前提下把 softmax 算完」。
+
+**核心思想**
+- 把 `Q/K/V` 按块切分，让每个块的分数只在 SRAM 里存在，算完立刻消费掉。
+- 难点是 softmax 需要整行的 max 与 sum，而分块后一次只能看到一段。Online Softmax 用「边遍历边修正」解决：每来一个新块就更新 running max，再把之前累积的结果按 `exp(m_old - m_new)` 缩回去。
+- 于是每行只需要在寄存器里维护 `m`、`l`、`O` 三个状态，显存占用从 `O(S²)` 降到 `O(S)`。
+
+**算法步骤与推导**
+- 把 `Q` 切成 `Tr` 块（常驻 SRAM），`K/V` 切成 `Tc` 块（从 HBM 流式读入）。
+- 对每个 `Q` 块遍历所有 `K/V` 块，累加三件事：`m = max(m, rowmax(S_block))`、`l = l·exp(m_old - m) + rowsum(exp(S_block - m))`、`O = O·exp(m_old - m) + exp(S_block - m)·V_block`。
+- 三个式子是同一件事：新块到来后先修正旧的归一化因子，再把新块的贡献加进来，所以中途得到的 `O` 始终是「已遍历部分」的正确结果。
+- 全部遍历完再统一除以 `l`。结果是精确的 softmax，不是近似 —— 只差浮点累加顺序。
+
+**对比与代价**
+- IO 从 `O(S²)` 降到 `O(S²d/M)`：`Q` 块在 SRAM 里被复用，`K/V` 只从 HBM 读一遍。
+- 代价是要自己写 CUDA kernel，还要处理掩码、变长等分支；反向也必须重算注意力而不是读回概率矩阵，用额外算力换显存。
+- 结果是数值等价的，所以可以逐层替换、不需要重新训练；这也是它能迅速成为标准实现的原因。
 
 ## 📐 核心公式
 
@@ -26,15 +42,20 @@ Flash Attention: IO = O(N²d/M)  (M=SRAM大小)
 ## 📊 张量流程图
 
 ```
-标准 Attention:                Flash Attention:
-  Q → scores[N×N] → softmax → @V    Q分块 → 逐块计算 → Online Softmax → 输出
-      ↑ 写入HBM (O(N²))                    ↑ 只在SRAM (O(N))
+# 标准实现：把中间矩阵物化到 HBM
+S = Q·Kᵀ :: [B, H, S, S] :: 一次写完整个分数矩阵
+P = softmax(S) :: [B, H, S, S] :: 再整块读回来做 softmax
+O = P·V :: [B, H, S, Dh] :: 第三次读写 O(S²) 的数据
+$ IO = O(S²)：瓶颈在显存带宽，不在乘加
 
-Online Softmax 三步:
-  Pass 1: 找每行最大值 m (数值稳定)
-  Pass 2: 计算 exp(x-m) 的和 l (分母)
-  Pass 3: 计算 exp(x-m)/l * V (分子)
-  → 不需要存储完整 N×N 矩阵!
+# Flash Attention：分块 + Online Softmax
++ Q 分块 :: [B, H, Br, Dh] :: 常驻 SRAM，反复使用
++ K, V 分块 :: [B, H, Bc, Dh] :: 从 HBM 流式读入，每个 Q 块读一遍
+m = max(m, rowmax(S_block)) :: [B, H, Br] :: 维护每行的 running max
+l = l·exp(m_old - m) + rowsum(exp(S_block - m)) :: [B, H, Br] :: 修正后的分母
+O = O·exp(m_old - m) + exp(S_block - m)·V_block :: [B, H, Br, Dh] :: 旧结果缩放后叠加新块
+> 全程不需要 [S, S] 矩阵，每行只维护 m、l、O 三个状态
+$ IO 从 O(S²) 降到 O(S²d/M)，M 是 SRAM 大小；结果与标准 softmax 数值等价
 ```
 
 ## 💻 代码实现
