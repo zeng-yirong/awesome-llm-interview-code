@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, Lightbulb, Code2, GitBranch, BookOpen } from 'lucide-react';
 import CodeBlock from './CodeBlock';
+import FlowDiagram from './FlowDiagram';
 import { Problem } from '../data/problems';
 
 interface ProblemCardProps {
@@ -124,12 +125,40 @@ export default function ProblemCard({ problem }: ProblemCardProps) {
                     原理 & 思想
                   </h4>
                 </div>
-                <p 
+                <p
                   className="text-sm leading-relaxed"
                   style={{ color: 'var(--text-secondary)' }}
                 >
                   {problem.principle}
                 </p>
+
+                {/* 原理分节展开：动机 / 直觉 / 步骤 / 代价 */}
+                {problem.principleSections && problem.principleSections.length > 0 && (
+                  <div className="mt-4 space-y-4">
+                    {problem.principleSections.map((section) => (
+                      <div key={section.title}>
+                        <h5
+                          className="text-xs font-semibold mb-2"
+                          style={{ color: 'var(--text-primary)' }}
+                        >
+                          {section.title}
+                        </h5>
+                        <ul className="space-y-2">
+                          {section.items.map((item, idx) => (
+                            <li
+                              key={idx}
+                              className="flex items-start gap-2 text-sm"
+                              style={{ color: 'var(--text-secondary)' }}
+                            >
+                              <span style={{ color: '#f59e0b' }}>▸</span>
+                              <span>{item}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Formula */}
@@ -165,15 +194,7 @@ export default function ProblemCard({ problem }: ProblemCardProps) {
                     张量流程图
                   </h4>
                 </div>
-                <pre 
-                  className="text-xs font-mono whitespace-pre p-4 rounded-lg overflow-x-auto"
-                  style={{
-                    backgroundColor: 'var(--bg-tertiary)',
-                    color: 'var(--text-secondary)'
-                  }}
-                >
-                  {problem.flowDiagram}
-                </pre>
+                <FlowDiagram source={problem.flowDiagram} />
               </div>
 
               {/* Code */}
