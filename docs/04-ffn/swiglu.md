@@ -18,20 +18,20 @@
 
 ## 📐 核心公式
 
-$$
+```math
 \text{SwiGLU}(x)=W_{\text{down}}\!\left(\text{SiLU}(W_{\text{gate}}x)\odot W_{\text{up}}x\right)
-$$
+```
 
-$$
+```math
 \text{SiLU}(x)=x\,\sigma(x),\qquad d_{ff}=\frac{8}{3}D
-$$
+```
 
-$$
+```math
 \begin{aligned}
 \text{SwiGLU}: &\quad 3D\,d_{ff}\approx 8D^{2}\\[2pt]
 \text{FFN}: &\quad 8D^{2}
 \end{aligned}
-$$
+```
 
 ## 📊 张量流程图
 

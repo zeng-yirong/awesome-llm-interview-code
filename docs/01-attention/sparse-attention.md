@@ -19,30 +19,30 @@
 
 ## 📐 核心公式
 
-$$
+```math
 \begin{aligned}
 K_{\text{cmp},j} &= \text{mean}\!\left(K_{jl:(j+1)l}\right)\\[2pt]
 p_j &= \text{score}\!\left(q_t,K_{\text{cmp},j}\right),\qquad
 \mathcal{B}_{\text{slc}}=\text{top}_{n}(p)\\[2pt]
 \mathcal{B}_{\text{win}} &= \{t-w,\dots,t\}
 \end{aligned}
-$$
+```
 
-$$
+```math
 o_t=\sum_{b\in\{\text{cmp},\text{slc},\text{win}\}} g_b\,\text{Attn}(q_t,K_b,V_b),
 \qquad
 g=\sigma\!\left(w^{\top}[q_t;\dots]\right)
-$$
+```
 
-$$
+```math
 k_s=W^{K,l}h_s,\qquad
 I_{t,s}=\sum_j w_{t,j}\text{ReLU}(q_{t,j}\cdot k_s),\qquad
 \mathcal{S}_t=\text{top}_{k}\!\left(I_{t,\cdot}\right)
-$$
+```
 
-$$
+```math
 \mathcal{S}_t\subseteq\{s\le t\},\qquad k=2048,\qquad O(S^{2})\to O(S\,k)
-$$
+```
 
 ## 📊 张量流程图
 

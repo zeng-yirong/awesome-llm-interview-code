@@ -19,33 +19,33 @@
 
 ## 📐 核心公式
 
-$$
+```math
 \text{value}=(-1)^{s}\cdot 2^{\,e-\text{bias}}\cdot(1.m)
-$$
+```
 
-$$
+```math
 \begin{aligned}
 \text{FP32}: &\quad 1+8+23\ \text{bits}\\[2pt]
 \text{FP16}: &\quad 1+5+10\ \text{bits}\\[2pt]
 \text{BF16}: &\quad 1+8+7\ \text{bits}
 \end{aligned}
-$$
+```
 
-$$
+```math
 \begin{aligned}
 \text{forward / backward}: &\quad \text{FP16}\ (2\ \text{B})\\[2pt]
 \text{master weights}: &\quad \text{FP32}\ (4\ \text{B})\\[2pt]
 \text{gradient}: &\quad g_{\text{FP16}}\ \longrightarrow\ \text{FP32}
 \end{aligned}
-$$
+```
 
-$$
+```math
 \mathcal{L}'\leftarrow S\cdot\mathcal{L},
 \qquad
 g\leftarrow\frac{\text{cast}\!\left(g_{\text{FP16}}\right)}{S},
 \qquad
 \text{BF16}:\ e_{\text{bits}}=8\ \Rightarrow\ S=1
-$$
+```
 
 ## 📊 张量流程图
 

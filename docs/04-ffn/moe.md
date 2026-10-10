@@ -19,17 +19,17 @@
 
 ## 📐 核心公式
 
-$$
+```math
 \text{MoE}(x)=\sum_{i\in\text{TopK}}\text{softmax}\!\left(\text{Router}(x)\right)_i E_i(x)
-$$
+```
 
-$$
+```math
 \text{Router}(x)=W_rx,\qquad W_r\in\mathbb{R}^{D\times N},\qquad K=2
-$$
+```
 
-$$
+```math
 \text{Mixtral 8x7B:}\quad N=8,\ K=2,\qquad \text{FLOPs}\approx 12.9\text{B}\ \text{vs}\ 46.7\text{B total}
-$$
+```
 
 ## 📊 张量流程图
 

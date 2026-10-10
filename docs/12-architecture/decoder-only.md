@@ -20,19 +20,19 @@
 
 ## 📐 核心公式
 
-$$
+```math
 x\leftarrow x+\text{Attn}\!\left(\text{LN}(x),\ \text{causal mask}\right),
 \qquad
 x\leftarrow x+\text{FFN}\!\left(\text{LN}(x)\right)
-$$
+```
 
-$$
+```math
 P(x_1,\dots,x_n)=\prod_{t=1}^{n}P(x_t\mid x_{<t})
-$$
+```
 
-$$
+```math
 \{\text{RMSNorm},\ \text{SwiGLU},\ \text{RoPE},\ \text{Pre-Norm}\}
-$$
+```
 
 ## 📊 张量流程图
 

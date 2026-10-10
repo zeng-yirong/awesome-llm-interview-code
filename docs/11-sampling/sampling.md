@@ -19,22 +19,22 @@ Temperature 通过除以温度参数 T 调整分布锐度（T<1 更确定，T>1 
 
 ## 📐 核心公式
 
-$$
+```math
 P(x_i)=\frac{\exp(z_i/T)}{\sum_j\exp(z_j/T)}
-$$
+```
 
-$$
+```math
 T<1:\ \text{sharper},\qquad T>1:\ \text{flatter},\qquad T\to 0:\ \text{greedy}
-$$
+```
 
-$$
+```math
 \text{top-}k:\quad \mathcal{S}_k=\{i:\ \text{rank}(z_i)\le k\},
 \qquad p_i\leftarrow 0\ \text{for}\ i\notin\mathcal{S}_k
-$$
+```
 
-$$
+```math
 \text{top-}p:\quad \mathcal{S}_p=\min\left\{V'\subseteq V:\ \sum_{i\in V'}p_i\ge p\right\}
-$$
+```
 
 ## 📊 张量流程图
 

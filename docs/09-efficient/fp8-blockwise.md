@@ -18,32 +18,32 @@
 
 ## 📐 核心公式
 
-$$
+```math
 s=\frac{\text{amax}(\text{block})}{448},\qquad 448=\text{e4m3 max}
-$$
+```
 
-$$
+```math
 x_q=\text{clamp}\!\left(\frac{x}{s},\ -448,\ 448\right)\to\text{FP8},
 \qquad
 \hat{x}=x_q\,s
-$$
+```
 
-$$
+```math
 y=\sum_{\text{block}}(x_qs_x)(w_qs_w)=\sum_{\text{block}}s_xs_w\,(x_qw_q)
-$$
+```
 
-$$
+```math
 \begin{aligned}
 \text{e4m3}: &\quad 1+4+3\ \text{bits},\quad \max=448 && \text{(activations, weights)}\\[2pt]
 \text{e5m2}: &\quad 1+5+2\ \text{bits},\quad \max=57344 && \text{(gradients)}
 \end{aligned}
-$$
+```
 
-$$
+```math
 \text{DeepSeek-V3}:\quad \text{activations }1\times128,\qquad
 \text{weights }128\times128,\qquad
 \text{accumulate in FP32}
-$$
+```
 
 ## 📊 张量流程图
 

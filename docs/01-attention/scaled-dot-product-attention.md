@@ -19,16 +19,16 @@
 
 ## 📐 核心公式
 
-$$
+```math
 \text{Attention}(Q,K,V)=\text{softmax}\!\left(\frac{QK^{\top}}{\sqrt{d_k}}\right)V
-$$
+```
 
-$$
+```math
 \text{softmax}(z)_i=\frac{e^{z_i}}{\sum_j e^{z_j}},\qquad
 \text{Var}(q\cdot k)=d_k,\qquad
 Q,K,V\in\mathbb{R}^{n\times d_k},\qquad
 d_k=\frac{D}{H}
-$$
+```
 
 ## 📊 张量流程图
 

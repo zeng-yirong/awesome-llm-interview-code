@@ -18,25 +18,25 @@
 
 ## 📐 核心公式
 
-$$
+```math
 \mathcal{L}_{\text{OPD}}=\mathbb{E}_{y\sim\pi_S(\cdot\mid x)}\left[\frac{1}{|y|}\sum_t D\!\left(p_T(\cdot\mid x,y_{<t})\ \|\ p_S(\cdot\mid x,y_{<t})\right)\right]
-$$
+```
 
-$$
+```math
 \begin{aligned}
 M&=\beta\,p_T+(1-\beta)\,p_S\\[2pt]
 D_{\text{GJS}}(\beta)&=(1-\beta)\text{KL}(p_T\|M)+\beta\text{KL}(p_S\|M),
 \qquad \beta\in[0,1]
 \end{aligned}
-$$
+```
 
-$$
+```math
 \begin{aligned}
 \beta=0 &\Rightarrow \text{KL}(p_T\|p_S) && \text{forward KL (mode-covering)}\\[2pt]
 \beta=1 &\Rightarrow \text{KL}(p_S\|p_T) && \text{reverse KL (mode-seeking)}\\[2pt]
 \beta=0.5 &\Rightarrow \text{standard JSD}
 \end{aligned}
-$$
+```
 
 ## 📊 张量流程图
 

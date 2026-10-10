@@ -19,15 +19,15 @@
 
 ## 📐 核心公式
 
-$$
+```math
 \text{MultiHead}(Q,K,V)=\text{Concat}\!\left(\text{head}_1,\dots,\text{head}_H\right)W_O
-$$
+```
 
-$$
+```math
 \text{head}_i=\text{Attention}\!\left(QW_i^{Q},\ KW_i^{K},\ VW_i^{V}\right),
 \qquad
 D_h=\frac{D}{H}
-$$
+```
 
 ## 📊 张量流程图
 

@@ -18,17 +18,17 @@
 
 ## 📐 核心公式
 
-$$
+```math
 \text{activations}: O(L)\ \longrightarrow\ O\!\left(\sqrt{L}\right)
-$$
+```
 
-$$
+```math
 \text{memory}: L\,B\,S\,d\cdot 4\ \text{B}\ \longrightarrow\ \sqrt{L}\,B\,S\,d\cdot 4\ \text{B}
-$$
+```
 
-$$
+```math
 \text{checkpoints}=\sqrt{L},\qquad \text{time overhead}\approx 20\%
-$$
+```
 
 ## 📊 张量流程图
 

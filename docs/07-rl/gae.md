@@ -18,29 +18,29 @@
 
 ## 📐 核心公式
 
-$$
+```math
 \delta_t=r_t+\gamma V(s_{t+1})-V(s_t)
-$$
+```
 
-$$
+```math
 A_t=\sum_{l=0}^{T-t}(\gamma\lambda)^{l}\,\delta_{t+l}
 =\delta_t+\gamma\lambda\,\delta_{t+1}+(\gamma\lambda)^{2}\delta_{t+2}+\cdots
-$$
+```
 
-$$
+```math
 A_t=\delta_t+\gamma\lambda\,A_{t+1},\qquad A_T=\delta_T
-$$
+```
 
-$$
+```math
 \begin{aligned}
 \lambda=1: &\quad A_t=\text{MC return}-V(s_t) & \text{(unbiased, high variance)}\\[2pt]
 \lambda=0: &\quad A_t=\delta_t & \text{(low variance, high bias)}
 \end{aligned}
-$$
+```
 
-$$
+```math
 \gamma=0.99,\qquad \lambda=0.95
-$$
+```
 
 ## 📊 张量流程图
 

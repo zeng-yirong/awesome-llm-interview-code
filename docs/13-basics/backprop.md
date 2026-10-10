@@ -19,18 +19,18 @@
 
 ## 📐 核心公式
 
-$$
+```math
 \frac{\partial\mathcal{L}}{\partial x}=\frac{\partial\mathcal{L}}{\partial y}\cdot\frac{\partial y}{\partial x}
-$$
+```
 
-$$
+```math
 \begin{aligned}
 y=Wx: &\quad \frac{\partial\mathcal{L}}{\partial W}=\frac{\partial\mathcal{L}}{\partial y}\,x^{\top},\quad
 \frac{\partial\mathcal{L}}{\partial x}=W^{\top}\frac{\partial\mathcal{L}}{\partial y}\\[3pt]
 y=\text{ReLU}(x): &\quad \frac{\partial\mathcal{L}}{\partial x}=\frac{\partial\mathcal{L}}{\partial y}\odot(x>0)\\[3pt]
 y=\text{softmax}(z): &\quad \frac{\partial\mathcal{L}}{\partial z}=y-\text{one\_hot}(\text{target})\quad(\text{with CE})
 \end{aligned}
-$$
+```
 
 ## 📊 张量流程图
 
