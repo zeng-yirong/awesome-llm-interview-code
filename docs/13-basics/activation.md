@@ -15,6 +15,7 @@
 2. `GELU(x) = x·Φ(x)`（`Φ` 是标准正态 CDF）：负区间仍有小梯度，是 ReLU 的平滑版。
 3. `SiLU(x) = x·σ(x)`：`σ` 充当 0~1 的开关，负区间先降后回升，自带门控。
 4. 三者都是逐元素作用，形状完全不变，可以随意替换。
+5. 梯度的差别只有一档：`ReLU′` 只有 0 / 1 两档，在 0 处不连续；`GELU′`、`SiLU′` 处处可导 —— 这正是平滑版训练更稳的原因。
 
 ## 📐 核心公式
 
@@ -37,24 +38,14 @@
 
 ## 📊 张量流程图
 
-```
-# 三种激活函数：形状决定行为
-x :: [..., D] :: 输入张量
-+ ReLU :: max(0, x) :: 负区间恒为 0，正区间线性
-+ GELU :: x·Φ(x) :: 平滑版 ReLU，负区间仍有小梯度
-+ SiLU :: x·σ(x) :: 自带门控，负区间先降后回升
-y :: [..., D] :: 逐个元素作用，形状不变
-
-# 梯度
-+ ReLU' :: x > 0 :: 只有 0 / 1 两档，不连续
-+ GELU' :: 平滑过渡 :: 处处可导
-+ SiLU' :: 平滑 + 门控 :: 处处可导
-
-# 使用场景
-+ ReLU :: 原始 Transformer 的标准 FFN
-+ GELU :: BERT、GPT-2/3
-+ SiLU :: SwiGLU 门控（LLaMA、PaLM）
-> ReLU 负区间梯度为 0，神经元长期落在负区间就再也学不动（dead neuron）
+```mermaid
+flowchart LR
+  x["x<br/>[..., D]"] --> relu["ReLU<br/>max(0, x)"]
+  x --> gelu["GELU<br/>x·Φ(x)"]
+  x --> silu["SiLU<br/>x·σ(x)"]
+  relu --> y["y<br/>[..., D]"]
+  gelu --> y
+  silu --> y
 ```
 
 ## 💻 代码实现
@@ -167,6 +158,7 @@ if __name__ == "__main__":
 - **GELU**: 平滑版 ReLU，BERT/GPT 使用
 - **SiLU = Swish**: 用于 SwiGLU 门控机制
 - **面试常问**: 各激活函数的梯度和使用场景？
+- **使用场景**: ReLU 是原始 Transformer FFN 的标配；GELU 用于 BERT、GPT-2/3；SiLU 用于 SwiGLU（LLaMA、PaLM）
 - **对比**: ReLU vs GELU vs SiLU 的优缺点？
 
 
