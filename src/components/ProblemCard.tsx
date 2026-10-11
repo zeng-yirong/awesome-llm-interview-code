@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, Lightbulb, Code2, GitBranch, BookOpen } from 'lucide-react';
 import CodeBlock from './CodeBlock';
-import FlowDiagram from './FlowDiagram';
+import TensorFlow from './TensorFlow';
 import MathFormula from './MathFormula';
 import { Problem } from '../data/problems';
 
@@ -187,7 +187,7 @@ export default function ProblemCard({ problem }: ProblemCardProps) {
                     张量流程图
                   </h4>
                 </div>
-                <FlowDiagram source={problem.flowDiagram} />
+                <TensorFlow source={problem.flowDiagram} />
               </div>
 
               {/* Code */}

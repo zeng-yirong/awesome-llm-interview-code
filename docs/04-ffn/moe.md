@@ -10,6 +10,8 @@
 ### 核心思想
 通过 Router 网络为每个 token 动态选择最相关的 K 个专家处理，实现稀疏激活。每个专家是独立的 FFN，只处理分配到的 token，最后加权融合。
 
+总共有 N 份专家参数，而每个 token 只算 K 份，所以 FLOPs 只占 K/N —— 参数量与计算量解耦。
+
 ### 算法步骤
 1. Router 计算：logits = Router(x)，得到每个专家的得分
 2. Top-K 选择：选出得分最高的 K 个专家
@@ -33,16 +35,12 @@
 
 ## 📊 张量流程图
 
-```
-# 按 token 路由到 Top-K 个专家
-x = reshape(x, [B*S, D]) :: [B*S, D] :: 摊平序列维，路由是逐 token 的
-logits = Router(x) :: [B*S, N] :: Router 只是一个 [D, N] 的线性层
-Top-K :: indices, weights :: 通常 K=2，取出下标与权重
-w = softmax(选中的 logits) :: [B*S, K] :: 路由权重，用来加权求和
-E_k(x) :: 每个专家都是一个完整的 FFN
-y = Σ_k w_k · E_k(x) :: [B*S, D] :: 只算 K 个专家，其余不参与
-$ 总参数是 N 份专家，每个 token 只算 K 份 → FLOPs 只占 K/N
-> Mixtral 8x7B：8 选 2，46.7B 总参数，单 token 实际计算约 12.9B
+```mermaid
+flowchart TD
+  x["x<br/>[B·S, D]"] --> r["logits = Router<br/>[B·S, N]"] --> tk["Top-K<br/>[B·S, K]"] --> w["w = softmax<br/>[B·S, K]"]
+  w --> e1["E_1<br/>FFN"] & e2["E_2<br/>FFN"] & e3["E_K<br/>FFN"]
+  e1 & e2 & e3 --> y["y = Σ_k w_k·E_k(x)<br/>[B·S, D]"]
+  y --> z["reshape<br/>[B, S, D]"]
 ```
 
 ## 💻 代码实现
