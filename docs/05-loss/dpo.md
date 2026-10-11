@@ -34,14 +34,15 @@ y_w:\ \text{chosen},\qquad y_l:\ \text{rejected},\qquad \beta\in[0.1,\ 0.5]
 
 ## 📊 张量流程图
 
-```
-# 隐式奖励：策略相对参考策略的对数比率
-+ chosen :: policy_logp_w - ref_logp_w = r_w :: 优选回答的隐式奖励
-+ rejected :: policy_logp_l - ref_logp_l = r_l :: 拒绝回答的隐式奖励
-logits = r_w - r_l :: chosen 比 rejected 好多少
-loss = -logsigmoid(β · logits) :: logits 越大 loss 越小
-$ r = β·log(π/π_ref) + 常数 —— 把 RLHF 的闭式解代回 Bradley-Terry
-> 参考模型的 logp 必须 no_grad，它只是固定锚点
+```mermaid
+flowchart TD
+  pw["policy_logp_w"] --> rw["r_w = policy_logp_w − ref_logp_w<br/>优选回答的隐式奖励"]
+  pl["policy_logp_l"] --> rl["r_l = policy_logp_l − ref_logp_l<br/>拒绝回答的隐式奖励"]
+  rf["ref_logp<br/>必须 no_grad，只是固定锚点"] --> rw
+  rf --> rl
+  rw --> d["Δ = r_w − r_l<br/>chosen 比 rejected 好多少"]
+  rl --> d
+  d --> loss["loss = −logsigmoid(β·Δ)<br/>Δ 越大 loss 越小"]
 ```
 
 ## 💻 代码实现
@@ -97,5 +98,5 @@ if __name__ == "__main__":
 - **比 PPO 简单很多**: 不需要 reward model 和 critic
 - **变体**: IPO, KTO, ORPO, SimPO 等
 - **面试常问**: DPO 和 PPO 的区别？为什么 DPO 更简单？
-
+- **参考模型的 logp 必须 no_grad**: 它只是固定锚点，只有策略一侧回传梯度
 

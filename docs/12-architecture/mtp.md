@@ -37,16 +37,11 @@ p_{i+k+1}=\text{lm\_head}\!\left(h_i^{k}\right)
 
 ## 📊 张量流程图
 
-```
-# 主干之外串行接若干 MTP 模块
-x :: [x₁, x₂, x₃, x₄, x₅] :: 输入序列
-主干 Transformer :: h⁰ [B, T, D] → lm_head → 预测 x₂ :: 主损失 L_main
-+ MTP 模块 1 :: h¹ = M1[h⁰; Emb(x₂)] → 预测 x₃ :: 辅助损失
-+ MTP 模块 2 :: h² = M2[h¹; Emb(x₃)] → 预测 x₄ :: 辅助损失
-+ MTP 模块 3 :: h³ = M3[h²; Emb(x₄)] → 预测 x₅ :: 辅助损失
-$ L = L_main + (λ/D)·Σ_k Σ_i CE(第 k 个预测, 目标)，λ 典型 0.3
-> Emb 与 lm_head 与主模型共享，参数开销很小
-> 推理时这些模块直接当 draft，几乎白送一个投机解码加速器
+```mermaid
+flowchart TD
+  x["x₁ … x₅<br/>[B, T]"] --> bk["主干 Transformer<br/>h⁰ [B, T, D]"] --> h0["lm_head<br/>预测 x₂<br/>主损失 L_main"]
+  bk --> m1["MTP 模块 1<br/>h¹ = M₁[h⁰; Emb(x₂)]<br/>预测 x₃，辅助损失"] --> m2["MTP 模块 2<br/>h² = M₂[h¹; Emb(x₃)]<br/>预测 x₄，辅助损失"] --> m3["MTP 模块 3<br/>h³ = M₃[h²; Emb(x₄)]<br/>预测 x₅，辅助损失"]
+  m3 -.-> note["Emb 与 lm_head 与主模型共享，参数开销很小<br/>推理时这些模块直接当 draft"]
 ```
 
 ## 💻 代码实现

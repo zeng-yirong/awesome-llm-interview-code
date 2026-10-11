@@ -33,15 +33,14 @@ LayerNorm 的简化版：不做均值中心化，只用 RMS (均方根) 归一�
 
 ## 📊 张量流程图
 
-```
-# 只压尺度，不管中心
-x :: [B, S, D] :: 残差流的输入
-x32 = x.float() :: [B, S, D] :: 升 fp32，bf16 下 x² 动态范围不够
-ms = mean(x32², -1, keepdim=True) :: [B, S, 1] :: 均方，只沿特征维
-r = rsqrt(ms + ε) :: [B, S, 1] :: ε 取 1e-5，纯数值保护
-y = (x32·r).type_as(x)·γ :: [B, S, D] :: 只有一个可学习参数 γ: [D]
-$ 相比 LayerNorm 少了求均值与减均值，归约次数减半、参数量减半
-> LLaMA、PaLM、Qwen 都把它放在每个子层之前
+```mermaid
+flowchart TD
+  x["x<br/>[B, S, D]"] --> up["x32 = x.float()<br/>bf16 下 x² 动态范围不够"]
+  up --> ms["ms = mean(x32², -1, keepdim)<br/>[B, S, 1]"]
+  ms --> r["r = rsqrt(ms + ε)<br/>[B, S, 1]"]
+  up --> mul["x32·r<br/>[B, S, D]"]
+  r --> mul
+  mul --> y["y = (·).type_as(x)·γ<br/>[B, S, D]<br/>只有一个可学习参数"]
 ```
 
 ## 💻 代码实现
@@ -84,5 +83,5 @@ if __name__ == "__main__":
 - **在 float32 下计算保证数值稳定性**
 - **LLaMA, Mistral, PaLM, Gemma 等都用 RMSNorm**
 - **对比 LayerNorm**: 计算更快，参数更少，效果相当
-
+- **相比 LayerNorm 少一次求均值与减均值**: 归约次数减半，也没有 β；LLaMA、PaLM、Qwen 都把它放在每个子层之前
 

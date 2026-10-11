@@ -40,14 +40,18 @@ c\in\{\text{reference answer},\ \text{hint},\ \text{strategy name},\ \text{tool 
 
 ## 📊 张量流程图
 
-```
-# 同一份权重 θ，两条路径
-学生路径 :: x → π_θ(·|x) :: 需要真采样 rollout，带着自己的错误
-教师路径 :: x ⊕ c → π_θ(·|x ⊕ c) :: 同一份权重多拼一段上下文，no_grad
-c :: 参考答案 / 关键提示 / 解题策略 / 工具返回 / 用户纠正
-逐 token 反向 KL :: KL(π_θ(·|x, y_<t) ‖ π_θ(·|x ⊕ c, y_<t)) :: 只在 y 自己的 token 上回传
-$ 教师不是「更强的模型」，而是「信息更全的同一个自己」
-> 师生共享参数：不需要额外的教师显存，也不存在能力差距导致的负迁移
+```mermaid
+flowchart TD
+  subgraph STU["学生路径：真采样 rollout，带着自己的错误"]
+    direction LR
+    x1["x"] --> p1["π_θ(·|x)<br/>需要梯度"]
+  end
+  subgraph TEA["教师路径：同一份权重，多拼一段特权上下文"]
+    direction LR
+    x2["x ⊕ c<br/>参考答案 / 提示 / 工具返回"] --> p2["π_θ(·|x ⊕ c)<br/>no_grad"]
+  end
+  p1 --> kl["逐 token 反向 KL<br/>KL(p_student ‖ p_teacher)<br/>只在 y 自己的 token 上回传"]
+  p2 --> kl
 ```
 
 ## 💻 代码实现

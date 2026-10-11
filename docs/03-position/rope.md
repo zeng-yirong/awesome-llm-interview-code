@@ -40,19 +40,17 @@ R(m\theta)=\begin{pmatrix}\cos m\theta & -\sin m\theta\\[2pt] \sin m\theta & \co
 
 ## 📊 张量流程图
 
-```
-# 预计算：每个位置、每个维度对对应的旋转角
-inv_freq = 1/10000^(2i/d) :: [d/2] :: i = 0..d/2-1，靠后的维度对频率更低
-angles = outer(pos, inv_freq) :: [S, d/2] :: 位置 × 维度对
-cos, sin = cos(angles), sin(angles) :: [S, d] :: 复制一份拼成完整维度，好与 [B,S,H,D] 广播
-
-# 旋转：只作用在 Q、K 上
-rotate_half(x) :: cat(-x₂, x₁) :: 后半段取负拼到前面，等价于旋转 90°
-+ q' = q·cos + rotate_half(q)·sin :: [B, S, H, D] :: 查询被旋转
-+ k' = k·cos + rotate_half(k)·sin :: [B, S, H, D] :: 键被旋转同样的角度
-> v 不参与旋转：它是被加权求和的内容，本身与位置无关
-$ (R_m q)·(R_n k) = qᵀ·R_{n-m}·k —— 点积里只剩相对位置 n - m
-> 基频 10000 是超参，直接外推到远超训练长度时高频维度会震荡，所以有 NTK-aware、线性插值等改法
+```mermaid
+flowchart TD
+  subgraph PRE["预计算：每个位置、每个维度对对应的旋转角"]
+    direction LR
+    f["inv_freq = 1/10000^(2i/d)<br/>[d/2]<br/>靠后的维度对频率更低"] --> ang["angles = outer(pos, inv_freq)<br/>[S, d/2]"] --> cs["cos, sin<br/>[S, d]<br/>与 [B,S,H,D] 广播"]
+  end
+  subgraph ROT["旋转：只作用在 Q、K 上"]
+    direction LR
+    q["q<br/>[B, S, H, D]"] --> qr["q′ = q·cos + rotate_half(q)·sin<br/>[B, S, H, D]"]
+    k["k<br/>[B, S, H, D]"] --> kr["k′ = k·cos + rotate_half(k)·sin<br/>[B, S, H, D]"]
+  end
 ```
 
 ## 💻 代码实现

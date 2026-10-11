@@ -32,15 +32,13 @@
 
 ## 📊 张量流程图
 
-```
-# 沿特征维归一化：每个 token 独立统计
-x :: [B, S, D] :: 残差流的输入
-μ = mean(x, -1, keepdim=True) :: [B, S, 1] :: 只沿最后一维求均值
-σ² = var(x, -1, unbiased=False) :: [B, S, 1] :: 用总体方差，不做贝塞尔校正
-x̂ = (x - μ) / √(σ² + ε) :: [B, S, D] :: 广播回原形状，每个 token 均值 0、方差 1
-y = x̂·γ + β :: [B, S, D] :: γ、β 都是可学习的 [D]，负责恢复尺度与偏移
-$ 统计量取自每个 token 自己的 D 维，与 batch 里其他样本无关
-> 训练与推理走同一条路径，不像 BatchNorm 需要维护滑动平均
+```mermaid
+flowchart TD
+  x["x<br/>[B, S, D]<br/>残差流的输入"] --> mu["μ = mean(x, -1, keepdim)<br/>[B, S, 1]"]
+  x --> va["σ² = var(x, -1, unbiased=False)<br/>[B, S, 1]"]
+  mu --> nx["x̂ = (x − μ) / √(σ² + ε)<br/>[B, S, D]<br/>每个 token 均值 0、方差 1"]
+  va --> nx
+  nx --> y["y = x̂·γ + β<br/>[B, S, D]<br/>γ、β 都是可学习的 [D]"]
 ```
 
 ## 💻 代码实现
@@ -89,5 +87,5 @@ if __name__ == "__main__":
 - **Pre-Norm**: `x = x + SubLayer(LN(x))` — 现代 LLM 标配
 - **Post-Norm**: `x = LN(x + SubLayer(x))` — 原始 Transformer
 - **对比 BatchNorm**: BN 沿 batch 维度归一化，LN 沿特征维度
-
+- **与 batch 无关**: 统计量取自每个 token 自己的 D 维；训练与推理走同一条路径，不像 BatchNorm 要维护滑动平均
 

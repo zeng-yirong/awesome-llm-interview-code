@@ -46,23 +46,19 @@ I_{t,s}=\sum_j w_{t,j}\text{ReLU}(q_{t,j}\cdot k_s),\qquad
 
 ## 📊 张量流程图
 
-```
-# NSA：压缩 + 选择 + 滑窗，三路门控加权
-K, V :: [B, H, S, D] :: 输入
-+ 压缩分支 :: [B, H, S/l, D] :: mean_pool 按块大小 l 池化，给粗粒度全局
-+ 选择分支 :: top-n 块 :: 用压缩表示打分选出重要块，再取回这些块的原始 KV
-+ 滑窗分支 :: 最近 w 个 token :: 局部精确
-门控 g = σ(wᵀ·[q_t ; ...]) :: [B, H, 1] :: 学出来的加权系数
-o = Σ_b g_b · Attn(q, K_b, V_b) :: [B, H, S, D] :: 三路结果加权求和
-$ 复杂度 O(S²) → O(S·n)
-
-# DSA：一个极轻的 indexer 粗筛，只对 top-k 做真注意力
-q_t, k_s :: [B, H, S, D] :: 输入
-k_s = W^{K,l}·h_s :: [B, S, d^I] :: 轻量 key 投影，d^I 远小于 d
-I_{t,s} = Σ_j w_{t,j}·ReLU(q_{t,j}·k_s) :: [B, S, S] :: 给每个历史 token 打分
-top-k :: [B, S, k] :: 选中的 token 索引，其余全部丢掉
-MLA 注意力 :: [B, S, k] :: 只在这 k 个 token 上做真正的注意力
-$ 复杂度 O(S²) → O(S·k)，indexer 可以用 FP8 跑
+```mermaid
+flowchart TD
+  subgraph NSA["NSA：压缩 + 选择 + 滑窗，三路门控加权"]
+    direction LR
+    cmp["压缩分支<br/>[B, H, S/l, D]<br/>mean_pool 给粗粒度全局"] --> g["g = σ(wᵀ·[q_t ; ...])<br/>[B, H, 1]<br/>学出来的加权系数"]
+    sel["选择分支<br/>top-n 块<br/>聚焦重要中程区域"] --> g
+    win["滑窗分支<br/>最近 w 个 token<br/>局部精确"] --> g
+    g --> o1["o = Σ_b g_b·Attn(q, K_b, V_b)<br/>[B, H, S, D]"]
+  end
+  subgraph DSA["DSA：极轻的 indexer 粗筛，只对 top-k 做真注意力"]
+    direction LR
+    ks["k_s = W·h_s<br/>[B, S, d^I]<br/>d^I 远小于 d"] --> sc["I = Σ_j w_j·ReLU(q_j·k_s)<br/>[B, S, S]<br/>给每个历史 token 打分"] --> tk["top-k<br/>[B, S, k]<br/>其余全部丢掉"] --> att["MLA 注意力<br/>只在这 k 个 token 上做"]
+  end
 ```
 
 ## 💻 代码实现

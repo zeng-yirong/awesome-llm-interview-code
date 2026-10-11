@@ -38,16 +38,13 @@
 
 ## 📊 张量流程图
 
-```
-# shift 对齐：位置 t 的输出预测位置 t+1 的 token
-logits :: [B, S, V] :: 每个位置对整个词表的打分
-labels :: [B, S] :: 真实 token 下标，prompt 段置 -100
-+ 预测 :: logits[:, :-1] → [B, S-1, V] :: 丢掉最后一个位置，它没有下一个 token
-+ 目标 :: labels[:, 1:] → [B, S-1] :: 丢掉第一个位置，它没有被谁预测
-logp = log_softmax(logits, -1) :: [B, S-1, V] :: 直接取对数概率，避免下溢
-loss = -mean(logp[range, 目标]) :: 只取正确 token 那一项，结果是标量
-$ 梯度 = softmax(logits) - one_hot(目标)，预测越离谱梯度越大
-> SFT 时 prompt 段的 label 置 -100，ignore_index 把它们排除出分母
+```mermaid
+flowchart TD
+  logits["logits<br/>[B, S, V]<br/>每个位置对整个词表的打分"] --> sh1["logits[:, :-1]<br/>[B, S−1, V]<br/>丢掉最后一个位置"]
+  labels["labels<br/>[B, S]<br/>prompt 段置 -100"] --> sh2["labels[:, 1:]<br/>[B, S−1]<br/>丢掉第一个位置"]
+  sh1 --> lp["logp = log_softmax(logits, -1)<br/>[B, S−1, V]"]
+  sh2 --> loss["loss = −mean(logp[range, 目标])<br/>只取正确 token 那一项，标量"]
+  lp --> loss
 ```
 
 ## 💻 代码实现
@@ -100,5 +97,5 @@ def sft_loss(logits, labels, prompt_lengths):
 - **Pretrain**: 所有 token 参与 loss
 - **SFT**: prompt 部分 label 设为 -100，只算 response
 - **面试常问**: Pretrain Loss 和 SFT Loss 的区别？
-
+- **梯度形式**: ∂L/∂logits = softmax(logits) − one_hot(目标)，预测越离谱梯度越大
 

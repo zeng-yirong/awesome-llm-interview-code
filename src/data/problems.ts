@@ -89,17 +89,13 @@ $$
 Q,K,V\in\mathbb{R}^{n\times d_k},\qquad
 d_k=\frac{D}{H}
 $$`,
-    flowDiagram: `# 打分：一次 matmul 得到所有位置对的相关性
-+ Q :: [B, H, Sq, D] :: 查询
-+ K :: [B, H, Sk, D] :: 键
-S = Q·Kᵀ/√D :: [B, H, Sq, Sk] :: 除以 √D 把点积方差从 D 拉回 1
-Mask :: 因果 / padding 位置填 -1e9，softmax 后权重≈0
-A = softmax(S) :: [B, H, Sq, Sk] :: 每行和为 1
-
-# 加权求和
-+ A :: [B, H, Sq, Sk] :: 注意力权重
-+ V :: [B, H, Sk, D] :: 值
-O = A·V :: [B, H, Sq, D] :: 与 Q 同形`,
+    flowDiagram: `flowchart LR
+  q["Q<br/>[B, H, Sq, D]"] --> s["S = Q·Kᵀ/√D<br/>[B, H, Sq, Sk]"]
+  k["K<br/>[B, H, Sk, D]"] --> s
+  s --> mask["masked_fill(mask == 0, -1e9)<br/>因果 / padding 位置"]
+  mask --> a["A = softmax(·, -1)<br/>[B, H, Sq, Sk]"]
+  a --> o["O = A·V<br/>[B, H, Sq, D]"]
+  v["V<br/>[B, H, Sk, D]"] --> o`,
     code: `import torch, torch.nn.functional as F, math
 
 def scaled_dot_product_attention(q, k, v, mask=None):
@@ -235,14 +231,10 @@ $$
 $$
 A=\text{softmax}(S'),\qquad A_{ij}=0\ \text{ for }\ j>i
 $$`,
-    flowDiagram: `# 只改 softmax 的输入，不改任何形状
-scores = Q·Kᵀ/√D :: [B, H, S, S] :: 与普通注意力完全一样
-mask = tril(ones(S, S)) :: [S, S] :: 下三角含对角线为 1（可见），上三角为 0（屏蔽）
-scores.masked_fill(mask == 0, -1e9) :: [B, H, S, S] :: 屏蔽位填一个极大的负数
-A = softmax(scores, -1) :: [B, H, S, S] :: exp(-1e9) 下溢为 0，权重精确为 0
-O = A·V :: [B, H, S, Dh] :: 第 i 行只混合了 j ≤ i 的 V
-$ 形状全程不变，因果性完全由 mask 的取值保证
-> 推理时每步只有 1 个 token，掩码自动失效 —— 训练与推理走的是同一套代码`,
+    flowDiagram: `flowchart LR
+  s["scores = Q·Kᵀ/√D<br/>[B, H, S, S]"] --> mf["masked_fill(mask == 0, -1e9)<br/>[B, H, S, S]"]
+  m["mask = tril(ones(S, S))<br/>下三角可见，上三角屏蔽"] --> mf
+  mf --> a["A = softmax(·, -1)<br/>exp(-1e9) 下溢为 0"] --> o["O = A·V<br/>[B, H, S, D_h]<br/>第 i 行只混合 j ≤ i"]`,
     code: `import torch
 
 def create_causal_mask(seq_len, device='cpu'):
@@ -258,6 +250,7 @@ def create_causal_mask(seq_len, device='cpu'):
       '被屏蔽位置填 -inf → softmax 后为 0',
       'decoder-only (GPT) 全程使用 causal mask',
       '训练时可用 causal mask 并行计算所有位置的 loss',
+      '推理时: 每步只有 1 个 token，掩码自动失效 —— 训练与推理走的是同一套代码',
     ],
     source: 'cdhx',
   },
@@ -305,19 +298,9 @@ G=H &\Rightarrow \text{MHA}, & \text{one KV per query head}\\[2pt]
 G=1 &\Rightarrow \text{MQA}, & \text{all query heads share one KV}
 \end{aligned}
 $$`,
-    flowDiagram: `# Q 有 H 个头，K/V 只有 G 组
-+ Q :: [B, H, S, Dh] :: 全部 H 个头各自独立
-+ K, V :: [B, G, S, Dh] :: 只有 G 组，G < H
-repeat_kv :: G → H :: 每份 KV 复制 H/G 次，与 Q 的头数对齐
-SDPA :: [B, H, S, Dh] :: 之后与 MHA 完全相同
-$ KV Cache 降到 G/H；LLaMA 2 70B 取 G=8、H=64，只剩 1/8
-
-# repeat_kv：unsqueeze → expand → reshape
-x :: [B, G, S, Dh] :: 输入，G 份 KV
-unsqueeze :: [B, G, 1, S, Dh] :: 插一个复制维
-expand :: [B, G, H/G, S, Dh] :: 只建视图，不占新内存
-reshape :: [B, H, S, Dh] :: 到这里才真正复制
-> MHA: G = H；MQA: G = 1；GQA: 1 < G < H`,
+    flowDiagram: `flowchart LR
+  q["Q<br/>[B, H, S, D_h]<br/>H 个头各自独立"] --> sdpa["SDPA<br/>[B, H, S, D_h]<br/>之后与 MHA 完全相同"]
+  kv["K, V<br/>[B, G, S, D_h]<br/>只有 G 组"] --> rep["repeat_kv<br/>G → H<br/>unsqueeze → expand → reshape"] --> sdpa`,
     code: `import torch, torch.nn as nn, torch.nn.functional as F, math
 
 class GQA(nn.Module):
@@ -408,20 +391,17 @@ $$
 $$
 O=\frac{O^{(\text{final})}}{\ell^{(\text{final})}},\qquad \text{memory}: O(S^{2})\to O(S)
 $$`,
-    flowDiagram: `# 标准实现：把中间矩阵物化到 HBM
-S = Q·Kᵀ :: [B, H, S, S] :: 一次写完整个分数矩阵
-P = softmax(S) :: [B, H, S, S] :: 再整块读回来做 softmax
-O = P·V :: [B, H, S, Dh] :: 第三次读写 O(S²) 的数据
-$ IO = O(S²)：瓶颈在显存带宽，不在乘加
-
-# Flash Attention：分块 + Online Softmax
-+ Q 分块 :: [B, H, Br, Dh] :: 常驻 SRAM，反复使用
-+ K, V 分块 :: [B, H, Bc, Dh] :: 从 HBM 流式读入，每个 Q 块读一遍
-m = max(m, rowmax(S_block)) :: [B, H, Br] :: 维护每行的 running max
-l = l·exp(m_old - m) + rowsum(exp(S_block - m)) :: [B, H, Br] :: 修正后的分母
-O = O·exp(m_old - m) + exp(S_block - m)·V_block :: [B, H, Br, Dh] :: 旧结果缩放后叠加新块
-> 全程不需要 [S, S] 矩阵，每行只维护 m、l、O 三个状态
-$ IO 从 O(S²) 降到 O(S²d/M)，M 是 SRAM 大小；结果与标准 softmax 数值等价`,
+    flowDiagram: `flowchart TD
+  subgraph STD["标准实现 · 中间矩阵物化到 HBM"]
+    direction LR
+    s1["S = Q·Kᵀ<br/>[B, H, S, S]"] --> p1["P = softmax(S)<br/>[B, H, S, S]"] --> o1["O = P·V<br/>[B, H, S, D_h]"]
+  end
+  subgraph FA["Flash Attention · 分块 + Online Softmax"]
+    direction LR
+    q2["Q 分块<br/>[B, H, Br, D_h]<br/>常驻 SRAM"] --> sc["S_块 = Q_块·K_块ᵀ<br/>[B, H, Br, Bc]"] --> m2["m, l 递推<br/>每行的 running max 与分母"] --> o2["O ← O·e^Δm + P·V<br/>[B, H, Br, D_h]"]
+    kv2["K, V 分块<br/>[B, H, Bc, D_h]<br/>从 HBM 流式读入"] --> sc
+    kv2 --> o2
+  end`,
     code: `import torch, math
 
 def flash_attention_qk(Q, K, V, block_size=64):
@@ -508,19 +488,17 @@ $$
 \text{no cache}: \sum_{t=1}^{S}t=O(S^{2}),\qquad
 \text{cache}: O(S)\ \text{per step}
 $$`,
-    flowDiagram: `# Prefill：整段算完，把每层的 K/V 留下来
-prompt :: [1, S_prompt, D] :: 整段输入，一次前向
-Q, K, V 投影 :: [1, H_kv, S_prompt, Dh] :: 只有 K、V 会被留下
-cache :: [L, 2, B, H_kv, S, Dh] :: 每层一份，显存随序列长度线性增长
-
-# Decode：每步只算新 token，历史 KV 从缓存拼
-token_t :: [1, 1, D] :: 当前步唯一的新输入
-+ q_t :: [1, H, 1, Dh] :: 查询，只有这一步用得上，不缓存
-+ k_t, v_t :: [1, H_kv, 1, Dh] :: 键值，追加到缓存末尾
-K = cat(K_cache, k_t) :: [1, H_kv, S+t, Dh] :: 拼接即可，历史部分完全不重算
-O = SDPA(q_t, K, V) :: [1, H, S+t, Dh] :: 一个 query 对整个历史
-$ 每步计算量恒定，不缓存则是 Σt = O(S²)
-> LLaMA 2 70B 在 4096 长度、fp16 下缓存约 80GB —— 比模型本身还大`,
+    flowDiagram: `flowchart TD
+  subgraph PF["Prefill：整段算完，把每层的 K/V 留下来"]
+    direction LR
+    p["prompt<br/>[1, S_prompt, D]"] --> proj["Q, K, V 投影<br/>[1, H_kv, S_prompt, D_h]<br/>只有 K、V 会被留下"] --> cache["cache<br/>[L, 2, B, H_kv, S, D_h]<br/>随序列长度线性增长"]
+  end
+  subgraph DC["Decode：每步只算新 token，历史 KV 从缓存拼"]
+    direction LR
+    t["token_t<br/>[1, 1, D]<br/>当前步唯一的新输入"] --> qt["q_t<br/>[1, H, 1, D_h]<br/>只有这一步用得上，不缓存"]
+    t --> kt["k_t, v_t<br/>[1, H_kv, 1, D_h]<br/>追加到缓存末尾"] --> cat["K = cat(K_cache, k_t)<br/>[1, H_kv, S+t, D_h]<br/>历史部分完全不重算"] --> att["O = SDPA(q_t, K, V)<br/>[1, H, S+t, D_h]<br/>一个 query 对整个历史"]
+    qt --> att
+  end`,
     code: `import torch, torch.nn as nn, torch.nn.functional as F, math
 
 class KVCacheAttention(nn.Module):
@@ -553,6 +531,7 @@ class KVCacheAttention(nn.Module):
       'GQA 减少 KV Cache (多个 Q 共享 KV)',
       '长序列推理的主要显存瓶颈',
       'PagedAttention (vLLM) 用分页管理 KV Cache 减少碎片',
+      '不缓存的代价: 每步要对全部历史重算，累计 Σt = O(S²)；LLaMA 2 70B 在 4096 长度、fp16 下缓存约 80GB，比模型本身还大',
     ],
     source: 'both',
   },
@@ -605,19 +584,15 @@ $$
 \text{MLA}: &\quad \text{KV cache}=C\qquad (C=512,\ D_h=128)
 \end{aligned}
 $$`,
-    flowDiagram: `# 只缓存低维潜变量，用的时候再恢复
-x :: [B, S, D] :: 输入
-c_kv = x·W_dkv :: [B, S, C] :: 下投影到潜空间，C 远小于 H·Dh
-> 进 cache 的只有 c_kv —— 压缩发生在存储维度上，不是头数上
-kv = c_kv·W_ukv :: [B, S, H·(Dh+Dr+Dh)] :: 用时上投影恢复
-split :: k_content, k_rope, v :: 内容分量与 RoPE 分量分开
-+ q_content :: [B, S, H, Dh] :: 同样先低秩压缩再上投影
-+ q_rope :: [B, S, H, Dr] :: 不压缩，单独留给 RoPE
-q = cat(q_content, q_rope) :: [B, S, H, Dh+Dr] :: 拼成完整的查询
-k = cat(k_content, k_rope) :: [B, S, H, Dh+Dr] :: 键同样拼接
-O = SDPA(q, k, v)·W_o :: [B, S, D] :: 之后与普通注意力完全一致
-$ Cache 从 2·G·Dh 降到 C：DeepSeek-V2 取 C=512，压缩比 10× 以上
-> RoPE 必须单独走不压缩的分量：它是位置相关的，挤进低秩空间会被压坏`,
+    flowDiagram: `flowchart LR
+  x["x<br/>[B, S, D]"] --> ckv["c_kv = x·W_dkv<br/>[B, S, C]<br/>进 cache 的只有这一项"]
+  ckv --> kv["kv = c_kv·W_ukv<br/>[B, S, H·(D_h+Dr+D_h)]<br/>用时上投影恢复"]
+  kv --> sp["split<br/>k_content / k_rope / v"]
+  x --> qc["q = cat(q_content, q_rope)<br/>[B, S, H, D_h+Dr]<br/>Q 也低秩，但不缓存"]
+  sp --> ck["k = cat(k_content, k_rope)<br/>[B, S, H, D_h+Dr]"]
+  ck --> o["O = SDPA(q, k, v)·W_o<br/>[B, S, D]"]
+  qc --> o
+  sp --> o`,
     code: `import torch, torch.nn as nn, torch.nn.functional as F, math
 
 class MLA(nn.Module):
@@ -655,6 +630,8 @@ class MLA(nn.Module):
       '压缩比可达 90%+ (vs GQA 75%)',
       'Q 也使用低秩投影，但不缓存（只用于当前 token）',
       'DeepSeek-V2 用 MLA + MoE 实现极高效率',
+      '压缩发生的位置: c_kv 是唯一进 cache 的东西 —— 压缩的是存储维度，不是头数（这是与 GQA 的本质区别）',
+      'RoPE 必须单独走不压缩的分量: 它是位置相关的，挤进低秩空间会被压坏',
     ],
     source: 'ckd0817',
   },
@@ -709,22 +686,18 @@ $$
 $$
 \mathcal{S}_t\subseteq\{s\le t\},\qquad k=2048,\qquad O(S^{2})\to O(S\,k)
 $$`,
-    flowDiagram: `# NSA：压缩 + 选择 + 滑窗，三路门控加权
-K, V :: [B, H, S, D] :: 输入
-+ 压缩分支 :: [B, H, S/l, D] :: mean_pool 按块大小 l 池化，给粗粒度全局
-+ 选择分支 :: top-n 块 :: 用压缩表示打分选出重要块，再取回这些块的原始 KV
-+ 滑窗分支 :: 最近 w 个 token :: 局部精确
-门控 g = σ(wᵀ·[q_t ; ...]) :: [B, H, 1] :: 学出来的加权系数
-o = Σ_b g_b · Attn(q, K_b, V_b) :: [B, H, S, D] :: 三路结果加权求和
-$ 复杂度 O(S²) → O(S·n)
-
-# DSA：一个极轻的 indexer 粗筛，只对 top-k 做真注意力
-q_t, k_s :: [B, H, S, D] :: 输入
-k_s = W^{K,l}·h_s :: [B, S, d^I] :: 轻量 key 投影，d^I 远小于 d
-I_{t,s} = Σ_j w_{t,j}·ReLU(q_{t,j}·k_s) :: [B, S, S] :: 给每个历史 token 打分
-top-k :: [B, S, k] :: 选中的 token 索引，其余全部丢掉
-MLA 注意力 :: [B, S, k] :: 只在这 k 个 token 上做真正的注意力
-$ 复杂度 O(S²) → O(S·k)，indexer 可以用 FP8 跑`,
+    flowDiagram: `flowchart TD
+  subgraph NSA["NSA：压缩 + 选择 + 滑窗，三路门控加权"]
+    direction LR
+    cmp["压缩分支<br/>[B, H, S/l, D]<br/>mean_pool 给粗粒度全局"] --> g["g = σ(wᵀ·[q_t ; ...])<br/>[B, H, 1]<br/>学出来的加权系数"]
+    sel["选择分支<br/>top-n 块<br/>聚焦重要中程区域"] --> g
+    win["滑窗分支<br/>最近 w 个 token<br/>局部精确"] --> g
+    g --> o1["o = Σ_b g_b·Attn(q, K_b, V_b)<br/>[B, H, S, D]"]
+  end
+  subgraph DSA["DSA：极轻的 indexer 粗筛，只对 top-k 做真注意力"]
+    direction LR
+    ks["k_s = W·h_s<br/>[B, S, d^I]<br/>d^I 远小于 d"] --> sc["I = Σ_j w_j·ReLU(q_j·k_s)<br/>[B, S, S]<br/>给每个历史 token 打分"] --> tk["top-k<br/>[B, S, k]<br/>其余全部丢掉"] --> att["MLA 注意力<br/>只在这 k 个 token 上做"]
+  end`,
     code: `import torch, torch.nn as nn, torch.nn.functional as F, math
 
 def compress_blocks(x, block_size):
@@ -838,14 +811,12 @@ $$
 \gamma,\beta\in\mathbb{R}^{D},\qquad
 \epsilon=10^{-5}
 $$`,
-    flowDiagram: `# 沿特征维归一化：每个 token 独立统计
-x :: [B, S, D] :: 残差流的输入
-μ = mean(x, -1, keepdim=True) :: [B, S, 1] :: 只沿最后一维求均值
-σ² = var(x, -1, unbiased=False) :: [B, S, 1] :: 用总体方差，不做贝塞尔校正
-x̂ = (x - μ) / √(σ² + ε) :: [B, S, D] :: 广播回原形状，每个 token 均值 0、方差 1
-y = x̂·γ + β :: [B, S, D] :: γ、β 都是可学习的 [D]，负责恢复尺度与偏移
-$ 统计量取自每个 token 自己的 D 维，与 batch 里其他样本无关
-> 训练与推理走同一条路径，不像 BatchNorm 需要维护滑动平均`,
+    flowDiagram: `flowchart TD
+  x["x<br/>[B, S, D]<br/>残差流的输入"] --> mu["μ = mean(x, -1, keepdim)<br/>[B, S, 1]"]
+  x --> va["σ² = var(x, -1, unbiased=False)<br/>[B, S, 1]"]
+  mu --> nx["x̂ = (x − μ) / √(σ² + ε)<br/>[B, S, D]<br/>每个 token 均值 0、方差 1"]
+  va --> nx
+  nx --> y["y = x̂·γ + β<br/>[B, S, D]<br/>γ、β 都是可学习的 [D]"]`,
     code: `import torch, torch.nn as nn
 
 class LayerNorm(nn.Module):
@@ -867,6 +838,7 @@ class LayerNorm(nn.Module):
       'gamma(缩放) 和 beta(偏移) 两个可学习参数',
       'Pre-Norm: x = x + SubLayer(LN(x)) — 现代 LLM 标配',
       'Post-Norm: x = LN(x + SubLayer(x)) — 原始 Transformer',
+      '与 batch 无关: 统计量取自每个 token 自己的 D 维；训练与推理走同一条路径，不像 BatchNorm 要维护滑动平均',
     ],
     source: 'both',
   },
@@ -908,14 +880,13 @@ $$
 \text{RMSNorm}: &\quad \frac{x}{\sqrt{\text{mean}(x^{2})+\epsilon}}\odot\gamma
 \end{aligned}
 $$`,
-    flowDiagram: `# 只压尺度，不管中心
-x :: [B, S, D] :: 残差流的输入
-x32 = x.float() :: [B, S, D] :: 升 fp32，bf16 下 x² 动态范围不够
-ms = mean(x32², -1, keepdim=True) :: [B, S, 1] :: 均方，只沿特征维
-r = rsqrt(ms + ε) :: [B, S, 1] :: ε 取 1e-5，纯数值保护
-y = (x32·r).type_as(x)·γ :: [B, S, D] :: 只有一个可学习参数 γ: [D]
-$ 相比 LayerNorm 少了求均值与减均值，归约次数减半、参数量减半
-> LLaMA、PaLM、Qwen 都把它放在每个子层之前`,
+    flowDiagram: `flowchart TD
+  x["x<br/>[B, S, D]"] --> up["x32 = x.float()<br/>bf16 下 x² 动态范围不够"]
+  up --> ms["ms = mean(x32², -1, keepdim)<br/>[B, S, 1]"]
+  ms --> r["r = rsqrt(ms + ε)<br/>[B, S, 1]"]
+  up --> mul["x32·r<br/>[B, S, D]"]
+  r --> mul
+  mul --> y["y = (·).type_as(x)·γ<br/>[B, S, D]<br/>只有一个可学习参数"]`,
     code: `import torch, torch.nn as nn
 
 class RMSNorm(nn.Module):
@@ -937,6 +908,7 @@ class RMSNorm(nn.Module):
       'rsqrt 比 1/sqrt 更高效（硬件优化）',
       '在 float32 下计算保证数值稳定性',
       'LLaMA, Mistral, PaLM, Gemma 等都用 RMSNorm',
+      '相比 LayerNorm 少一次求均值与减均值: 归约次数减半，也没有 β；LLaMA、PaLM、Qwen 都把它放在每个子层之前',
     ],
     source: 'both',
   },
@@ -986,18 +958,16 @@ $$
 $$
 \theta_i=10000^{-2i/d},\qquad i=0,\dots,\frac{d}{2}-1
 $$`,
-    flowDiagram: `# 预计算：每个位置、每个维度对对应的旋转角
-inv_freq = 1/10000^(2i/d) :: [d/2] :: i = 0..d/2-1，靠后的维度对频率更低
-angles = outer(pos, inv_freq) :: [S, d/2] :: 位置 × 维度对
-cos, sin = cos(angles), sin(angles) :: [S, d] :: 复制一份拼成完整维度，好与 [B,S,H,D] 广播
-
-# 旋转：只作用在 Q、K 上
-rotate_half(x) :: cat(-x₂, x₁) :: 后半段取负拼到前面，等价于旋转 90°
-+ q' = q·cos + rotate_half(q)·sin :: [B, S, H, D] :: 查询被旋转
-+ k' = k·cos + rotate_half(k)·sin :: [B, S, H, D] :: 键被旋转同样的角度
-> v 不参与旋转：它是被加权求和的内容，本身与位置无关
-$ (R_m q)·(R_n k) = qᵀ·R_{n-m}·k —— 点积里只剩相对位置 n - m
-> 基频 10000 是超参，直接外推到远超训练长度时高频维度会震荡，所以有 NTK-aware、线性插值等改法`,
+    flowDiagram: `flowchart TD
+  subgraph PRE["预计算：每个位置、每个维度对对应的旋转角"]
+    direction LR
+    f["inv_freq = 1/10000^(2i/d)<br/>[d/2]<br/>靠后的维度对频率更低"] --> ang["angles = outer(pos, inv_freq)<br/>[S, d/2]"] --> cs["cos, sin<br/>[S, d]<br/>与 [B,S,H,D] 广播"]
+  end
+  subgraph ROT["旋转：只作用在 Q、K 上"]
+    direction LR
+    q["q<br/>[B, S, H, D]"] --> qr["q′ = q·cos + rotate_half(q)·sin<br/>[B, S, H, D]"]
+    k["k<br/>[B, S, H, D]"] --> kr["k′ = k·cos + rotate_half(k)·sin<br/>[B, S, H, D]"]
+  end`,
     code: `import torch, torch.nn as nn
 
 class RotaryEmbedding(nn.Module):
@@ -1073,13 +1043,8 @@ $$
 \text{Attention}: &\quad 4D^{2}
 \end{aligned}
 $$`,
-    flowDiagram: `# 两层全连接 + 中间一层逐元素非线性
-x :: [B, S, D] :: 残差流的输入
-h = x·W₁ᵀ :: [B, S, 4D] :: 上投影，中间维度通常取 4 倍
-a = ReLU(h) :: [B, S, 4D] :: 逐元素 max(0, x)，唯一引入非线性的地方
-y = a·W₂ᵀ :: [B, S, D] :: 下投影回残差流维度，才能与输入相加
-$ 参数量 8D²，是注意力 4D² 的两倍，约占 Transformer 的 2/3
-> 逐 token 独立：同一个 W₁ 作用在所有位置上，没有任何跨 token 交互`,
+    flowDiagram: `flowchart LR
+  x["x<br/>[B, S, D]<br/>残差流的输入"] --> h["h = x·W₁ᵀ<br/>[B, S, 4D]<br/>上投影，中间维度 4 倍"] --> a["a = ReLU(h)<br/>[B, S, 4D]<br/>唯一引入非线性的地方"] --> y["y = a·W₂ᵀ<br/>[B, S, D]<br/>下投影回残差流"]`,
     code: `import torch, torch.nn as nn, torch.nn.functional as F
 
 class FFN(nn.Module):
@@ -1097,6 +1062,7 @@ class FFN(nn.Module):
       '占 Transformer 参数量的 2/3',
       '现代 LLM 多用 SwiGLU 替代标准 FFN+ReLU',
       'MoE 本质上是对 FFN 层的稀疏化',
+      '逐 token 独立: 同一个 W₁ 作用在所有位置上，没有任何跨 token 交互 —— 跨 token 的信息交换全部由注意力负责',
     ],
     source: 'both',
   },
@@ -1140,14 +1106,12 @@ $$
 \text{FFN}: &\quad 8D^{2}
 \end{aligned}
 $$`,
-    flowDiagram: `# 门控 FFN：两路上投影，一路当门
-x :: [B, S, D] :: 残差流的输入
-+ gate = SiLU(x·W_gateᵀ) :: [B, S, d_ff] :: 门，过激活
-+ up = x·W_upᵀ :: [B, S, d_ff] :: 内容，不过激活
-g = gate ⊙ up :: [B, S, d_ff] :: 逐元素相乘，门决定每一维通过多少
-y = g·W_downᵀ :: [B, S, D] :: 下投影回残差流维度
-$ d_ff 取 8/3·D，3·D·d_ff ≈ 8D²，与标准 FFN 参数量持平
-> SiLU(x) = x·σ(x)：σ 是 0~1 的开关，x 是内容，所以叫「自带门控」`,
+    flowDiagram: `flowchart LR
+  x["x<br/>[B, S, D]"] --> gate["gate = SiLU(x·W_gateᵀ)<br/>[B, S, d_ff]<br/>门，过激活"]
+  x --> up["up = x·W_upᵀ<br/>[B, S, d_ff]<br/>内容，不过激活"]
+  gate --> g["g = gate ⊙ up<br/>[B, S, d_ff]<br/>逐元素相乘"]
+  up --> g
+  g --> y["y = g·W_downᵀ<br/>[B, S, D]<br/>下投影回残差流"]`,
     code: `import torch, torch.nn as nn, torch.nn.functional as F
 
 class SwiGLU(nn.Module):
@@ -1296,15 +1260,12 @@ $$
 \text{SFT}: &\quad \text{label}_{\text{prompt}}=-100,\qquad \text{ignore\_index}=-100
 \end{aligned}
 $$`,
-    flowDiagram: `# shift 对齐：位置 t 的输出预测位置 t+1 的 token
-logits :: [B, S, V] :: 每个位置对整个词表的打分
-labels :: [B, S] :: 真实 token 下标，prompt 段置 -100
-+ 预测 :: logits[:, :-1] → [B, S-1, V] :: 丢掉最后一个位置，它没有下一个 token
-+ 目标 :: labels[:, 1:] → [B, S-1] :: 丢掉第一个位置，它没有被谁预测
-logp = log_softmax(logits, -1) :: [B, S-1, V] :: 直接取对数概率，避免下溢
-loss = -mean(logp[range, 目标]) :: 只取正确 token 那一项，结果是标量
-$ 梯度 = softmax(logits) - one_hot(目标)，预测越离谱梯度越大
-> SFT 时 prompt 段的 label 置 -100，ignore_index 把它们排除出分母`,
+    flowDiagram: `flowchart TD
+  logits["logits<br/>[B, S, V]<br/>每个位置对整个词表的打分"] --> sh1["logits[:, :-1]<br/>[B, S−1, V]<br/>丢掉最后一个位置"]
+  labels["labels<br/>[B, S]<br/>prompt 段置 -100"] --> sh2["labels[:, 1:]<br/>[B, S−1]<br/>丢掉第一个位置"]
+  sh1 --> lp["logp = log_softmax(logits, -1)<br/>[B, S−1, V]"]
+  sh2 --> loss["loss = −mean(logp[range, 目标])<br/>只取正确 token 那一项，标量"]
+  lp --> loss`,
     code: `import torch, torch.nn.functional as F
 
 def lm_loss(logits, labels, ignore_index=-100):
@@ -1325,6 +1286,7 @@ def lm_loss(logits, labels, ignore_index=-100):
       'ignore_index=-100 的位置不参与梯度',
       'Pretrain: 所有 token 参与 loss',
       'SFT: prompt 部分 label 设为 -100，只算 response',
+      '梯度形式: ∂L/∂logits = softmax(logits) − one_hot(目标)，预测越离谱梯度越大',
     ],
     source: 'both',
   },
@@ -1367,13 +1329,14 @@ $$
 $$
 y_w:\ \text{chosen},\qquad y_l:\ \text{rejected},\qquad \beta\in[0.1,\ 0.5]
 $$`,
-    flowDiagram: `# 隐式奖励：策略相对参考策略的对数比率
-+ chosen :: policy_logp_w - ref_logp_w = r_w :: 优选回答的隐式奖励
-+ rejected :: policy_logp_l - ref_logp_l = r_l :: 拒绝回答的隐式奖励
-logits = r_w - r_l :: chosen 比 rejected 好多少
-loss = -logsigmoid(β · logits) :: logits 越大 loss 越小
-$ r = β·log(π/π_ref) + 常数 —— 把 RLHF 的闭式解代回 Bradley-Terry
-> 参考模型的 logp 必须 no_grad，它只是固定锚点`,
+    flowDiagram: `flowchart TD
+  pw["policy_logp_w"] --> rw["r_w = policy_logp_w − ref_logp_w<br/>优选回答的隐式奖励"]
+  pl["policy_logp_l"] --> rl["r_l = policy_logp_l − ref_logp_l<br/>拒绝回答的隐式奖励"]
+  rf["ref_logp<br/>必须 no_grad，只是固定锚点"] --> rw
+  rf --> rl
+  rw --> d["Δ = r_w − r_l<br/>chosen 比 rejected 好多少"]
+  rl --> d
+  d --> loss["loss = −logsigmoid(β·Δ)<br/>Δ 越大 loss 越小"]`,
     code: `import torch, torch.nn.functional as F
 
 def dpo_loss(policy_chosen_logps, policy_rejected_logps,
@@ -1396,6 +1359,7 @@ def dpo_loss(policy_chosen_logps, policy_rejected_logps,
       'β 控制偏离参考模型程度，通常 0.1-0.5',
       '比 PPO 简单很多: 不需要 reward model 和 critic',
       '变体: IPO, KTO, ORPO, SimPO 等',
+      '参考模型的 logp 必须 no_grad: 它只是固定锚点，只有策略一侧回传梯度',
     ],
     source: 'both',
   },
@@ -1444,17 +1408,13 @@ A_t>0:\ &\quad r_t>1+\epsilon\ \Rightarrow\ r_tA_t\ \text{capped at}\ (1+\epsilo
 A_t<0:\ &\quad r_t<1-\epsilon\ \Rightarrow\ r_tA_t\ \text{floored at}\ (1-\epsilon)A_t
 \end{aligned}
 $$`,
-    flowDiagram: `# 截断重要性比率，给更新幅度设上界
-old_logp :: π_old 对已采样动作的对数概率
-new_logp :: π_new 的对数概率，需要梯度
-ratio = exp(new_logp - old_logp) :: 重要性采样比率，用对数相减更稳
-+ unclipped :: ratio · A :: 不加约束的更新量
-+ clipped :: clip(ratio, 1-ε, 1+ε) · A :: 比率被夹住后的更新量
-loss = -mean(min(unclipped, clipped)) :: 取更小的那个，得到悲观下界
-! A > 0 时 ratio 涨过 1+ε 停止奖励，防过度优化
-! A < 0 时 ratio 跌破 1-ε 停止惩罚，防过度惩罚
-$ ε 通常取 0.2，一步更新幅度便有了显式上界
-> ratio 必须用旧策略的 logp 现算，rollout 与更新要严格配对`,
+    flowDiagram: `flowchart TD
+  old["old_logp<br/>π_old，rollout 时算"] --> ratio["ratio = exp(new_logp − old_logp)<br/>重要性采样比率，取对数相减更稳"]
+  new["new_logp<br/>π_new，需要梯度"] --> ratio
+  ratio --> unc["unclipped = ratio·A<br/>不加约束的更新量"]
+  ratio --> cl["clipped = clip(ratio, 1−ε, 1+ε)·A<br/>比率被夹住后的更新量"]
+  unc --> loss["loss = −mean(min(unclipped, clipped))<br/>取更小的，得到悲观下界"]
+  cl --> loss`,
     code: `import torch
 
 def ppo_loss(old_logp, new_logp, advantages, eps=0.2):
@@ -1476,6 +1436,7 @@ def ppo_loss(old_logp, new_logp, advantages, eps=0.2):
       'A<0: 防止 ratio 过小 → 停止惩罚',
       'ChatGPT/InstructGPT 的 RLHF 核心算法',
       '需要 reward model + critic model + reference model',
+      'ε 通常取 0.2；ratio 必须用旧策略的 logp 现算，rollout 与更新要严格配对',
     ],
     source: 'ckd0817',
   },
@@ -1609,15 +1570,8 @@ $$
 \qquad
 \epsilon=3\times10^{-4}
 $$`,
-    flowDiagram: `# 把重要性比率从 token 级提到序列级
-逐 token 对数比 :: [B, G, T] :: log(π_θ / π_old)，每个 token 一个
-Σ_t :: 按 mask 求和 → [B, G] :: padding 不参与
-/ |y_i| :: 长度归一化 :: 让长短序列可比
-s_i = exp(·) :: [B, G] :: 每条序列一个标量比率
-目标 :: min(s_i·Â_i, clip(s_i, 1-ε, 1+ε)·Â_i) :: 整条序列只 clip 一次
-$ 组内优势 Â_i = (r_i - mean(r)) / (std(r) + ε)，与 GRPO 完全一致
-> 奖励是序列级的标量，比率就该是序列级的标量 —— 粒度对齐
-> GRPO 的 token 级比率在 MoE 上会放大路由抖动，是训练发散的主因之一`,
+    flowDiagram: `flowchart LR
+  tok["逐 token 对数比<br/>[B, G, T]<br/>log(π_θ / π_old)"] --> sum["Σ_t<br/>按 mask 求和，padding 不参与"] --> len["/ |y_i|<br/>长度归一化，让长短序列可比"] --> s["s_i = exp(·)<br/>[B, G]<br/>每条序列一个标量比率"] --> obj["min(s_i·Â_i, clip(s_i, 1−ε, 1+ε)·Â_i)<br/>整条序列只 clip 一次"]`,
     code: `import torch
 
 def sequence_ratio(per_token_logp_new, per_token_logp_old, completion_mask):
@@ -1695,17 +1649,13 @@ $$
 $$
 \text{overlong shaping}:\quad \tilde{R}(y)=R(y)-\alpha\max\!\left(0,\ |y|-L_{\max}\right)
 $$`,
-    flowDiagram: `# 一个 batch 里的若干组，先过滤再更新
-! ✗ group_1  rewards [1,1,1,1] → std = 0 → Â 全 0，无梯度信号
-! ✗ group_2  rewards [0,0,0,0] → std = 0 → Â 全 0，无梯度信号
-! ✓ group_3  rewards [1,0,1,0] → Â 有正有负，保留
-> 动态采样：只走有梯度信号的组，全对全错的组等于白算
-比率 ρ_{i,t} = exp(new_logp - old_logp) :: [B, G, T] :: 仍然是逐 token 的
-clip-higher :: clip(ρ, 1-ε_low, 1+ε_high) :: ε_high > ε_low，给低概率 token 留上升空间
-长度惩罚 :: R̃(y) = R(y) - α·max(0, |y| - L_max) :: 惩罚被截断的超长回答
-loss = -Σ(保留组的全部 token) / Σ|y_i| :: 分母是总 token 数，不是每组平均
-$ clip-higher 抬高的是熵的下界，缓解输出同质化
-> 四个改动互不耦合，都不动 GRPO 的骨架`,
+    flowDiagram: `flowchart TD
+  g["batch 里的各组<br/>组内奖励 r_i"] --> pen["长度惩罚<br/>R̃ = R − α·max(0, |y| − L_max)"]
+  pen --> filt["动态采样<br/>丢掉 Â 全为 0 的组<br/>全对 / 全错等于白算"]
+  filt --> adv["组内优势 Â_i<br/>只留有正有负的组"]
+  adv --> rho["ρ_{i,t} = exp(new_logp − old_logp)<br/>[B, G, T]<br/>仍然是逐 token 的"]
+  rho --> clip["clip-higher<br/>clip(ρ, 1−ε_low, 1+ε_high)<br/>上界比下界宽"]
+  clip --> loss["loss = −Σ(保留组的全部 token) / Σ|y_i|<br/>分母是总 token 数"]`,
     code: `import torch
 
 def overlong_reward_shaping(rewards, lengths, max_len, alpha=1.0):
@@ -1788,19 +1738,13 @@ $$
 \beta=0.5 &\Rightarrow \text{standard JSD}
 \end{aligned}
 $$`,
-    flowDiagram: `# 两条路的对比
-! ✗ 离线蒸馏：教师生成 y_T，学生拟合 y_T，训练分布 ≠ 推理分布
-! ✓ on-policy 蒸馏：学生自己采样，教师在自己的轨迹上逐 token 打分
-# 学生采样：监督落在学生真正会走的路径上
-prompt x :: 同一批输入
-y_S ~ π_S(·|x) :: [B, T] :: 学生采样得到，带着自己的错误
-# 教师打分：逐 token 给出完整分布
-teacher_logits = π_T(·|x, y_<t) :: [B, T, V] :: 必须 detach / no_grad
-student_logits = π_S(·|x, y_<t) :: [B, T, V] :: 需要梯度
-per_token_loss = D(p_T ‖ p_S) :: [B, T] :: 逐 token 散度
-loss = mean(per_token_loss) :: 按有效 token 数平均，得到标量
-$ β=0 → 前向 KL（mode-covering）、β=1 → 反向 KL（mode-seeking）、β=0.5 → 标准 JSD
-> 教师的逐 token 分布本身就是稠密奖励，不需要 reward model`,
+    flowDiagram: `flowchart TD
+  x["prompt x"] --> ys["y_S ~ π_S(·|x)<br/>[B, T]<br/>学生自己采样，带着自己的错误"]
+  ys --> tl["teacher_logits = π_T(·|x, y_&lt;t)<br/>[B, T, V]<br/>必须 detach / no_grad"]
+  ys --> sl["student_logits = π_S(·|x, y_&lt;t)<br/>[B, T, V]<br/>需要梯度"]
+  tl --> l["per_token_loss = D(p_T ‖ p_S)<br/>[B, T]<br/>逐 token 散度"]
+  sl --> l
+  l --> loss["loss = mean(per_token_loss)<br/>按有效 token 数平均"]`,
     code: `import torch, torch.nn.functional as F
 
 def generalized_jsd(student_logits, teacher_logits, beta=1.0, temperature=1.0):
@@ -1893,13 +1837,17 @@ $$
 $$
 c\in\{\text{reference answer},\ \text{hint},\ \text{strategy name},\ \text{tool output},\ \text{user correction}\}
 $$`,
-    flowDiagram: `# 同一份权重 θ，两条路径
-学生路径 :: x → π_θ(·|x) :: 需要真采样 rollout，带着自己的错误
-教师路径 :: x ⊕ c → π_θ(·|x ⊕ c) :: 同一份权重多拼一段上下文，no_grad
-c :: 参考答案 / 关键提示 / 解题策略 / 工具返回 / 用户纠正
-逐 token 反向 KL :: KL(π_θ(·|x, y_<t) ‖ π_θ(·|x ⊕ c, y_<t)) :: 只在 y 自己的 token 上回传
-$ 教师不是「更强的模型」，而是「信息更全的同一个自己」
-> 师生共享参数：不需要额外的教师显存，也不存在能力差距导致的负迁移`,
+    flowDiagram: `flowchart TD
+  subgraph STU["学生路径：真采样 rollout，带着自己的错误"]
+    direction LR
+    x1["x"] --> p1["π_θ(·|x)<br/>需要梯度"]
+  end
+  subgraph TEA["教师路径：同一份权重，多拼一段特权上下文"]
+    direction LR
+    x2["x ⊕ c<br/>参考答案 / 提示 / 工具返回"] --> p2["π_θ(·|x ⊕ c)<br/>no_grad"]
+  end
+  p1 --> kl["逐 token 反向 KL<br/>KL(p_student ‖ p_teacher)<br/>只在 y 自己的 token 上回传"]
+  p2 --> kl`,
     code: `import torch, torch.nn.functional as F
 
 @torch.no_grad()
@@ -1981,17 +1929,13 @@ $$
 $$
 \eta=3\times10^{-4},\qquad (\beta_1,\beta_2)=(0.9,\ 0.95),\qquad \lambda=0.1,\qquad \epsilon=10^{-8}
 $$`,
-    flowDiagram: `# 一阶矩与二阶矩
-g_t :: 当前梯度
-m_t = β₁·m + (1-β₁)·g_t :: 一阶矩，动量
-v_t = β₂·v + (1-β₂)·g_t² :: 二阶矩，梯度平方的滑动平均
-# 偏差修正
-m̂ = m / (1-β₁ᵗ) :: 补偿前几步从 0 起步导致的偏小
-v̂ = v / (1-β₂ᵗ)
-# 更新：自适应梯度步 + 解耦的权重衰减
-θ = θ - lr·(m̂/(√v̂ + ε) + λ·θ) :: 两项相加，衰减项不经过任何归一化
-$ Adam 把 λθ 加进梯度，再被 1/√v̂ 归一化，衰减强度因此失控
-> LLM 标配：lr = 3e-4、betas = (0.9, 0.95)、weight_decay = 0.1`,
+    flowDiagram: `flowchart TD
+  g["g_t<br/>当前梯度"] --> m["m_t = β₁·m + (1−β₁)·g_t<br/>一阶矩，动量"]
+  g --> v["v_t = β₂·v + (1−β₂)·g_t²<br/>二阶矩，梯度平方的滑动平均"]
+  m --> mh["m̂ = m / (1−β₁ᵗ)<br/>补偿前几步从 0 起步"]
+  v --> vh["v̂ = v / (1−β₂ᵗ)<br/>偏差修正"]
+  mh --> upd["θ = θ − lr·(m̂/(√v̂ + ε) + λ·θ)<br/>两个加号：自适应步 + 解耦衰减"]
+  vh --> upd`,
     code: `import torch
 
 class AdamW:
@@ -2025,6 +1969,7 @@ class AdamW:
       '偏差修正解决初始阶段 m,v 偏小的问题',
       'LLM 标配: lr=3e-4, betas=(0.9,0.95), wd=0.1',
       '配合 cosine schedule with warmup 使用',
+      '解耦为什么重要: Adam 把 λθ 加进梯度再被 1/√v̂ 归一化，衰减强度会随梯度尺度失控；LLM 标配 lr=3e-4、betas=(0.9, 0.95)、weight_decay=0.1',
     ],
     source: 'cdhx',
   },
@@ -2076,23 +2021,20 @@ W_q\leftarrow\sqrt{\gamma}\,W_q,\qquad
 W_k\leftarrow\sqrt{\gamma}\,W_k,\qquad
 \tau\approx 100
 $$`,
-    flowDiagram: `# 参数分组：Muon 只吃 2D 隐藏层权重
-+ emb / lm_head / bias / norm :: 交给 AdamW
-+ attn & mlp 的 2D 权重矩阵 :: 交给 Muon
-
-# Muon 单步
-G :: [m, n] :: 本步梯度
-M = μM + G :: [m, n] :: 累积动量（Nesterov 变体用 G + μ·M）
-X = M / (‖M‖_F + ε) :: [m, n] :: 归一化，保证谱范数 ≤ 1，否则迭代发散
-NS5 :: 重复 5 次 X ← a·X + (b·A + c·A²)·X，其中 A = X·Xᵀ
-O :: [m, n] :: 奇异值 ≈ 1，逼近极分解 UVᵀ
-$ θ ← θ - η·O：每个奇异方向走同样大的一步
-> 系数 (a, b, c) = (3.4445, -4.7750, 2.0315)，5 步后奇异值落在约 [0.5, 1.5]
-
-# MuonClip 额外一步（周期性执行）
-S_max :: 每个 head 在本 batch 上的最大注意力 logit
-! S_max > τ → γ = τ / S_max，W_q ← √γ·W_q，W_k ← √γ·W_k
-> 典型 τ = 100。logit ∝ W_q·W_kᵀ，缩放一次权重等于缩放 γ 倍 logit，所以取 √γ`,
+    flowDiagram: `flowchart TD
+  subgraph GRP["参数分组：Muon 只吃 2D 隐藏层权重"]
+    direction LR
+    e["emb / lm_head / bias / norm"] --> ad["AdamW"]
+    w["attn 与 mlp 的 2D 权重矩阵"] --> mu["Muon"]
+  end
+  subgraph STEP["Muon 单步"]
+    direction LR
+    g["G<br/>[m, n] 本步梯度"] --> mom["M = μM + G<br/>[m, n] 累积动量"] --> nrm["X = M / (‖M‖_F + ε)<br/>谱范数 ≤ 1，否则迭代发散"] --> ns["NS5：重复 5 次<br/>X ← a·X + (b·A + c·A²)·X"] --> o["O<br/>[m, n] 奇异值 ≈ 1"]
+  end
+  subgraph CLIP["MuonClip：周期性额外一步"]
+    direction LR
+    sm["S_max<br/>本 batch 最大注意力 logit"] --> sc["γ = τ / S_max<br/>W_q ← √γ·W_q，W_k ← √γ·W_k"]
+  end`,
     code: `import torch
 
 def zeropower_via_newtonschulz5(G, steps=5, eps=1e-7):
@@ -2160,6 +2102,7 @@ def qk_clip_(model, tau=100.0):
       '为什么是 √γ: logit 正比于 W_q·W_kᵀ，放缩一次权重，logit 就被放缩 γ 倍，所以权重取 √γ',
       'QK-Clip 会自己退场: 训练早期生效，模型稳定后 S_max 不再超阈值，机制自动不再触发',
       '实测收益: 相比 AdamW 约有 2× token 效率；正则与 RMS 对齐后 Adam 的超参可以直接迁移',
+      'MuonClip 的阈值: 典型 τ = 100；logit 正比于 W_q·W_kᵀ，缩放一次权重等于缩放 γ 倍 logit，所以取 √γ',
     ],
     source: 'original',
   },
@@ -2211,15 +2154,11 @@ $$
 \qquad
 W_{\text{new}}=W_0+\frac{\alpha}{r}BA\ \ \text{(mergeable at inference)}
 $$`,
-    flowDiagram: `# 主干冻结，旁路低秩可训练
-x :: [B, S, k] :: 输入
-W₀ :: [d, k] :: 预训练权重，冻结
-+ 主干 :: W₀x :: 冻结，不产生梯度
-+ 旁路 :: dropout → A[r,k] → B[d,r] → (B·A)x · (α/r) :: 只训练这两个小矩阵
-h = W₀x + (B·A)x·(α/r) :: [B, S, d] :: 两条路相加
-$ 可训练参数从 d·k 降到 r·(d+k)，而 r ≪ min(d, k)
-> B 零初始化 ⇒ 初始 BA = 0，模型一开始与原模型逐位一致
-> 推理时可合并：W_new = W₀ + B·A·(α/r)，零额外开销`,
+    flowDiagram: `flowchart LR
+  x["x<br/>[B, S, k]"] --> main["W₀x<br/>主干冻结，不产生梯度"]
+  x --> drop["dropout"] --> a["A<br/>[r, k]"] --> b["B<br/>[d, r]"] --> ba["(B·A)x·(α/r)<br/>只训练这两个小矩阵"]
+  main --> h["h = W₀x + (B·A)x·(α/r)<br/>[B, S, d]"]
+  ba --> h`,
     code: `import torch, torch.nn as nn, math
 
 class LoRALinear(nn.Module):
@@ -2251,6 +2190,7 @@ class LoRALinear(nn.Module):
       '推理时可 merge: W = W + BA·scaling → 无额外开销',
       '通常只应用于 Q 和 V 的投影矩阵',
       'QLoRA = LoRA + 4bit 量化，进一步降低显存',
+      '参数量: 可训练参数从 d·k 降到 r·(d+k)，而 r ≪ min(d, k)',
     ],
     source: 'both',
   },
@@ -2298,15 +2238,13 @@ $$
 $$
 \text{top-}p:\quad \mathcal{S}_p=\min\left\{V'\subseteq V:\ \sum_{i\in V'}p_i\ge p\right\}
 $$`,
-    flowDiagram: `# 三步：调形状 → 截长尾 → 采样
-logits :: [V] :: 模型对词表的原始打分
-logits = logits / T :: [V] :: 温度只做一次除法，却改变整个分布的熵
-+ Top-k :: 取最大的 k 个，其余置 -inf :: 固定数量截断
-+ Top-p :: 排序 → cumsum → 累积超过 p 的置 -inf :: 候选集随分布陡峭程度伸缩
-probs = softmax(logits) :: [V] :: 被截掉的位置概率为 0
-next_token = multinomial(probs) :: 下一个 token :: 只在留下的候选里采样
-$ T<1 更确定、T>1 更随机、T→0 退化成 greedy
-> 实践中常组合：温度在最前，Top-k 保底，Top-p 收缩`,
+    flowDiagram: `flowchart TD
+  l["logits<br/>[V]<br/>模型对词表的原始打分"] --> t["logits / T<br/>[V]<br/>只做一次除法，却改变整个分布的熵"]
+  t --> tk["Top-k<br/>取最大的 k 个，其余置 −inf<br/>固定数量截断"]
+  t --> tp["Top-p<br/>排序 → cumsum → 累积超 p 的置 −inf<br/>候选集随陡峭程度伸缩"]
+  tk --> sm["probs = softmax(logits)<br/>[V]<br/>被截掉的位置概率为 0"]
+  tp --> sm
+  sm --> nt["next_token = multinomial(probs)<br/>只在留下的候选里采样"]`,
     code: `import torch, torch.nn.functional as F
 
 def top_k_top_p_sampling(logits, temperature=0.7, top_k=50, top_p=0.9):
@@ -2394,17 +2332,12 @@ g\leftarrow\frac{\text{cast}\!\left(g_{\text{FP16}}\right)}{S},
 \qquad
 \text{BF16}:\ e_{\text{bits}}=8\ \Rightarrow\ S=1
 $$`,
-    flowDiagram: `# 计算走半精度，参数留全精度
-FP32 主权重 :: 唯一被更新的真身
-FP16 权重 :: 每次前向前从主权重 cast 一份
-前向 :: FP16 :: 激活与权重都是半精度
-loss :: FP16 :: 前向的输出，数值偏小
-loss × scale :: 先把 loss 放大 2^k 倍，梯度跟着抬出下溢区
-FP16 梯度 :: 数值已被放大到安全范围
-cast + 除以 scale :: FP32 梯度 :: 恢复真实尺度后转回 fp32
-update :: FP32 主权重 :: 高精度累加，误差不写回主权重
-$ FP32 是 1+8+23 位；FP16 是 1+5+10；BF16 是 1+8+7
-> bf16 指数位与 fp32 相同，动态范围足够，因此不需要 loss scaling`,
+    flowDiagram: `flowchart TD
+  w32["FP32 主权重<br/>唯一被更新的真身"] --> cast["cast<br/>每次前向前复制一份"] --> w16["FP16 权重"]
+  w16 --> fwd["前向<br/>FP16 激活与权重"] --> ls["loss<br/>FP16，数值偏小"]
+  ls --> scl["loss × scale<br/>放大 2^k 倍，梯度跟着抬出下溢区"] --> bwd["反向<br/>FP16 梯度，已在安全范围"]
+  bwd --> uns["cast + 除以 scale<br/>FP32 梯度，恢复真实尺度"] --> upd["update<br/>FP32 高精度累加"]
+  upd --> w32`,
     code: `import torch
 
 # PyTorch 原生 AMP (Automatic Mixed Precision)
@@ -2471,14 +2404,15 @@ $$
 $$
 \text{checkpoints}=\sqrt{L},\qquad \text{time overhead}\approx 20\%
 $$`,
-    flowDiagram: `# 标准训练：全部激活都留着
-+ 标准 :: Layer₁ → act₁ → Layer₂ → act₂ → … → Layer_L → act_L :: 每层激活全部保存
-! ✗ 标准代价：激活显存 O(L)，层数一多就成了显存大头
-! ✓ 检查点：只保存 √L 份，段内激活反向时重算
-Layer₁ → act₁* → Layer₂ → Layer₃ → act₃* → … :: 带 * 的是检查点
-! 反向时从最近的检查点重跑一次前向，把段内激活重建出来
-$ 激活显存 O(L) → O(√L)，代价是训练时间 +20%
-> 省下来的显存可以直接换成更大的 batch 或更长的序列`,
+    flowDiagram: `flowchart TD
+  subgraph S1["标准训练：每层激活全部保存"]
+    direction LR
+    a["Layer₁ → act₁ → Layer₂ → act₂ → … → Layer_L → act_L<br/>激活显存 O(L)，层数一多就是显存大头"]
+  end
+  subgraph S2["梯度检查点：只保存 √L 份，段内激活反向时重算"]
+    direction LR
+    b["Layer₁ → act₁* → Layer₂ → Layer₃ → act₃* → …<br/>带 * 的是检查点；反向时从最近的检查点重跑一次前向"]
+  end`,
     code: `import torch
 from torch.utils.checkpoint import checkpoint
 
@@ -2508,6 +2442,7 @@ class CheckpointBlock(nn.Module):
       'HuggingFace 模型一行开启: gradient_checkpointing=True',
       '常与 LoRA 配合: LoRA 减少参数 + 检查点减少激活',
       'use_reentrant=False 是新版推荐设置',
+      '省下来的显存可以直接换成更大的 batch 或更长的序列',
     ],
     source: 'cdhx',
   },
@@ -2563,18 +2498,11 @@ $$
 \text{weights }128\times128,\qquad
 \text{accumulate in FP32}
 $$`,
-    flowDiagram: `# 整张量共用一个 scale：离群值把所有正常值拖下水
-x :: [4096] :: 含离群值 1200
-scale = amax / 448 :: 2.68 :: 为了装下 1200，只能把范围拉到最大
-! ✗ 正常值 ~1.0 除以 2.68 只剩 0.37，3 位尾数不够用，精度崩了
-# 块级缩放：每块自己算 amax
-+ block_0 :: amax = 1.2 → s = 0.0027 :: 块内共享一个 scale
-+ block_1 :: amax = 0.9 → s = 0.0020
-+ block_7 :: amax = 1200 → s = 2.68 :: 离群值只影响自己这一块
-x_q = (x / s).to(fp8_e4m3) :: 1 字节/元素 :: 只保留 3 位尾数
-GEMM :: Σ s_x·s_w·(x_q @ w_q) :: FP8 相乘、高精度累加
-$ 显存与带宽相对 FP16 再减半，累加精度不变
-> DeepSeek-V3：激活 1×128 分块，权重 128×128 分块`,
+    flowDiagram: `flowchart TD
+  x["x<br/>[4096]<br/>含离群值 1200"] --> whole["整张量共用一个 scale<br/>scale = amax / 448 = 2.68<br/>正常值 ~1.0 除以它只剩 0.37"]
+  x --> blk["块级缩放：每块自己算 amax<br/>1×128（激活）/ 128×128（权重）<br/>离群值只影响自己这一块"]
+  blk --> q["x_q = (x / s).to(fp8_e4m3)<br/>1 字节/元素，只保留 3 位尾数"]
+  q --> gemm["GEMM<br/>Σ s_x·s_w·(x_q @ w_q)<br/>FP8 相乘、高精度累加"]`,
     code: `import torch
 
 FP8_MAX = {"e4m3": 448.0, "e5m2": 57344.0}
@@ -2614,6 +2542,7 @@ def fp8_gemm_sim(x, w, block_size=128):
       '块大小的权衡: 块越小，离群值影响越小但缩放因子的存储和计算开销越大；1×128（激活）和 128×128（权重）是常见折中',
       '必须让缩放因子以可融合的方式参与: 真实实现把 scale 融进张量核的 epilogue，避免额外的反量化访存',
       '和 BF16 混合精度的区别: BF16 混合精度靠「主权重 FP32 + 计算 BF16」保精度；FP8 靠「块级缩放 + 高精度累加」保精度，省的是带宽',
+      '省的是什么: 块级缩放保精度，相比 FP16 显存与带宽再减半，而累加精度不变',
     ],
     source: 'original',
   },
@@ -2663,16 +2592,15 @@ $$
 $$
 \text{utilization}: 45\%\ \longrightarrow\ 96\%
 $$`,
-    flowDiagram: `# 传统：每个请求按 max_len 预分配
-! ✗ seq₁ 预分配 max_len，实际只用了很短一段，其余全程闲置
-! ✗ 剩余空洞拼不到一起 → 显存碎片化，利用率约 45%
-# PagedAttention：逻辑连续、物理离散
-逻辑视图 :: seq₁ = [block₀, block₁, block₂, …] :: 序列视角看仍是连续的
-块表 :: logical → physical :: seq₁_b₀ → GPU_block_3，seq₁_b₁ → GPU_block_7
-物理显存 :: [block₀][block₁][block₂]…[blockₙ] :: 非连续，按需分配
-注意力 :: 按块表取物理块 :: 对计算本身透明，用完即还
-$ 显存利用率 ~96%（传统预分配约 45%）
-> 前缀相同的请求可让块表指向同一批物理块，共享部分只存一份`,
+    flowDiagram: `flowchart TD
+  subgraph OLD["传统：每个请求按 max_len 预分配"]
+    direction LR
+    o1["seq₁ 预分配 max_len<br/>实际只用了很短一段<br/>剩余空洞拼不到一起 → 碎片化，利用率约 45%"]
+  end
+  subgraph NEW["PagedAttention：逻辑连续、物理离散"]
+    direction LR
+    lv["逻辑视图<br/>seq₁ = [block₀, block₁, block₂, …]"] --> bt["块表<br/>logical → physical<br/>seq₁_b₀ → GPU_block_3"] --> ph["物理显存<br/>[block₀][block₁]…[blockₙ]<br/>非连续，按需分配"] --> at["注意力<br/>按块表取物理块<br/>对计算本身透明，用完即还"]
+  end`,
     code: `# PagedAttention 核心思想 (简化伪代码)
 
 class PagedKVCache:
@@ -2766,15 +2694,11 @@ $$
 \qquad
 \text{speculative}: 1\ \text{forward}\to 3\text{ to }4\ \text{tokens}
 $$`,
-    flowDiagram: `# Draft 先猜，Target 一次验证
-Draft model :: 小、快，自回归生成 γ 个候选
-x₁ → x₂ → x₃ → x₄ → x₅ :: 候选 token :: γ = 5，逐个猜出来
-Target model :: 大、慢，prompt 加候选一起喂进去，一次前向
-p(x₁) … p(x₅) :: 每个位置的概率 :: 一次算完，验证几乎是白送的
-! ✓ accept x₁、x₂、x₃：满足 r < p_target / p_draft
-! ✗ reject x₄：从 x₄ 按修正后的分布重新采样，x₅ 直接丢弃
-$ 一次大模型前向产出 3~4 个 token，而标准解码只有 1 个
-> 拒绝采样保证输出分布与「只用大模型」逐位一致，属于无损加速`,
+    flowDiagram: `flowchart TD
+  draft["Draft model<br/>小、快"] --> cand["x₁ → x₂ → x₃ → x₄ → x₅<br/>自回归猜出 γ = 5 个候选"]
+  cand --> target["Target model<br/>prompt + 候选一起喂，一次前向"] --> prob["p(x₁) … p(x₅)<br/>一次算完，验证几乎是白送的"]
+  prob --> acc["✓ 接受 x₁、x₂、x₃<br/>满足 r &lt; p_target / p_draft"]
+  prob --> rej["✗ 拒绝 x₄<br/>按修正分布重新采样，x₅ 直接丢弃"]`,
     code: `import torch, torch.nn.functional as F
 
 @torch.no_grad()
@@ -2877,17 +2801,10 @@ $$
 $$
 \{\text{RMSNorm},\ \text{SwiGLU},\ \text{RoPE},\ \text{Pre-Norm}\}
 $$`,
-    flowDiagram: `# 一路 decoder 堆到顶
-tokens :: [B, S] :: 输入
-Embedding + RoPE :: [B, S, D] :: 词嵌入叠加位置信息
-+ 注意力子层 :: x = x + Attn(LN(x), causal_mask) :: 因果掩码，只能看左边
-+ FFN 子层 :: x = x + FFN(LN(x)) :: Pre-Norm 加残差
-Transformer Block × N :: 上述两个子层重复 N 次
-RMSNorm → LM Head :: logits [B, S, V]
-! ✓ 训练 :: shift + CrossEntropy，所有位置一次算完
-! ✓ 推理 :: 取末位采样下一个 token，拼回去再跑一轮
-$ 现代标配：RMSNorm、SwiGLU、RoPE、Pre-Norm
-> 训练与推理共用一套权重，形式统一是 scaling 的前提`,
+    flowDiagram: `flowchart TD
+  tok["tokens<br/>[B, S]"] --> emb["Embedding + RoPE<br/>[B, S, D]<br/>词嵌入叠加位置信息"] --> blk["Transformer Block × N<br/>x = x + Attn(LN(x), causal_mask)<br/>x = x + FFN(LN(x))"] --> nrm["RMSNorm"] --> head["LM Head<br/>logits [B, S, V]"]
+  head --> tr["训练：shift + CrossEntropy<br/>所有位置一次算完"]
+  head --> inf["推理：取末位采样下一个 token<br/>拼回去再跑一轮"]`,
     code: `import torch, torch.nn as nn
 
 class DecoderBlock(nn.Module):
@@ -2926,6 +2843,7 @@ class GPTModel(nn.Module):
       'RMSNorm + SwiGLU 是现代 LLM 标配',
       'RoPE 替代传统位置编码',
       'GPT/LLaMA/Mistral/Qwen 都是 decoder-only',
+      '训练与推理共用一套权重: 形式统一是 scaling 的前提 —— 训练是 shift + CE 一次算完，推理是逐 token 拼回去再跑一轮',
     ],
     source: 'cdhx',
   },
@@ -2971,15 +2889,10 @@ $$
 \lambda=0.3\ \text{(first 10T tokens)}\ \longrightarrow\ 0.1,\qquad
 \text{Emb},\ \text{lm\_head}\ \text{shared with the main model}
 $$`,
-    flowDiagram: `# 主干之外串行接若干 MTP 模块
-x :: [x₁, x₂, x₃, x₄, x₅] :: 输入序列
-主干 Transformer :: h⁰ [B, T, D] → lm_head → 预测 x₂ :: 主损失 L_main
-+ MTP 模块 1 :: h¹ = M1[h⁰; Emb(x₂)] → 预测 x₃ :: 辅助损失
-+ MTP 模块 2 :: h² = M2[h¹; Emb(x₃)] → 预测 x₄ :: 辅助损失
-+ MTP 模块 3 :: h³ = M3[h²; Emb(x₄)] → 预测 x₅ :: 辅助损失
-$ L = L_main + (λ/D)·Σ_k Σ_i CE(第 k 个预测, 目标)，λ 典型 0.3
-> Emb 与 lm_head 与主模型共享，参数开销很小
-> 推理时这些模块直接当 draft，几乎白送一个投机解码加速器`,
+    flowDiagram: `flowchart TD
+  x["x₁ … x₅<br/>[B, T]"] --> bk["主干 Transformer<br/>h⁰ [B, T, D]"] --> h0["lm_head<br/>预测 x₂<br/>主损失 L_main"]
+  bk --> m1["MTP 模块 1<br/>h¹ = M₁[h⁰; Emb(x₂)]<br/>预测 x₃，辅助损失"] --> m2["MTP 模块 2<br/>h² = M₂[h¹; Emb(x₃)]<br/>预测 x₄，辅助损失"] --> m3["MTP 模块 3<br/>h³ = M₃[h²; Emb(x₄)]<br/>预测 x₅，辅助损失"]
+  m3 -.-> note["Emb 与 lm_head 与主模型共享，参数开销很小<br/>推理时这些模块直接当 draft"]`,
     code: `import torch, torch.nn as nn, torch.nn.functional as F
 
 class RMSNorm(nn.Module):
@@ -3089,18 +3002,11 @@ $$
 $$
 \gamma=0.99,\qquad \lambda=0.95
 $$`,
-    flowDiagram: `# 两个端点
-! ✗ MC return：无偏差，但方差随轨迹长度增长
-! ✗ TD(0)：方差小，但严重依赖 V(s) 的准确度，偏差大
-# GAE：各阶 TD 误差的几何加权和
-δ_t = r_t + γ·V(s_{t+1}) - V(s_t) :: TD 误差，GAE 的原子单元
-A_t = Σ_l (γλ)^l · δ_{t+l} :: 从 t 往后所有 TD 误差按 (γλ)^l 加权
-A_t = δ_t + γλ·δ_{t+1} + (γλ)²·δ_{t+2} + … :: 展开形式
-# 反向递推实现
-A_T = δ_T :: 从末端起步
-A_t = δ_t + γλ·A_{t+1} :: 往前推一步，不必真的算级数
-$ λ=1 望远镜式相消 → MC return - V(s_t)；λ=0 → 只剩 δ_t，退化成 TD(0)
-> 通常取 γ=0.99、λ=0.95，等于「几乎 MC 但略带衰减」`,
+    flowDiagram: `flowchart TD
+  r["r_t"] --> d["δ_t = r_t + γ·V(s_{t+1}) − V(s_t)<br/>TD 误差，GAE 的原子单元"]
+  vs["V(s_t)、V(s_{t+1})"] --> d
+  d --> rec["A_t = δ_t + γλ·A_{t+1}<br/>从末端 A_T = δ_T 往前递推，O(T)"]
+  rec -.-> ep["λ = 1：望远镜相消，退化成 MC return − V(s_t)<br/>λ = 0：只剩 δ_t，退化成 TD(0)<br/>所以 λ 就是偏差-方差的旋钮"]`,
     code: `import torch
 
 def compute_gae(rewards, values, gamma=0.99, lam=0.95):
@@ -3173,16 +3079,15 @@ y=\text{ReLU}(x): &\quad \frac{\partial\mathcal{L}}{\partial x}=\frac{\partial\m
 y=\text{softmax}(z): &\quad \frac{\partial\mathcal{L}}{\partial z}=y-\text{one\_hot}(\text{target})\quad(\text{with CE})
 \end{aligned}
 $$`,
-    flowDiagram: `# 前向：按拓扑顺序算，顺手保存中间量
-x → W₁ → h → ReLU → a → W₂ → ŷ → Loss → L :: 保存 x、h、a、ŷ 供反向使用
-# 反向：从输出往输入逐层乘局部梯度
-∂L/∂ŷ :: 从 Loss 的导数起步
-∂L/∂W₂ = ∂L/∂ŷ · aᵀ :: 权重梯度只需输出的梯度和该层输入
-∂L/∂a = W₂ᵀ · ∂L/∂ŷ :: 继续往左传
-∂L/∂h = ∂L/∂a · (a>0) :: ReLU 的局部导数，负区间直接归零
-∂L/∂W₁ = ∂L/∂h · xᵀ :: 每层模式完全相同，逐层套用
-$ 一次前向 + 一次反向 = 全部参数的梯度，复杂度与前向同阶
-> 代价是中间激活要留到反向，显存随层数线性增长`,
+    flowDiagram: `flowchart TD
+  subgraph FWD["前向：按拓扑顺序算，顺手保存中间量"]
+    direction LR
+    fx["x"] --> f1["W₁"] --> fh["h"] --> fr["ReLU"] --> fa["a"] --> f2["W₂"] --> fy["ŷ"] --> fl["Loss → L"]
+  end
+  subgraph BWD["反向：从输出往输入逐层乘局部梯度"]
+    direction RL
+    g4["∂L/∂W₂ = ∂L/∂ŷ · aᵀ"] --> g3["∂L/∂a = W₂ᵀ · ∂L/∂ŷ"] --> g2["∂L/∂h = ∂L/∂a · (a &gt; 0)<br/>ReLU 的局部导数，负区间归零"] --> g1["∂L/∂W₁ = ∂L/∂h · xᵀ<br/>每层模式完全相同"]
+  end`,
     code: `import torch
 
 # 手动实现简单两层网络的反向传播
@@ -3221,6 +3126,7 @@ class TwoLayerNet:
       '矩阵求导: ∂(xW)/∂W = xᵀ · ∂L/∂y',
       'ReLU 梯度: 正区间为 1，负区间为 0',
       'Softmax + CE 的梯度特别简洁: y - one_hot',
+      '一次前向 + 一次反向就得到全部参数的梯度，复杂度与前向同阶；代价是中间激活要留到反向，显存随层数线性增长',
     ],
     source: 'cdhx',
   },
@@ -3247,6 +3153,7 @@ class TwoLayerNet:
           'GELU(x) = x·Φ(x)（Φ 是标准正态 CDF）：负区间仍有小梯度，是 ReLU 的平滑版。',
           'SiLU(x) = x·σ(x)：σ 充当 0~1 的开关，负区间先降后回升，自带门控。',
           '三者都是逐元素作用，形状完全不变，可以随意替换。',
+          '梯度的差别只有一档：ReLU′ 只有 0 / 1 两档，在 0 处不连续；GELU′、SiLU′ 处处可导 —— 这正是平滑版训练更稳的原因。',
         ],
       },
     ],
@@ -3266,23 +3173,13 @@ $$
 $$
 \text{Swish}\equiv\text{SiLU}
 $$`,
-    flowDiagram: `# 三种激活函数：形状决定行为
-x :: [..., D] :: 输入张量
-+ ReLU :: max(0, x) :: 负区间恒为 0，正区间线性
-+ GELU :: x·Φ(x) :: 平滑版 ReLU，负区间仍有小梯度
-+ SiLU :: x·σ(x) :: 自带门控，负区间先降后回升
-y :: [..., D] :: 逐个元素作用，形状不变
-
-# 梯度
-+ ReLU' :: x > 0 :: 只有 0 / 1 两档，不连续
-+ GELU' :: 平滑过渡 :: 处处可导
-+ SiLU' :: 平滑 + 门控 :: 处处可导
-
-# 使用场景
-+ ReLU :: 原始 Transformer 的标准 FFN
-+ GELU :: BERT、GPT-2/3
-+ SiLU :: SwiGLU 门控（LLaMA、PaLM）
-> ReLU 负区间梯度为 0，神经元长期落在负区间就再也学不动（dead neuron）`,
+    flowDiagram: `flowchart LR
+  x["x<br/>[..., D]"] --> relu["ReLU<br/>max(0, x)"]
+  x --> gelu["GELU<br/>x·Φ(x)"]
+  x --> silu["SiLU<br/>x·σ(x)"]
+  relu --> y["y<br/>[..., D]"]
+  gelu --> y
+  silu --> y`,
     code: `import torch
 import torch.nn.functional as F
 
@@ -3313,6 +3210,7 @@ print("GELU grad:", x.grad[:5])     # 平滑过渡`,
       'GELU: 平滑版 ReLU，BERT/GPT 使用',
       'SiLU = Swish: 用于 SwiGLU 门控机制',
       '面试常问: 各激活函数的梯度和使用场景',
+      '使用场景: ReLU 是原始 Transformer FFN 的标配；GELU 用于 BERT、GPT-2/3；SiLU 用于 SwiGLU（LLaMA、PaLM）',
     ],
     source: 'cdhx',
   },

@@ -30,15 +30,11 @@ A=\text{softmax}(S'),\qquad A_{ij}=0\ \text{ for }\ j>i
 
 ## 📊 张量流程图
 
-```
-# 只改 softmax 的输入，不改任何形状
-scores = Q·Kᵀ/√D :: [B, H, S, S] :: 与普通注意力完全一样
-mask = tril(ones(S, S)) :: [S, S] :: 下三角含对角线为 1（可见），上三角为 0（屏蔽）
-scores.masked_fill(mask == 0, -1e9) :: [B, H, S, S] :: 屏蔽位填一个极大的负数
-A = softmax(scores, -1) :: [B, H, S, S] :: exp(-1e9) 下溢为 0，权重精确为 0
-O = A·V :: [B, H, S, Dh] :: 第 i 行只混合了 j ≤ i 的 V
-$ 形状全程不变，因果性完全由 mask 的取值保证
-> 推理时每步只有 1 个 token，掩码自动失效 —— 训练与推理走的是同一套代码
+```mermaid
+flowchart LR
+  s["scores = Q·Kᵀ/√D<br/>[B, H, S, S]"] --> mf["masked_fill(mask == 0, -1e9)<br/>[B, H, S, S]"]
+  m["mask = tril(ones(S, S))<br/>下三角可见，上三角屏蔽"] --> mf
+  mf --> a["A = softmax(·, -1)<br/>exp(-1e9) 下溢为 0"] --> o["O = A·V<br/>[B, H, S, D_h]<br/>第 i 行只混合 j ≤ i"]
 ```
 
 ## 💻 代码实现
@@ -78,5 +74,5 @@ if __name__ == "__main__":
 - **decoder-only (GPT)**: 全程使用 causal mask
 - **训练时可用 causal mask 并行计算所有位置的 loss**
 - **面试常问**: 为什么训练时可以并行？因为 causal mask 保证了每个位置只能看到之前的 token
-
+- **推理时**: 每步只有 1 个 token，掩码自动失效 —— 训练与推理走的是同一套代码
 

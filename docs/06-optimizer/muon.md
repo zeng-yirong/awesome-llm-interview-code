@@ -43,24 +43,21 @@ W_k\leftarrow\sqrt{\gamma}\,W_k,\qquad
 
 ## 📊 张量流程图
 
-```
-# 参数分组：Muon 只吃 2D 隐藏层权重
-+ emb / lm_head / bias / norm :: 交给 AdamW
-+ attn & mlp 的 2D 权重矩阵 :: 交给 Muon
-
-# Muon 单步
-G :: [m, n] :: 本步梯度
-M = μM + G :: [m, n] :: 累积动量（Nesterov 变体用 G + μ·M）
-X = M / (‖M‖_F + ε) :: [m, n] :: 归一化，保证谱范数 ≤ 1，否则迭代发散
-NS5 :: 重复 5 次 X ← a·X + (b·A + c·A²)·X，其中 A = X·Xᵀ
-O :: [m, n] :: 奇异值 ≈ 1，逼近极分解 UVᵀ
-$ θ ← θ - η·O：每个奇异方向走同样大的一步
-> 系数 (a, b, c) = (3.4445, -4.7750, 2.0315)，5 步后奇异值落在约 [0.5, 1.5]
-
-# MuonClip 额外一步（周期性执行）
-S_max :: 每个 head 在本 batch 上的最大注意力 logit
-! S_max > τ → γ = τ / S_max，W_q ← √γ·W_q，W_k ← √γ·W_k
-> 典型 τ = 100。logit ∝ W_q·W_kᵀ，缩放一次权重等于缩放 γ 倍 logit，所以取 √γ
+```mermaid
+flowchart TD
+  subgraph GRP["参数分组：Muon 只吃 2D 隐藏层权重"]
+    direction LR
+    e["emb / lm_head / bias / norm"] --> ad["AdamW"]
+    w["attn 与 mlp 的 2D 权重矩阵"] --> mu["Muon"]
+  end
+  subgraph STEP["Muon 单步"]
+    direction LR
+    g["G<br/>[m, n] 本步梯度"] --> mom["M = μM + G<br/>[m, n] 累积动量"] --> nrm["X = M / (‖M‖_F + ε)<br/>谱范数 ≤ 1，否则迭代发散"] --> ns["NS5：重复 5 次<br/>X ← a·X + (b·A + c·A²)·X"] --> o["O<br/>[m, n] 奇异值 ≈ 1"]
+  end
+  subgraph CLIP["MuonClip：周期性额外一步"]
+    direction LR
+    sm["S_max<br/>本 batch 最大注意力 logit"] --> sc["γ = τ / S_max<br/>W_q ← √γ·W_q，W_k ← √γ·W_k"]
+  end
 ```
 
 ## 💻 代码实现
@@ -163,3 +160,4 @@ if __name__ == "__main__":
 - **QK-Clip 会自己退场**: 训练早期生效，模型稳定后 `S_max` 不再超阈值，机制自动不再触发
 - **实测收益**: 相比 AdamW 约有 2× token 效率；正则与 RMS 对齐后 Adam 的超参可以直接迁移
 - **面试常问**: Muon 和 Adam 的几何差别是什么？为什么 QK-Clip 用 √γ 而不是 γ？
+- **MuonClip 的阈值**: 典型 τ = 100；logit 正比于 W_q·W_kᵀ，缩放一次权重等于缩放 γ 倍 logit，所以取 √γ

@@ -38,16 +38,14 @@ T<1:\ \text{sharper},\qquad T>1:\ \text{flatter},\qquad T\to 0:\ \text{greedy}
 
 ## 📊 张量流程图
 
-```
-# 三步：调形状 → 截长尾 → 采样
-logits :: [V] :: 模型对词表的原始打分
-logits = logits / T :: [V] :: 温度只做一次除法，却改变整个分布的熵
-+ Top-k :: 取最大的 k 个，其余置 -inf :: 固定数量截断
-+ Top-p :: 排序 → cumsum → 累积超过 p 的置 -inf :: 候选集随分布陡峭程度伸缩
-probs = softmax(logits) :: [V] :: 被截掉的位置概率为 0
-next_token = multinomial(probs) :: 下一个 token :: 只在留下的候选里采样
-$ T<1 更确定、T>1 更随机、T→0 退化成 greedy
-> 实践中常组合：温度在最前，Top-k 保底，Top-p 收缩
+```mermaid
+flowchart TD
+  l["logits<br/>[V]<br/>模型对词表的原始打分"] --> t["logits / T<br/>[V]<br/>只做一次除法，却改变整个分布的熵"]
+  t --> tk["Top-k<br/>取最大的 k 个，其余置 −inf<br/>固定数量截断"]
+  t --> tp["Top-p<br/>排序 → cumsum → 累积超 p 的置 −inf<br/>候选集随陡峭程度伸缩"]
+  tk --> sm["probs = softmax(logits)<br/>[V]<br/>被截掉的位置概率为 0"]
+  tp --> sm
+  sm --> nt["next_token = multinomial(probs)<br/>只在留下的候选里采样"]
 ```
 
 ## 💻 代码实现

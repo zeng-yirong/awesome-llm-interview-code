@@ -35,16 +35,9 @@ s_i(\theta)=\left(\frac{\pi_\theta(y_i\mid x)}{\pi_{\text{old}}(y_i\mid x)}\righ
 
 ## 📊 张量流程图
 
-```
-# 把重要性比率从 token 级提到序列级
-逐 token 对数比 :: [B, G, T] :: log(π_θ / π_old)，每个 token 一个
-Σ_t :: 按 mask 求和 → [B, G] :: padding 不参与
-/ |y_i| :: 长度归一化 :: 让长短序列可比
-s_i = exp(·) :: [B, G] :: 每条序列一个标量比率
-目标 :: min(s_i·Â_i, clip(s_i, 1-ε, 1+ε)·Â_i) :: 整条序列只 clip 一次
-$ 组内优势 Â_i = (r_i - mean(r)) / (std(r) + ε)，与 GRPO 完全一致
-> 奖励是序列级的标量，比率就该是序列级的标量 —— 粒度对齐
-> GRPO 的 token 级比率在 MoE 上会放大路由抖动，是训练发散的主因之一
+```mermaid
+flowchart LR
+  tok["逐 token 对数比<br/>[B, G, T]<br/>log(π_θ / π_old)"] --> sum["Σ_t<br/>按 mask 求和，padding 不参与"] --> len["/ |y_i|<br/>长度归一化，让长短序列可比"] --> s["s_i = exp(·)<br/>[B, G]<br/>每条序列一个标量比率"] --> obj["min(s_i·Â_i, clip(s_i, 1−ε, 1+ε)·Â_i)<br/>整条序列只 clip 一次"]
 ```
 
 ## 💻 代码实现

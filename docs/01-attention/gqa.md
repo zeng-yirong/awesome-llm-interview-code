@@ -39,20 +39,10 @@ G=1 &\Rightarrow \text{MQA}, & \text{all query heads share one KV}
 
 ## 📊 张量流程图
 
-```
-# Q 有 H 个头，K/V 只有 G 组
-+ Q :: [B, H, S, Dh] :: 全部 H 个头各自独立
-+ K, V :: [B, G, S, Dh] :: 只有 G 组，G < H
-repeat_kv :: G → H :: 每份 KV 复制 H/G 次，与 Q 的头数对齐
-SDPA :: [B, H, S, Dh] :: 之后与 MHA 完全相同
-$ KV Cache 降到 G/H；LLaMA 2 70B 取 G=8、H=64，只剩 1/8
-
-# repeat_kv：unsqueeze → expand → reshape
-x :: [B, G, S, Dh] :: 输入，G 份 KV
-unsqueeze :: [B, G, 1, S, Dh] :: 插一个复制维
-expand :: [B, G, H/G, S, Dh] :: 只建视图，不占新内存
-reshape :: [B, H, S, Dh] :: 到这里才真正复制
-> MHA: G = H；MQA: G = 1；GQA: 1 < G < H
+```mermaid
+flowchart LR
+  q["Q<br/>[B, H, S, D_h]<br/>H 个头各自独立"] --> sdpa["SDPA<br/>[B, H, S, D_h]<br/>之后与 MHA 完全相同"]
+  kv["K, V<br/>[B, G, S, D_h]<br/>只有 G 组"] --> rep["repeat_kv<br/>G → H<br/>unsqueeze → expand → reshape"] --> sdpa
 ```
 
 ## 💻 代码实现

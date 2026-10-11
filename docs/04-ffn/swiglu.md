@@ -35,15 +35,13 @@
 
 ## 📊 张量流程图
 
-```
-# 门控 FFN：两路上投影，一路当门
-x :: [B, S, D] :: 残差流的输入
-+ gate = SiLU(x·W_gateᵀ) :: [B, S, d_ff] :: 门，过激活
-+ up = x·W_upᵀ :: [B, S, d_ff] :: 内容，不过激活
-g = gate ⊙ up :: [B, S, d_ff] :: 逐元素相乘，门决定每一维通过多少
-y = g·W_downᵀ :: [B, S, D] :: 下投影回残差流维度
-$ d_ff 取 8/3·D，3·D·d_ff ≈ 8D²，与标准 FFN 参数量持平
-> SiLU(x) = x·σ(x)：σ 是 0~1 的开关，x 是内容，所以叫「自带门控」
+```mermaid
+flowchart LR
+  x["x<br/>[B, S, D]"] --> gate["gate = SiLU(x·W_gateᵀ)<br/>[B, S, d_ff]<br/>门，过激活"]
+  x --> up["up = x·W_upᵀ<br/>[B, S, d_ff]<br/>内容，不过激活"]
+  gate --> g["g = gate ⊙ up<br/>[B, S, d_ff]<br/>逐元素相乘"]
+  up --> g
+  g --> y["y = g·W_downᵀ<br/>[B, S, D]<br/>下投影回残差流"]
 ```
 
 ## 💻 代码实现

@@ -42,16 +42,12 @@ W_{\text{new}}=W_0+\frac{\alpha}{r}BA\ \ \text{(mergeable at inference)}
 
 ## 📊 张量流程图
 
-```
-# 主干冻结，旁路低秩可训练
-x :: [B, S, k] :: 输入
-W₀ :: [d, k] :: 预训练权重，冻结
-+ 主干 :: W₀x :: 冻结，不产生梯度
-+ 旁路 :: dropout → A[r,k] → B[d,r] → (B·A)x · (α/r) :: 只训练这两个小矩阵
-h = W₀x + (B·A)x·(α/r) :: [B, S, d] :: 两条路相加
-$ 可训练参数从 d·k 降到 r·(d+k)，而 r ≪ min(d, k)
-> B 零初始化 ⇒ 初始 BA = 0，模型一开始与原模型逐位一致
-> 推理时可合并：W_new = W₀ + B·A·(α/r)，零额外开销
+```mermaid
+flowchart LR
+  x["x<br/>[B, S, k]"] --> main["W₀x<br/>主干冻结，不产生梯度"]
+  x --> drop["dropout"] --> a["A<br/>[r, k]"] --> b["B<br/>[d, r]"] --> ba["(B·A)x·(α/r)<br/>只训练这两个小矩阵"]
+  main --> h["h = W₀x + (B·A)x·(α/r)<br/>[B, S, d]"]
+  ba --> h
 ```
 
 ## 💻 代码实现
@@ -131,5 +127,5 @@ if __name__ == "__main__":
 - **通常只应用于 Q 和 V 的投影矩阵**
 - **QLoRA = LoRA + 4bit 量化**，进一步降低显存
 - **面试常问**: LoRA 的初始化策略？为什么 B 初始化为零？
-
+- **参数量**: 可训练参数从 d·k 降到 r·(d+k)，而 r ≪ min(d, k)
 

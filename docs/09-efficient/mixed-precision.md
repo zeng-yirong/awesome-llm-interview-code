@@ -49,18 +49,13 @@ g\leftarrow\frac{\text{cast}\!\left(g_{\text{FP16}}\right)}{S},
 
 ## 📊 张量流程图
 
-```
-# 计算走半精度，参数留全精度
-FP32 主权重 :: 唯一被更新的真身
-FP16 权重 :: 每次前向前从主权重 cast 一份
-前向 :: FP16 :: 激活与权重都是半精度
-loss :: FP16 :: 前向的输出，数值偏小
-loss × scale :: 先把 loss 放大 2^k 倍，梯度跟着抬出下溢区
-FP16 梯度 :: 数值已被放大到安全范围
-cast + 除以 scale :: FP32 梯度 :: 恢复真实尺度后转回 fp32
-update :: FP32 主权重 :: 高精度累加，误差不写回主权重
-$ FP32 是 1+8+23 位；FP16 是 1+5+10；BF16 是 1+8+7
-> bf16 指数位与 fp32 相同，动态范围足够，因此不需要 loss scaling
+```mermaid
+flowchart TD
+  w32["FP32 主权重<br/>唯一被更新的真身"] --> cast["cast<br/>每次前向前复制一份"] --> w16["FP16 权重"]
+  w16 --> fwd["前向<br/>FP16 激活与权重"] --> ls["loss<br/>FP16，数值偏小"]
+  ls --> scl["loss × scale<br/>放大 2^k 倍，梯度跟着抬出下溢区"] --> bwd["反向<br/>FP16 梯度，已在安全范围"]
+  bwd --> uns["cast + 除以 scale<br/>FP32 梯度，恢复真实尺度"] --> upd["update<br/>FP32 高精度累加"]
+  upd --> w32
 ```
 
 ## 💻 代码实现
