@@ -10,6 +10,8 @@
 ### 核心思想
 通过多个独立的注意力头，每个头学习不同的注意力模式（如语法关系、语义关系等）。最后通过输出投影融合所有头的信息，增强模型的表达能力。
 
+中间那个注意力矩阵是 [B, H, S, S]，显存与头数成正比 —— 这正是 GQA、MQA 要砍掉的那一项；而输出投影 W_o 是唯一发生跨头交互的地方。
+
 ### 算法步骤
 1. 线性投影：Q = x @ Wq, K = x @ Wk, V = x @ Wv
 2. 分头：view(B, S, H, Dh).transpose(1, 2) → [B, H, S, Dh]
@@ -31,18 +33,15 @@ D_h=\frac{D}{H}
 
 ## 📊 张量流程图
 
-```
-# 一次投影，再把 D 拆成 H 个头
-x :: [B, S, D] :: 输入
-+ Q = x·W_qᵀ :: [B, S, D] :: 查询投影
-+ K = x·W_kᵀ :: [B, S, D] :: 键投影
-+ V = x·W_vᵀ :: [B, S, D] :: 值投影
-view + transpose :: [B, H, S, Dh] :: 把 D 拆成 H×Dh，再把头维提到前面
-SDPA :: [B, H, S, Dh] :: 每个头独立算一次缩放点积注意力
-transpose + view :: [B, S, D] :: 头拼回完整的 D 维
-y = ·W_o :: [B, S, D] :: 输出投影，唯一发生跨头交互的地方
-$ H·Dh = D，参数量与单头完全相同，只多出一组中间张量
-> 中间的注意力矩阵是 [B, H, S, S]，显存与头数成正比 —— GQA、MQA 砍的就是这一项
+```mermaid
+flowchart LR
+  x["x<br/>[B, S, D]"] --> q["Q = x·W_qᵀ<br/>[B, H, S, D_h]"]
+  x --> k["K = x·W_kᵀ<br/>[B, H, S, D_h]"]
+  x --> v["V = x·W_vᵀ<br/>[B, H, S, D_h]"]
+  q --> a["softmax(Q·Kᵀ / √D_h)·V<br/>[B, H, S, D_h]"]
+  k --> a
+  v --> a
+  a --> y["concat · W_o<br/>[B, S, D]"]
 ```
 
 ## 💻 代码实现
@@ -108,6 +107,6 @@ if __name__ == "__main__":
 - **自注意力**: Q=K=V=x
 - **交叉注意力**: Q=x_dec, K=V=x_enc
 - **head_dim = d_model / n_heads**，通常 64 或 128
-- **参数量**: 4 × d_model² (Wq, Wk, Wv, Wo)
+- **参数量**: 与单头完全相同，4 × d_model² (Wq, Wk, Wv, Wo)，只多出一组中间张量（H·Dh = D）
 
 

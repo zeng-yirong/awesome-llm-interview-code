@@ -2,13 +2,15 @@
 /**
  * 只读校验脚本（无副作用，只打印报告）。
  *
- *   1. flowDiagram 的 DSL 解析普查：哪些题已迁移成结构化 DSL、哪些还走 <pre> 兜底
- *   2. 已迁移条目的语法卫生：不含框线字符、每行 `::` 字段 ≤ 3
+ *   1. flowDiagram 的格式普查：哪些题是 mermaid、哪些是旧 DSL、哪些还走 <pre> 兜底
+ *   2. flowDiagram 的语法卫生：不含框线字符、每行 `::` 字段 ≤ 3（DSL）、subgraph 配平（mermaid）
  *   3. formula 的 LaTeX 普查：哪些题已迁移成 `$$` 块、哪些还走 <pre> 兜底
  *   4. doc ↔ TS 一致性：张量流程图 fence / 核心公式 / oneLiner / 原理首段 / 原理分节 / 面试要点条数
  *   5. 核心公式的渲染卫生：KaTeX 实渲染、数学模式里的语法、GitHub 数学渲染器不接受的宏、\text 里的裸 _ ^
  *
  * 核心公式在文档里用 ```math 围栏——原因见 mathFences 的注释，别改回 $$。
+ * 张量流程图在文档里用 ```mermaid 围栏，GitHub 原生画图，与 TS 里的字符串逐字节同源。
+ * mermaid 能不能画出来由本地渲染验证（mermaid-cli + Chrome），这里只查结构与一致性。
  *
  * 用法: node scripts/check-flow.mjs
  */
@@ -21,6 +23,7 @@ const ROOT = resolve(HERE, '..');
 
 const { problems } = await import(new URL('../src/data/problems.ts', import.meta.url).href);
 const { parseFlow } = await import(new URL('../src/lib/flowDsl.ts', import.meta.url).href);
+const { isMermaidFlow } = await import(new URL('../src/lib/mermaidFlow.ts', import.meta.url).href);
 const { parseMath } = await import(new URL('../src/lib/mathBlock.ts', import.meta.url).href);
 // katex 本来就是站点的依赖：这里直接用站点那条渲染路径验公式，报错即失败。
 const katex = (await import('katex')).default;
@@ -143,11 +146,16 @@ function stripMarkup(text) {
   return text.split('`').join('').split('**').join('').trim();
 }
 
-/** 取正文里第一个 ``` fence 的内容（不含围栏本身） */
+/**
+ * 取正文里第一个 fence，连语言标记一起返回。
+ *
+ * 标签要单独看：mermaid 题目的张量流程图必须是 ```mermaid，
+ * 光比内容会漏掉「标签写回空围栏」这种退化。
+ */
 function firstFence(body) {
   if (body === null) return null;
-  const match = body.match(/```[a-zA-Z]*\n([\s\S]*?)\n```/);
-  return match ? match[1] : null;
+  const match = body.match(/```([a-zA-Z]*)\r?\n([\s\S]*?)\r?\n```/);
+  return match ? { tag: match[1], content: match[2] } : null;
 }
 
 /**
@@ -267,16 +275,31 @@ function stripBackticks(text) {
 /* ---------- 主流程 ---------- */
 
 const docMap = buildDocMap();
+const mermaid = [];
 const migrated = [];
 const legacy = [];
 const latexMigrated = [];
 const latexLegacy = [];
 
 for (const problem of problems) {
-  const isDsl = parseFlow(problem.flowDiagram) !== null;
-  (isDsl ? migrated : legacy).push(problem.id);
+  const isMermaid = isMermaidFlow(problem.flowDiagram);
+  // mermaid 源码里会有 `::`、`[` 之类，别再拿去喂 DSL 解析器判格式
+  const isDsl = !isMermaid && parseFlow(problem.flowDiagram) !== null;
+  if (isMermaid) mermaid.push(problem.id);
+  else (isDsl ? migrated : legacy).push(problem.id);
 
-  if (isDsl) {
+  if (isMermaid) {
+    if (BOX_CHARS.test(problem.flowDiagram)) {
+      failures.push(`[${problem.id}] 已迁移为 mermaid，但仍含框线字符`);
+    }
+    // subgraph 漏配 end 是手改 mermaid 最常犯的错，这里先挡一道；
+    // 真正的「能不能画出来」由本地 mermaid-cli 渲染验证，不在这个脚本里做。
+    const opens = problem.flowDiagram.match(/^\s*subgraph\s/gm)?.length ?? 0;
+    const ends = problem.flowDiagram.match(/^\s*end\s*$/gm)?.length ?? 0;
+    if (opens !== ends) {
+      failures.push(`[${problem.id}] mermaid 的 subgraph(${opens}) 与 end(${ends}) 不配平`);
+    }
+  } else if (isDsl) {
     if (BOX_CHARS.test(problem.flowDiagram)) {
       failures.push(`[${problem.id}] 已迁移为 DSL，但仍含框线字符`);
     }
@@ -304,13 +327,22 @@ for (const problem of problems) {
   const fence = firstFence(flowBody);
   if (fence === null) {
     failures.push(`[${problem.id}] 文档缺少「张量流程图」fence (${relPath})`);
-  } else if (fence !== problem.flowDiagram) {
-    const sameWhenTrimmed =
-      fence.split('\n').map((l) => l.trimEnd()).join('\n') ===
-      problem.flowDiagram.split('\n').map((l) => l.trimEnd()).join('\n');
-    failures.push(
-      `[${problem.id}] 张量流程图与 TS flowDiagram 不一致（${sameWhenTrimmed ? '仅行尾空白差异' : '内容差异'}）`,
-    );
+  } else {
+    // mermaid 题必须挂在 ```mermaid 上，不然 GitHub 只会把它当普通代码块显示
+    const wantTag = isMermaid ? 'mermaid' : undefined;
+    if (wantTag !== undefined && fence.tag !== wantTag) {
+      failures.push(
+        `[${problem.id}] 张量流程图用的是 \`\`\`${fence.tag} 围栏，应该是 \`\`\`${wantTag}`,
+      );
+    }
+    if (fence.content !== problem.flowDiagram) {
+      const sameWhenTrimmed =
+        fence.content.split('\n').map((l) => l.trimEnd()).join('\n') ===
+        problem.flowDiagram.split('\n').map((l) => l.trimEnd()).join('\n');
+      failures.push(
+        `[${problem.id}] 张量流程图与 TS flowDiagram 不一致（${sameWhenTrimmed ? '仅行尾空白差异' : '内容差异'}）`,
+      );
+    }
   }
 
   // 2) oneLiner 与引文一致（文档里的反引号会被剥掉）
@@ -469,7 +501,8 @@ for (const problem of problems) {
 /* ---------- 报告 ---------- */
 
 console.log(`题库总数: ${problems.length}`);
-console.log(`已迁移为 DSL: ${migrated.length}  → ${migrated.join(', ') || '(无)'}`);
+console.log(`已迁移为 mermaid: ${mermaid.length}  → ${mermaid.join(', ') || '(无)'}`);
+console.log(`仍是旧 DSL: ${migrated.length}  → ${migrated.join(', ') || '(无)'}`);
 console.log(`仍走 <pre> 兜底: ${legacy.length}  → ${legacy.join(', ') || '(无)'}`);
 console.log(`已迁移为 LaTeX: ${latexMigrated.length} / ${problems.length}`);
 

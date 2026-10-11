@@ -135,6 +135,7 @@ def scaled_dot_product_attention(q, k, v, mask=None):
         title: '核心思想',
         items: [
           '通过多个独立的注意力头，每个头学习不同的注意力模式（如语法关系、语义关系等）。最后通过输出投影融合所有头的信息，增强模型的表达能力。',
+          '中间那个注意力矩阵是 [B, H, S, S]，显存与头数成正比 —— 这正是 GQA、MQA 要砍掉的那一项；而输出投影 W_o 是唯一发生跨头交互的地方。',
         ],
       },
       {
@@ -157,17 +158,14 @@ $$
 \qquad
 D_h=\frac{D}{H}
 $$`,
-    flowDiagram: `# 一次投影，再把 D 拆成 H 个头
-x :: [B, S, D] :: 输入
-+ Q = x·W_qᵀ :: [B, S, D] :: 查询投影
-+ K = x·W_kᵀ :: [B, S, D] :: 键投影
-+ V = x·W_vᵀ :: [B, S, D] :: 值投影
-view + transpose :: [B, H, S, Dh] :: 把 D 拆成 H×Dh，再把头维提到前面
-SDPA :: [B, H, S, Dh] :: 每个头独立算一次缩放点积注意力
-transpose + view :: [B, S, D] :: 头拼回完整的 D 维
-y = ·W_o :: [B, S, D] :: 输出投影，唯一发生跨头交互的地方
-$ H·Dh = D，参数量与单头完全相同，只多出一组中间张量
-> 中间的注意力矩阵是 [B, H, S, S]，显存与头数成正比 —— GQA、MQA 砍的就是这一项`,
+    flowDiagram: `flowchart LR
+  x["x<br/>[B, S, D]"] --> q["Q = x·W_qᵀ<br/>[B, H, S, D_h]"]
+  x --> k["K = x·W_kᵀ<br/>[B, H, S, D_h]"]
+  x --> v["V = x·W_vᵀ<br/>[B, H, S, D_h]"]
+  q --> a["softmax(Q·Kᵀ / √D_h)·V<br/>[B, H, S, D_h]"]
+  k --> a
+  v --> a
+  a --> y["concat · W_o<br/>[B, S, D]"]`,
     code: `import torch, torch.nn as nn, torch.nn.functional as F, math
 
 class MultiHeadAttention(nn.Module):
@@ -198,7 +196,7 @@ class MultiHeadAttention(nn.Module):
       '合并操作: transpose(1,2).contiguous().view(B,S,D)',
       '自注意力 Q=K=V=x; 交叉注意力 Q=x_dec, K=V=x_enc',
       'head_dim = d_model / n_heads，通常 64 或 128',
-      '参数量: 4 × d_model² (Wq, Wk, Wv, Wo)',
+      '参数量: 与单头完全相同，4 × d_model² (Wq, Wk, Wv, Wo)，只多出一组中间张量（H·Dh = D）',
     ],
     source: 'both',
   },
@@ -1187,6 +1185,7 @@ class SwiGLU(nn.Module):
         title: '核心思想',
         items: [
           '通过 Router 网络为每个 token 动态选择最相关的 K 个专家处理，实现稀疏激活。每个专家是独立的 FFN，只处理分配到的 token，最后加权融合。',
+          '总共有 N 份专家参数，而每个 token 只算 K 份，所以 FLOPs 只占 K/N —— 参数量与计算量解耦。',
         ],
       },
       {
@@ -1211,15 +1210,11 @@ $$
 $$
 \text{Mixtral 8x7B:}\quad N=8,\ K=2,\qquad \text{FLOPs}\approx 12.9\text{B}\ \text{vs}\ 46.7\text{B total}
 $$`,
-    flowDiagram: `# 按 token 路由到 Top-K 个专家
-x = reshape(x, [B*S, D]) :: [B*S, D] :: 摊平序列维，路由是逐 token 的
-logits = Router(x) :: [B*S, N] :: Router 只是一个 [D, N] 的线性层
-Top-K :: indices, weights :: 通常 K=2，取出下标与权重
-w = softmax(选中的 logits) :: [B*S, K] :: 路由权重，用来加权求和
-E_k(x) :: 每个专家都是一个完整的 FFN
-y = Σ_k w_k · E_k(x) :: [B*S, D] :: 只算 K 个专家，其余不参与
-$ 总参数是 N 份专家，每个 token 只算 K 份 → FLOPs 只占 K/N
-> Mixtral 8x7B：8 选 2，46.7B 总参数，单 token 实际计算约 12.9B`,
+    flowDiagram: `flowchart TD
+  x["x<br/>[B·S, D]"] --> r["logits = Router<br/>[B·S, N]"] --> tk["Top-K<br/>[B·S, K]"] --> w["w = softmax<br/>[B·S, K]"]
+  w --> e1["E_1<br/>FFN"] & e2["E_2<br/>FFN"] & e3["E_K<br/>FFN"]
+  e1 & e2 & e3 --> y["y = Σ_k w_k·E_k(x)<br/>[B·S, D]"]
+  y --> z["reshape<br/>[B, S, D]"]`,
     code: `import torch, torch.nn as nn, torch.nn.functional as F
 
 class MoE(nn.Module):
@@ -1498,6 +1493,7 @@ def ppo_loss(old_logp, new_logp, advantages, eps=0.2):
         title: '核心思想',
         items: [
           '对同一问题生成 G 个回答，用组内归一化的奖励代替 Critic 网络的价值估计。优势函数 Aᵢ = (rᵢ - mean(r)) / (std(r) + ε)，结合 PPO clip 机制和显式 KL 惩罚。',
+          '组内的优势必然有正有负，梯度才有明确方向；clip 限制单步更新幅度，显式 KL 惩罚则拉住参考策略、防止跑偏。对比 PPO：PPO 要先训一个 Critic 估计 V(s)，再用 A = r + γV(s) − V(s)，GRPO 省掉的正是这一步。',
         ],
       },
       {
@@ -1528,23 +1524,21 @@ $$
 \text{PPO (token-level):}\quad & \rho_{i,t}=\frac{\pi_\theta(o_{i,t}\mid x,y_{<t})}{\pi_{\theta_{\text{old}}}(o_{i,t}\mid x,y_{<t})}
 \end{aligned}
 $$`,
-    flowDiagram: `# 组内采样：同一个问题采 G 个回答
-问题 q :: 同一个 prompt
-+ 回答 o₁ :: 奖励 r₁
-+ 回答 o₂ :: 奖励 r₂
-+ 回答 o_G :: 奖励 r_G（共 G 个，共享同一个 mean/std）
-组内归一化 :: Aᵢ = (rᵢ - mean) / (std + ε) :: 有正有负才有梯度方向
-$ 组内统计量代替 Critic：整个训练不需要 Value Head
-
-# 策略更新（PPO 的 clip 目标）
-比率 ρᵢ :: πθ(oᵢ|q) / πθ_old(oᵢ|q)
-做 clip :: clip(ρᵢ, 1-ε, 1+ε) :: 限制单步更新幅度
-$ L = -E[min(ρᵢAᵢ, clip(ρᵢ)·Aᵢ)] + β·KL(π‖π_ref)
-> 显式 KL 惩罚拉住参考策略，防止跑偏
-
-# 与 PPO 的对比
-> PPO:  需要 Critic 估计 V(s) → A = r + γV - V
-> GRPO: 组内归一化 → A = (r - mean) / std，省掉 Critic`,
+    flowDiagram: `flowchart TD
+  subgraph S1["采样 · 同一个问题采 G 个回答"]
+    direction LR
+    q["q<br/>[B]"] --> o["o_1 … o_G<br/>[B, G]"] --> r["r_i<br/>[B, G]"]
+  end
+  subgraph S2["组内归一化优势 · 不需要 Critic"]
+    direction LR
+    a["Â_i = (r_i − mean)/(std + ε)<br/>[B, G]"] --> rho["ρ_i = π_θ / π_θ_old<br/>[B, G]"] --> c["clip(ρ_i, 1−ε, 1+ε)<br/>[B, G]"] --> l["L = −min(ρÂ, clip·Â) + β·KL<br/>[B, G] → 标量"]
+  end
+  subgraph S3["PPO 对照 · token 级 + Critic"]
+    direction LR
+    p["ρ_i,t<br/>[B, G, T]"] --> adv["A = r + γV − V<br/>[B, T]"]
+    v["V(s)<br/>[B, T]"] --> adv
+  end
+  r --> a`,
     code: `import torch
 
 def grpo_advantages(rewards):

@@ -10,6 +10,8 @@ PPO 的简化版：对同一问题生成 G 个回答，用组内归一化的奖�
 ### 核心思想
 对同一问题生成 G 个回答，用组内归一化的奖励代替 Critic 网络的价值估计。优势函数 Aᵢ = (rᵢ - mean(r)) / (std(r) + ε)，结合 PPO clip 机制和显式 KL 惩罚。
 
+组内的优势必然有正有负，梯度才有明确方向；clip 限制单步更新幅度，显式 KL 惩罚则拉住参考策略、防止跑偏。对比 PPO：PPO 要先训一个 Critic 估计 V(s)，再用 A = r + γV(s) − V(s)，GRPO 省掉的正是这一步。
+
 ### 算法步骤
 1. 对同一问题 q 生成 G 个回答：o₁, o₂, ..., o_G
 2. 计算每个回答的奖励：r₁, r₂, ..., r_G
@@ -39,24 +41,22 @@ PPO 的简化版：对同一问题生成 G 个回答，用组内归一化的奖�
 
 ## 📊 张量流程图
 
-```
-# 组内采样：同一个问题采 G 个回答
-问题 q :: 同一个 prompt
-+ 回答 o₁ :: 奖励 r₁
-+ 回答 o₂ :: 奖励 r₂
-+ 回答 o_G :: 奖励 r_G（共 G 个，共享同一个 mean/std）
-组内归一化 :: Aᵢ = (rᵢ - mean) / (std + ε) :: 有正有负才有梯度方向
-$ 组内统计量代替 Critic：整个训练不需要 Value Head
-
-# 策略更新（PPO 的 clip 目标）
-比率 ρᵢ :: πθ(oᵢ|q) / πθ_old(oᵢ|q)
-做 clip :: clip(ρᵢ, 1-ε, 1+ε) :: 限制单步更新幅度
-$ L = -E[min(ρᵢAᵢ, clip(ρᵢ)·Aᵢ)] + β·KL(π‖π_ref)
-> 显式 KL 惩罚拉住参考策略，防止跑偏
-
-# 与 PPO 的对比
-> PPO:  需要 Critic 估计 V(s) → A = r + γV - V
-> GRPO: 组内归一化 → A = (r - mean) / std，省掉 Critic
+```mermaid
+flowchart TD
+  subgraph S1["采样 · 同一个问题采 G 个回答"]
+    direction LR
+    q["q<br/>[B]"] --> o["o_1 … o_G<br/>[B, G]"] --> r["r_i<br/>[B, G]"]
+  end
+  subgraph S2["组内归一化优势 · 不需要 Critic"]
+    direction LR
+    a["Â_i = (r_i − mean)/(std + ε)<br/>[B, G]"] --> rho["ρ_i = π_θ / π_θ_old<br/>[B, G]"] --> c["clip(ρ_i, 1−ε, 1+ε)<br/>[B, G]"] --> l["L = −min(ρÂ, clip·Â) + β·KL<br/>[B, G] → 标量"]
+  end
+  subgraph S3["PPO 对照 · token 级 + Critic"]
+    direction LR
+    p["ρ_i,t<br/>[B, G, T]"] --> adv["A = r + γV − V<br/>[B, T]"]
+    v["V(s)<br/>[B, T]"] --> adv
+  end
+  r --> a
 ```
 
 ## 💻 代码实现
