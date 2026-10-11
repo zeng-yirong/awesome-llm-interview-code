@@ -32,15 +32,16 @@
 
 ## 📊 张量流程图
 
-```
-# 标准训练：全部激活都留着
-+ 标准 :: Layer₁ → act₁ → Layer₂ → act₂ → … → Layer_L → act_L :: 每层激活全部保存
-! ✗ 标准代价：激活显存 O(L)，层数一多就成了显存大头
-! ✓ 检查点：只保存 √L 份，段内激活反向时重算
-Layer₁ → act₁* → Layer₂ → Layer₃ → act₃* → … :: 带 * 的是检查点
-! 反向时从最近的检查点重跑一次前向，把段内激活重建出来
-$ 激活显存 O(L) → O(√L)，代价是训练时间 +20%
-> 省下来的显存可以直接换成更大的 batch 或更长的序列
+```mermaid
+flowchart TD
+  subgraph S1["标准训练：每层激活全部保存"]
+    direction LR
+    a["Layer₁ → act₁ → Layer₂ → act₂ → … → Layer_L → act_L<br/>激活显存 O(L)，层数一多就是显存大头"]
+  end
+  subgraph S2["梯度检查点：只保存 √L 份，段内激活反向时重算"]
+    direction LR
+    b["Layer₁ → act₁* → Layer₂ → Layer₃ → act₃* → …<br/>带 * 的是检查点；反向时从最近的检查点重跑一次前向"]
+  end
 ```
 
 ## 💻 代码实现
@@ -123,5 +124,5 @@ print(f"\nMemory saved: {(mem1 - mem2):.2f} GB ({(1 - mem2/mem1)*100:.1f}%)")
 - **常与 LoRA 配合**: LoRA 减少参数 + 检查点减少激活
 - **use_reentrant=False** 是新版推荐设置
 - **面试常问**: 梯度检查点的原理？代价是什么？
-
+- 省下来的显存可以直接换成更大的 batch 或更长的序列
 

@@ -44,20 +44,16 @@ k=[k_{\text{content}};k_{\text{rope}}],\qquad q=[q_{\text{content}};q_{\text{rop
 
 ## 📊 张量流程图
 
-```
-# 只缓存低维潜变量，用的时候再恢复
-x :: [B, S, D] :: 输入
-c_kv = x·W_dkv :: [B, S, C] :: 下投影到潜空间，C 远小于 H·Dh
-> 进 cache 的只有 c_kv —— 压缩发生在存储维度上，不是头数上
-kv = c_kv·W_ukv :: [B, S, H·(Dh+Dr+Dh)] :: 用时上投影恢复
-split :: k_content, k_rope, v :: 内容分量与 RoPE 分量分开
-+ q_content :: [B, S, H, Dh] :: 同样先低秩压缩再上投影
-+ q_rope :: [B, S, H, Dr] :: 不压缩，单独留给 RoPE
-q = cat(q_content, q_rope) :: [B, S, H, Dh+Dr] :: 拼成完整的查询
-k = cat(k_content, k_rope) :: [B, S, H, Dh+Dr] :: 键同样拼接
-O = SDPA(q, k, v)·W_o :: [B, S, D] :: 之后与普通注意力完全一致
-$ Cache 从 2·G·Dh 降到 C：DeepSeek-V2 取 C=512，压缩比 10× 以上
-> RoPE 必须单独走不压缩的分量：它是位置相关的，挤进低秩空间会被压坏
+```mermaid
+flowchart LR
+  x["x<br/>[B, S, D]"] --> ckv["c_kv = x·W_dkv<br/>[B, S, C]<br/>进 cache 的只有这一项"]
+  ckv --> kv["kv = c_kv·W_ukv<br/>[B, S, H·(D_h+Dr+D_h)]<br/>用时上投影恢复"]
+  kv --> sp["split<br/>k_content / k_rope / v"]
+  x --> qc["q = cat(q_content, q_rope)<br/>[B, S, H, D_h+Dr]<br/>Q 也低秩，但不缓存"]
+  sp --> ck["k = cat(k_content, k_rope)<br/>[B, S, H, D_h+Dr]"]
+  ck --> o["O = SDPA(q, k, v)·W_o<br/>[B, S, D]"]
+  qc --> o
+  sp --> o
 ```
 
 ## 💻 代码实现
@@ -125,5 +121,6 @@ if __name__ == "__main__":
 - **Q 也使用低秩投影**，但不缓存（只用于当前 token）
 - **DeepSeek-V2 用 MLA + MoE** 实现极高效率
 - **面试重点**: 理解低秩压缩的思想，不要求完整实现
-
+- **压缩发生的位置**: c_kv 是唯一进 cache 的东西 —— 压缩的是存储维度，不是头数（这是与 GQA 的本质区别）
+- **RoPE 必须单独走不压缩的分量**: 它是位置相关的，挤进低秩空间会被压坏
 

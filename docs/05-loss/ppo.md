@@ -40,18 +40,14 @@ A_t<0:\ &\quad r_t<1-\epsilon\ \Rightarrow\ r_tA_t\ \text{floored at}\ (1-\epsil
 
 ## 📊 张量流程图
 
-```
-# 截断重要性比率，给更新幅度设上界
-old_logp :: π_old 对已采样动作的对数概率
-new_logp :: π_new 的对数概率，需要梯度
-ratio = exp(new_logp - old_logp) :: 重要性采样比率，用对数相减更稳
-+ unclipped :: ratio · A :: 不加约束的更新量
-+ clipped :: clip(ratio, 1-ε, 1+ε) · A :: 比率被夹住后的更新量
-loss = -mean(min(unclipped, clipped)) :: 取更小的那个，得到悲观下界
-! A > 0 时 ratio 涨过 1+ε 停止奖励，防过度优化
-! A < 0 时 ratio 跌破 1-ε 停止惩罚，防过度惩罚
-$ ε 通常取 0.2，一步更新幅度便有了显式上界
-> ratio 必须用旧策略的 logp 现算，rollout 与更新要严格配对
+```mermaid
+flowchart TD
+  old["old_logp<br/>π_old，rollout 时算"] --> ratio["ratio = exp(new_logp − old_logp)<br/>重要性采样比率，取对数相减更稳"]
+  new["new_logp<br/>π_new，需要梯度"] --> ratio
+  ratio --> unc["unclipped = ratio·A<br/>不加约束的更新量"]
+  ratio --> cl["clipped = clip(ratio, 1−ε, 1+ε)·A<br/>比率被夹住后的更新量"]
+  unc --> loss["loss = −mean(min(unclipped, clipped))<br/>取更小的，得到悲观下界"]
+  cl --> loss
 ```
 
 ## 💻 代码实现
@@ -126,5 +122,5 @@ if __name__ == "__main__":
 - **ChatGPT/InstructGPT 的 RLHF 核心算法**
 - **需要 reward model + critic model + reference model**
 - **面试常问**: PPO 的 clip 机制是如何工作的？
-
+- ε 通常取 0.2；ratio 必须用旧策略的 logp 现算，rollout 与更新要严格配对
 

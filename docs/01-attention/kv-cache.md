@@ -40,20 +40,18 @@ V\leftarrow\text{concat}(V,\,v_{\text{new}})
 
 ## 📊 张量流程图
 
-```
-# Prefill：整段算完，把每层的 K/V 留下来
-prompt :: [1, S_prompt, D] :: 整段输入，一次前向
-Q, K, V 投影 :: [1, H_kv, S_prompt, Dh] :: 只有 K、V 会被留下
-cache :: [L, 2, B, H_kv, S, Dh] :: 每层一份，显存随序列长度线性增长
-
-# Decode：每步只算新 token，历史 KV 从缓存拼
-token_t :: [1, 1, D] :: 当前步唯一的新输入
-+ q_t :: [1, H, 1, Dh] :: 查询，只有这一步用得上，不缓存
-+ k_t, v_t :: [1, H_kv, 1, Dh] :: 键值，追加到缓存末尾
-K = cat(K_cache, k_t) :: [1, H_kv, S+t, Dh] :: 拼接即可，历史部分完全不重算
-O = SDPA(q_t, K, V) :: [1, H, S+t, Dh] :: 一个 query 对整个历史
-$ 每步计算量恒定，不缓存则是 Σt = O(S²)
-> LLaMA 2 70B 在 4096 长度、fp16 下缓存约 80GB —— 比模型本身还大
+```mermaid
+flowchart TD
+  subgraph PF["Prefill：整段算完，把每层的 K/V 留下来"]
+    direction LR
+    p["prompt<br/>[1, S_prompt, D]"] --> proj["Q, K, V 投影<br/>[1, H_kv, S_prompt, D_h]<br/>只有 K、V 会被留下"] --> cache["cache<br/>[L, 2, B, H_kv, S, D_h]<br/>随序列长度线性增长"]
+  end
+  subgraph DC["Decode：每步只算新 token，历史 KV 从缓存拼"]
+    direction LR
+    t["token_t<br/>[1, 1, D]<br/>当前步唯一的新输入"] --> qt["q_t<br/>[1, H, 1, D_h]<br/>只有这一步用得上，不缓存"]
+    t --> kt["k_t, v_t<br/>[1, H_kv, 1, D_h]<br/>追加到缓存末尾"] --> cat["K = cat(K_cache, k_t)<br/>[1, H_kv, S+t, D_h]<br/>历史部分完全不重算"] --> att["O = SDPA(q_t, K, V)<br/>[1, H, S+t, D_h]<br/>一个 query 对整个历史"]
+    qt --> att
+  end
 ```
 
 ## 💻 代码实现
@@ -121,5 +119,5 @@ if __name__ == "__main__":
 - **长序列推理的主要显存瓶颈**
 - **PagedAttention (vLLM)** 用分页管理 KV Cache 减少碎片
 - **面试常问**: KV Cache 有多大？如何优化？
-
+- **不缓存的代价**: 每步要对全部历史重算，累计 Σt = O(S²)；LLaMA 2 70B 在 4096 长度、fp16 下缓存约 80GB，比模型本身还大
 

@@ -40,17 +40,16 @@
 
 ## 📊 张量流程图
 
-```
-# 传统：每个请求按 max_len 预分配
-! ✗ seq₁ 预分配 max_len，实际只用了很短一段，其余全程闲置
-! ✗ 剩余空洞拼不到一起 → 显存碎片化，利用率约 45%
-# PagedAttention：逻辑连续、物理离散
-逻辑视图 :: seq₁ = [block₀, block₁, block₂, …] :: 序列视角看仍是连续的
-块表 :: logical → physical :: seq₁_b₀ → GPU_block_3，seq₁_b₁ → GPU_block_7
-物理显存 :: [block₀][block₁][block₂]…[blockₙ] :: 非连续，按需分配
-注意力 :: 按块表取物理块 :: 对计算本身透明，用完即还
-$ 显存利用率 ~96%（传统预分配约 45%）
-> 前缀相同的请求可让块表指向同一批物理块，共享部分只存一份
+```mermaid
+flowchart TD
+  subgraph OLD["传统：每个请求按 max_len 预分配"]
+    direction LR
+    o1["seq₁ 预分配 max_len<br/>实际只用了很短一段<br/>剩余空洞拼不到一起 → 碎片化，利用率约 45%"]
+  end
+  subgraph NEW["PagedAttention：逻辑连续、物理离散"]
+    direction LR
+    lv["逻辑视图<br/>seq₁ = [block₀, block₁, block₂, …]"] --> bt["块表<br/>logical → physical<br/>seq₁_b₀ → GPU_block_3"] --> ph["物理显存<br/>[block₀][block₁]…[blockₙ]<br/>非连续，按需分配"] --> at["注意力<br/>按块表取物理块<br/>对计算本身透明，用完即还"]
+  end
 ```
 
 ## 💻 代码实现

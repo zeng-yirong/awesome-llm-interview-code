@@ -36,18 +36,11 @@ P(x_1,\dots,x_n)=\prod_{t=1}^{n}P(x_t\mid x_{<t})
 
 ## 📊 张量流程图
 
-```
-# 一路 decoder 堆到顶
-tokens :: [B, S] :: 输入
-Embedding + RoPE :: [B, S, D] :: 词嵌入叠加位置信息
-+ 注意力子层 :: x = x + Attn(LN(x), causal_mask) :: 因果掩码，只能看左边
-+ FFN 子层 :: x = x + FFN(LN(x)) :: Pre-Norm 加残差
-Transformer Block × N :: 上述两个子层重复 N 次
-RMSNorm → LM Head :: logits [B, S, V]
-! ✓ 训练 :: shift + CrossEntropy，所有位置一次算完
-! ✓ 推理 :: 取末位采样下一个 token，拼回去再跑一轮
-$ 现代标配：RMSNorm、SwiGLU、RoPE、Pre-Norm
-> 训练与推理共用一套权重，形式统一是 scaling 的前提
+```mermaid
+flowchart TD
+  tok["tokens<br/>[B, S]"] --> emb["Embedding + RoPE<br/>[B, S, D]<br/>词嵌入叠加位置信息"] --> blk["Transformer Block × N<br/>x = x + Attn(LN(x), causal_mask)<br/>x = x + FFN(LN(x))"] --> nrm["RMSNorm"] --> head["LM Head<br/>logits [B, S, V]"]
+  head --> tr["训练：shift + CrossEntropy<br/>所有位置一次算完"]
+  head --> inf["推理：取末位采样下一个 token<br/>拼回去再跑一轮"]
 ```
 
 ## 💻 代码实现
@@ -138,5 +131,5 @@ if __name__ == "__main__":
 - **RoPE 替代传统位置编码**
 - **GPT/LLaMA/Mistral/Qwen 都是 decoder-only**
 - **面试常问**: Decoder-only 和 Encoder-Decoder 的区别？为什么现代 LLM 都用 Decoder-only？
-
+- **训练与推理共用一套权重**: 形式统一是 scaling 的前提 —— 训练是 shift + CE 一次算完，推理是逐 token 拼回去再跑一轮
 

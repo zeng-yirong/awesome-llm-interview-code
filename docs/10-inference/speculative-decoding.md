@@ -44,16 +44,12 @@
 
 ## 📊 张量流程图
 
-```
-# Draft 先猜，Target 一次验证
-Draft model :: 小、快，自回归生成 γ 个候选
-x₁ → x₂ → x₃ → x₄ → x₅ :: 候选 token :: γ = 5，逐个猜出来
-Target model :: 大、慢，prompt 加候选一起喂进去，一次前向
-p(x₁) … p(x₅) :: 每个位置的概率 :: 一次算完，验证几乎是白送的
-! ✓ accept x₁、x₂、x₃：满足 r < p_target / p_draft
-! ✗ reject x₄：从 x₄ 按修正后的分布重新采样，x₅ 直接丢弃
-$ 一次大模型前向产出 3~4 个 token，而标准解码只有 1 个
-> 拒绝采样保证输出分布与「只用大模型」逐位一致，属于无损加速
+```mermaid
+flowchart TD
+  draft["Draft model<br/>小、快"] --> cand["x₁ → x₂ → x₃ → x₄ → x₅<br/>自回归猜出 γ = 5 个候选"]
+  cand --> target["Target model<br/>prompt + 候选一起喂，一次前向"] --> prob["p(x₁) … p(x₅)<br/>一次算完，验证几乎是白送的"]
+  prob --> acc["✓ 接受 x₁、x₂、x₃<br/>满足 r &lt; p_target / p_draft"]
+  prob --> rej["✗ 拒绝 x₄<br/>按修正分布重新采样，x₅ 直接丢弃"]
 ```
 
 ## 💻 代码实现

@@ -34,14 +34,9 @@ W_1\in\mathbb{R}^{D\times 4D},\qquad W_2\in\mathbb{R}^{4D\times D}
 
 ## 📊 张量流程图
 
-```
-# 两层全连接 + 中间一层逐元素非线性
-x :: [B, S, D] :: 残差流的输入
-h = x·W₁ᵀ :: [B, S, 4D] :: 上投影，中间维度通常取 4 倍
-a = ReLU(h) :: [B, S, 4D] :: 逐元素 max(0, x)，唯一引入非线性的地方
-y = a·W₂ᵀ :: [B, S, D] :: 下投影回残差流维度，才能与输入相加
-$ 参数量 8D²，是注意力 4D² 的两倍，约占 Transformer 的 2/3
-> 逐 token 独立：同一个 W₁ 作用在所有位置上，没有任何跨 token 交互
+```mermaid
+flowchart LR
+  x["x<br/>[B, S, D]<br/>残差流的输入"] --> h["h = x·W₁ᵀ<br/>[B, S, 4D]<br/>上投影，中间维度 4 倍"] --> a["a = ReLU(h)<br/>[B, S, 4D]<br/>唯一引入非线性的地方"] --> y["y = a·W₂ᵀ<br/>[B, S, D]<br/>下投影回残差流"]
 ```
 
 ## 💻 代码实现
@@ -83,5 +78,5 @@ if __name__ == "__main__":
 - **现代 LLM 多用 SwiGLU 替代标准 FFN+ReLU**
 - **MoE 本质上是对 FFN 层的稀疏化**
 - **面试常问**: FFN 的作用是什么？为什么参数量这么大？
-
+- **逐 token 独立**: 同一个 W₁ 作用在所有位置上，没有任何跨 token 交互 —— 跨 token 的信息交换全部由注意力负责
 

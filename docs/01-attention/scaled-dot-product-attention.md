@@ -32,18 +32,14 @@ d_k=\frac{D}{H}
 
 ## 📊 张量流程图
 
-```
-# 打分：一次 matmul 得到所有位置对的相关性
-+ Q :: [B, H, Sq, D] :: 查询
-+ K :: [B, H, Sk, D] :: 键
-S = Q·Kᵀ/√D :: [B, H, Sq, Sk] :: 除以 √D 把点积方差从 D 拉回 1
-Mask :: 因果 / padding 位置填 -1e9，softmax 后权重≈0
-A = softmax(S) :: [B, H, Sq, Sk] :: 每行和为 1
-
-# 加权求和
-+ A :: [B, H, Sq, Sk] :: 注意力权重
-+ V :: [B, H, Sk, D] :: 值
-O = A·V :: [B, H, Sq, D] :: 与 Q 同形
+```mermaid
+flowchart LR
+  q["Q<br/>[B, H, Sq, D]"] --> s["S = Q·Kᵀ/√D<br/>[B, H, Sq, Sk]"]
+  k["K<br/>[B, H, Sk, D]"] --> s
+  s --> mask["masked_fill(mask == 0, -1e9)<br/>因果 / padding 位置"]
+  mask --> a["A = softmax(·, -1)<br/>[B, H, Sq, Sk]"]
+  a --> o["O = A·V<br/>[B, H, Sq, D]"]
+  v["V<br/>[B, H, Sk, D]"] --> o
 ```
 
 ## 💻 代码实现

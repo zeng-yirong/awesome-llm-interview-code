@@ -46,18 +46,14 @@ DAPO 不改 GRPO 的骨架，只针对四个已知缺陷动手：(1) clip-higher
 
 ## 📊 张量流程图
 
-```
-# 一个 batch 里的若干组，先过滤再更新
-! ✗ group_1  rewards [1,1,1,1] → std = 0 → Â 全 0，无梯度信号
-! ✗ group_2  rewards [0,0,0,0] → std = 0 → Â 全 0，无梯度信号
-! ✓ group_3  rewards [1,0,1,0] → Â 有正有负，保留
-> 动态采样：只走有梯度信号的组，全对全错的组等于白算
-比率 ρ_{i,t} = exp(new_logp - old_logp) :: [B, G, T] :: 仍然是逐 token 的
-clip-higher :: clip(ρ, 1-ε_low, 1+ε_high) :: ε_high > ε_low，给低概率 token 留上升空间
-长度惩罚 :: R̃(y) = R(y) - α·max(0, |y| - L_max) :: 惩罚被截断的超长回答
-loss = -Σ(保留组的全部 token) / Σ|y_i| :: 分母是总 token 数，不是每组平均
-$ clip-higher 抬高的是熵的下界，缓解输出同质化
-> 四个改动互不耦合，都不动 GRPO 的骨架
+```mermaid
+flowchart TD
+  g["batch 里的各组<br/>组内奖励 r_i"] --> pen["长度惩罚<br/>R̃ = R − α·max(0, |y| − L_max)"]
+  pen --> filt["动态采样<br/>丢掉 Â 全为 0 的组<br/>全对 / 全错等于白算"]
+  filt --> adv["组内优势 Â_i<br/>只留有正有负的组"]
+  adv --> rho["ρ_{i,t} = exp(new_logp − old_logp)<br/>[B, G, T]<br/>仍然是逐 token 的"]
+  rho --> clip["clip-higher<br/>clip(ρ, 1−ε_low, 1+ε_high)<br/>上界比下界宽"]
+  clip --> loss["loss = −Σ(保留组的全部 token) / Σ|y_i|<br/>分母是总 token 数"]
 ```
 
 ## 💻 代码实现

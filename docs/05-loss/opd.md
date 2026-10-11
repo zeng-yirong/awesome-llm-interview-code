@@ -40,20 +40,14 @@ D_{\text{GJS}}(\beta)&=(1-\beta)\text{KL}(p_T\|M)+\beta\text{KL}(p_S\|M),
 
 ## 📊 张量流程图
 
-```
-# 两条路的对比
-! ✗ 离线蒸馏：教师生成 y_T，学生拟合 y_T，训练分布 ≠ 推理分布
-! ✓ on-policy 蒸馏：学生自己采样，教师在自己的轨迹上逐 token 打分
-# 学生采样：监督落在学生真正会走的路径上
-prompt x :: 同一批输入
-y_S ~ π_S(·|x) :: [B, T] :: 学生采样得到，带着自己的错误
-# 教师打分：逐 token 给出完整分布
-teacher_logits = π_T(·|x, y_<t) :: [B, T, V] :: 必须 detach / no_grad
-student_logits = π_S(·|x, y_<t) :: [B, T, V] :: 需要梯度
-per_token_loss = D(p_T ‖ p_S) :: [B, T] :: 逐 token 散度
-loss = mean(per_token_loss) :: 按有效 token 数平均，得到标量
-$ β=0 → 前向 KL（mode-covering）、β=1 → 反向 KL（mode-seeking）、β=0.5 → 标准 JSD
-> 教师的逐 token 分布本身就是稠密奖励，不需要 reward model
+```mermaid
+flowchart TD
+  x["prompt x"] --> ys["y_S ~ π_S(·|x)<br/>[B, T]<br/>学生自己采样，带着自己的错误"]
+  ys --> tl["teacher_logits = π_T(·|x, y_&lt;t)<br/>[B, T, V]<br/>必须 detach / no_grad"]
+  ys --> sl["student_logits = π_S(·|x, y_&lt;t)<br/>[B, T, V]<br/>需要梯度"]
+  tl --> l["per_token_loss = D(p_T ‖ p_S)<br/>[B, T]<br/>逐 token 散度"]
+  sl --> l
+  l --> loss["loss = mean(per_token_loss)<br/>按有效 token 数平均"]
 ```
 
 ## 💻 代码实现
