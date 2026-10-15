@@ -1,0 +1,67 @@
+name: 新增算法题目
+description: 提议一道新的 LLM 算法手撕题（不用写代码，写清想法即可）
+title: "[新题] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        只想提想法完全 OK，不必自己动手写文档。如果打算直接提 PR，请先读 [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md)。
+  - type: input
+    id: algo-name
+    attributes:
+      label: 算法名称
+      description: 中英文都写一下
+      placeholder: 例如：Ring Attention / 环形注意力
+    validations:
+      required: true
+  - type: dropdown
+    id: category
+    attributes:
+      label: 建议归入的分类
+      options:
+        - Attention
+        - Normalization
+        - Position
+        - FFN
+        - Loss
+        - Optimizer
+        - RL
+        - PEFT
+        - Efficient
+        - Inference
+        - Sampling
+        - Architecture
+        - Basics
+        - 需要新增分类（请在下方说明）
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: 为什么值得考
+      description: 面试里怎么问？跟已有的题是什么关系（是某题的变体/替代方案）？
+    validations:
+      required: true
+  - type: textarea
+    id: sketch
+    attributes:
+      label: 实现思路 / 伪代码
+      description: 核心公式、张量形状变化、关键 trick，有多少写多少
+      render: text
+    validations:
+      required: false
+  - type: input
+    id: reference
+    attributes:
+      label: 参考资料
+      description: 论文链接或权威实现
+    validations:
+      required: false
+  - type: checkboxes
+    id: intent
+    attributes:
+      label: 你打算
+      options:
+        - label: 我可以自己提 PR
+        - label: 我只提议题，希望 maintainer 接手

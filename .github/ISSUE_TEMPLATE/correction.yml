@@ -1,0 +1,41 @@
+name: 题目纠错
+description: 报告文档里的错误：公式、代码、表述、链接
+title: "[纠错] "
+labels: ["documentation"]
+body:
+  - type: input
+    id: where
+    attributes:
+      label: 哪道题
+      description: 题目名 + 文档路径（或站点上的链接）
+      placeholder: 例如：缩放点积注意力 docs/01-attention/scaled-dot-product-attention.md
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 错误类型
+      options:
+        - 公式写错了
+        - 代码跑不通 / 有 bug
+        - 讲解不准确或有误导
+        - 公式在 GitHub 上渲染失败
+        - 链接失效
+        - 排版 / 错别字
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: detail
+    attributes:
+      label: 错在哪
+      description: 现在写的是什么，应该是什么
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: 补充
+      description: 截图、报错信息、参考链接
+    validations:
+      required: false

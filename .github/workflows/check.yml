@@ -1,0 +1,37 @@
+name: Check
+
+# 文档 ↔ TS 一致性、类型、构建 —— 守住 PR 质量，不负责部署。
+# 部署见 deploy.yml（只在 push 到 main 时跑）。
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          # check-flow.mjs 直接 import src/data/problems.ts，依赖 Node 原生类型剥离：
+          # 22.6+ 需 --experimental-strip-types，23.6+ 默认开启。这里用 24 免去 flag。
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: 文档 ↔ TS 一致性校验
+        run: npm run check
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: 构建
+        run: npm run build
