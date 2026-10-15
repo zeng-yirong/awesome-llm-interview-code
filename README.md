@@ -36,19 +36,19 @@
       <td rowspan="7" align="left">👁️ Attention</td>
       <td align="center">1</td>
       <td align="left"><a href="./docs/01-attention/scaled-dot-product-attention.md">缩放点积注意力</a></td>
-      <td align="center">🔥🔥🔥</td>
+      <td align="center">🔥🔥</td>
       <td align="center">⭐⭐⭐</td>
     </tr>
     <tr>
       <td align="center">2</td>
       <td align="left"><a href="./docs/01-attention/multi-head-attention.md">多头注意力</a></td>
-      <td align="center">🔥🔥🔥</td>
+      <td align="center">🔥🔥🔥🔥🔥</td>
       <td align="center">⭐⭐⭐⭐</td>
     </tr>
     <tr>
       <td align="center">3</td>
       <td align="left"><a href="./docs/01-attention/causal-mask.md">因果掩码</a></td>
-      <td align="center">🔥🔥🔥</td>
+      <td align="center">🔥🔥</td>
       <td align="center">⭐⭐</td>
     </tr>
     <tr>
@@ -60,46 +60,46 @@
     <tr>
       <td align="center">5</td>
       <td align="left"><a href="./docs/01-attention/flash-attention.md">Flash Attention</a></td>
-      <td align="center">🔥🔥</td>
-      <td align="center">⭐⭐⭐⭐⭐</td>
+      <td align="center">🔥🔥🔥</td>
+      <td align="center">⭐⭐⭐⭐</td>
     </tr>
     <tr>
       <td align="center">6</td>
       <td align="left"><a href="./docs/01-attention/mla.md">多头潜在注意力 MLA</a></td>
-      <td align="center">🔥🔥</td>
+      <td align="center">🔥🔥🔥</td>
       <td align="center">⭐⭐⭐⭐⭐</td>
     </tr>
     <tr>
       <td align="center">7</td>
       <td align="left"><a href="./docs/01-attention/sparse-attention.md">稀疏注意力 NSA / DSA</a></td>
-      <td align="center">🔥🔥🔥</td>
+      <td align="center">🔥🔥🔥🔥</td>
       <td align="center">⭐⭐⭐⭐⭐</td>
     </tr>
     <tr>
       <td rowspan="2" align="left">📏 Normalization</td>
       <td align="center">8</td>
       <td align="left"><a href="./docs/02-normalization/layer-norm.md">层归一化 LayerNorm</a></td>
-      <td align="center">🔥🔥🔥</td>
+      <td align="center">🔥🔥</td>
       <td align="center">⭐⭐</td>
     </tr>
     <tr>
       <td align="center">9</td>
       <td align="left"><a href="./docs/02-normalization/rms-norm.md">RMS 归一化</a></td>
-      <td align="center">🔥🔥🔥</td>
+      <td align="center">🔥🔥</td>
       <td align="center">⭐⭐</td>
     </tr>
     <tr>
       <td rowspan="1" align="left">📍 Position</td>
       <td align="center">10</td>
       <td align="left"><a href="./docs/03-position/rope.md">旋转位置编码 RoPE</a></td>
-      <td align="center">🔥🔥🔥</td>
+      <td align="center">🔥🔥</td>
       <td align="center">⭐⭐⭐⭐</td>
     </tr>
     <tr>
       <td rowspan="3" align="left">🔗 FFN</td>
       <td align="center">11</td>
       <td align="left"><a href="./docs/04-ffn/ffn.md">标准前馈网络 FFN</a></td>
-      <td align="center">🔥🔥</td>
+      <td align="center">🔥🔥🔥</td>
       <td align="center">⭐⭐</td>
     </tr>
     <tr>
@@ -111,69 +111,69 @@
     <tr>
       <td align="center">13</td>
       <td align="left"><a href="./docs/04-ffn/moe.md">混合专家模型 MoE</a></td>
-      <td align="center">🔥🔥</td>
+      <td align="center">🔥🔥🔥</td>
       <td align="center">⭐⭐⭐⭐</td>
     </tr>
     <tr>
       <td rowspan="8" align="left">📉 Loss</td>
       <td align="center">14</td>
       <td align="left"><a href="./docs/05-loss/cross-entropy.md">交叉熵 / LM Loss</a></td>
-      <td align="center">🔥🔥🔥</td>
+      <td align="center">🔥🔥🔥🔥</td>
       <td align="center">⭐⭐</td>
     </tr>
     <tr>
       <td align="center">15</td>
       <td align="left"><a href="./docs/05-loss/dpo.md">DPO 损失</a></td>
-      <td align="center">🔥🔥🔥</td>
+      <td align="center">🔥🔥🔥🔥</td>
       <td align="center">⭐⭐⭐⭐</td>
     </tr>
     <tr>
       <td align="center">16</td>
       <td align="left"><a href="./docs/05-loss/ppo.md">PPO 损失</a></td>
-      <td align="center">🔥🔥🔥</td>
+      <td align="center">🔥🔥🔥🔥🔥</td>
       <td align="center">⭐⭐⭐⭐⭐</td>
     </tr>
     <tr>
       <td align="center">17</td>
       <td align="left"><a href="./docs/05-loss/grpo.md">GRPO 损失</a></td>
-      <td align="center">🔥🔥🔥</td>
+      <td align="center">🔥🔥🔥🔥🔥</td>
       <td align="center">⭐⭐⭐⭐</td>
     </tr>
     <tr>
       <td align="center">18</td>
       <td align="left"><a href="./docs/05-loss/gspo.md">GSPO 组序列策略优化</a></td>
-      <td align="center">🔥🔥🔥</td>
+      <td align="center">🔥🔥🔥🔥</td>
       <td align="center">⭐⭐⭐</td>
     </tr>
     <tr>
       <td align="center">19</td>
       <td align="left"><a href="./docs/05-loss/dapo.md">DAPO 解耦裁剪与动态采样</a></td>
-      <td align="center">🔥🔥🔥</td>
+      <td align="center">🔥🔥🔥🔥</td>
       <td align="center">⭐⭐⭐⭐</td>
     </tr>
     <tr>
       <td align="center">20</td>
       <td align="left"><a href="./docs/05-loss/opd.md">在线策略蒸馏 OPD</a></td>
-      <td align="center">🔥🔥🔥</td>
+      <td align="center">🔥🔥🔥🔥</td>
       <td align="center">⭐⭐⭐⭐</td>
     </tr>
     <tr>
       <td align="center">21</td>
       <td align="left"><a href="./docs/05-loss/self-opd.md">在线自蒸馏 Self-OPD</a></td>
-      <td align="center">🔥🔥</td>
+      <td align="center">🔥🔥🔥</td>
       <td align="center">⭐⭐⭐⭐</td>
     </tr>
     <tr>
       <td rowspan="2" align="left">⚙️ Optimizer</td>
       <td align="center">22</td>
       <td align="left"><a href="./docs/06-optimizer/adamw.md">AdamW 优化器</a></td>
-      <td align="center">🔥🔥🔥</td>
+      <td align="center">🔥🔥</td>
       <td align="center">⭐⭐⭐</td>
     </tr>
     <tr>
       <td align="center">23</td>
       <td align="left"><a href="./docs/06-optimizer/muon.md">Muon 优化器</a></td>
-      <td align="center">🔥🔥🔥</td>
+      <td align="center">🔥🔥</td>
       <td align="center">⭐⭐⭐⭐</td>
     </tr>
     <tr>
@@ -187,7 +187,7 @@
       <td rowspan="1" align="left">🎯 PEFT</td>
       <td align="center">25</td>
       <td align="left"><a href="./docs/08-peft/lora.md">LoRA</a></td>
-      <td align="center">🔥🔥🔥</td>
+      <td align="center">🔥🔥🔥🔥</td>
       <td align="center">⭐⭐⭐</td>
     </tr>
     <tr>
@@ -225,7 +225,7 @@
     <tr>
       <td align="center">31</td>
       <td align="left"><a href="./docs/10-inference/speculative-decoding.md">投机解码</a></td>
-      <td align="center">🔥🔥</td>
+      <td align="center">🔥🔥🔥</td>
       <td align="center">⭐⭐⭐⭐</td>
     </tr>
     <tr>
@@ -239,13 +239,13 @@
       <td rowspan="2" align="left">🏗️ Architecture</td>
       <td align="center">33</td>
       <td align="left"><a href="./docs/12-architecture/decoder-only.md">Decoder-Only 架构</a></td>
-      <td align="center">🔥🔥🔥</td>
+      <td align="center">🔥🔥🔥🔥</td>
       <td align="center">⭐⭐⭐</td>
     </tr>
     <tr>
       <td align="center">34</td>
       <td align="left"><a href="./docs/12-architecture/mtp.md">多 Token 预测 MTP</a></td>
-      <td align="center">🔥🔥🔥</td>
+      <td align="center">🔥🔥</td>
       <td align="center">⭐⭐⭐⭐</td>
     </tr>
     <tr>
