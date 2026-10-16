@@ -13,6 +13,7 @@
 - 🏷️ **多维筛选** — 按分类、热度、难度筛选，快速定位
 - 📊 **可视化标记** — 🔥 面试热度 + ⭐ 实现难度，优先级一目了然
 - 📖 **完整文档** — 每题含原理、公式、流程图、代码、面试要点
+- 🗳️ **社区投票** — 每题一个票箱，👍/👎 表态面试热度（票数每 6 小时同步）
 
 ---
 
@@ -326,6 +327,21 @@ npm run build
 # 预览构建结果
 npm run preview
 ```
+
+---
+
+## 🗳️ 社区投票
+
+每道题在 GitHub 上有一个**票箱 issue**（卡片上的 `Vote Now` 按钮直接跳过去），用表情表态这题在面试里的热度：
+
+- 👍 **热度高** — 面试真会考，值得花时间手撕
+- 👎 **热度低** — 偏冷门 / 了解原理即可
+
+票数由 [sync-votes.yml](./.github/workflows/sync-votes.yml) 从 issue reaction 同步，每 6 小时一次，显示在卡片上是 👍/👎 两个数字加一条占比条。
+
+- 投票靠 GitHub 账号，天然一人一票 —— 不用注册、不用防刷、不用后端
+- 票数**只作展示**，不会改动 `problems.ts` 里的 `hot` 字段（🔥 始终是人工标定）
+- 票箱 issue 挂了 `vote` 标签：[只看票箱](https://github.com/zeng-yirong/awesome-llm-interview-code/issues?q=label%3Avote) · [过滤掉票箱](https://github.com/zeng-yirong/awesome-llm-interview-code/issues?q=-label%3Avote)
 
 ---
 

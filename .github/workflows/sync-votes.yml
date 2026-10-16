@@ -1,0 +1,45 @@
+name: Sync Votes
+
+# 把票箱 issue 上的 👍/👎 同步成 votes-data 分支的 votes.json，站点直接读那个文件。
+# 这里不负责部署：票数更新不经过 Pages 构建，所以也不必重新部署。
+on:
+  schedule:
+    # 每 6 小时一次。挑 :17 避开整点——GitHub 的调度器整点最挤，常排队延迟
+    - cron: '17 */6 * * *'
+  push:
+    # 必须限定 main：脚本自己会往 votes-data 分支写数据，
+    # 这里若不限定分支，那次写入会反过来再触发一遍本 workflow，滚成死循环
+    branches: [main]
+    paths:
+      - 'src/data/problems.ts'
+      # 首次合并本 workflow / 脚本时也同步一次，好把 36 个票箱一次性建出来
+      - 'scripts/sync-votes.mjs'
+      - '.github/workflows/sync-votes.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write # 往 votes-data 分支写 votes.json（main 有分支保护，bot 推不上去，所以走独立分支）
+  issues: write # 自动补建票箱 issue
+
+concurrency:
+  group: sync-votes
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          # sync-votes.mjs 直接 import src/data/problems.ts，依赖 Node 原生类型剥离（23.6+ 默认开启）
+          node-version: '24'
+
+      # 只需要题目清单，不用装依赖
+      - name: 同步票数
+        run: node scripts/sync-votes.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

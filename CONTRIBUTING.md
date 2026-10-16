@@ -205,6 +205,16 @@ npm run dev          # http://localhost:3000
 
 ---
 
+## 关于社区投票
+
+每道题在 GitHub 上有一个带 `vote` 标签的票箱 issue（👍 热度高 / 👎 热度低），票数会显示在站点卡片上。
+
+**新增题目时你什么都不用做** —— 合并到 `main` 后，[sync-votes.yml](.github/workflows/sync-votes.yml) 会自动给新题开票箱（最迟等下一次定时同步，6 小时内）。票箱由 [scripts/sync-votes.mjs](scripts/sync-votes.mjs) 按题目 id 认领，别手工建、也别删已有的。
+
+票数只作展示，**不会**改动 `problems.ts` 里的 `hot` 字段。
+
+---
+
 ## 关于 License
 
 本项目以 [MIT](LICENSE) 协议开源。你提交的贡献将同样以 MIT 协议发布。

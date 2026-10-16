@@ -6,7 +6,8 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "check": "node scripts/check-flow.mjs"
+    "check": "node scripts/check-flow.mjs",
+    "votes": "node scripts/sync-votes.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.1.0",
