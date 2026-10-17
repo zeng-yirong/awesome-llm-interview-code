@@ -4,13 +4,17 @@ import { ChevronDown, Lightbulb, Code2, GitBranch, BookOpen } from 'lucide-react
 import CodeBlock from './CodeBlock';
 import TensorFlow from './TensorFlow';
 import MathFormula from './MathFormula';
+import VoteButton from './VoteButton';
 import { Problem } from '../data/problems';
+import { VoteCount } from '../lib/votes';
 
 interface ProblemCardProps {
   problem: Problem;
+  /** 社区投票数据（可能还没同步下来，此时按钮退化成只跳票箱列表） */
+  vote?: VoteCount;
 }
 
-export default function ProblemCard({ problem }: ProblemCardProps) {
+export default function ProblemCard({ problem, vote }: ProblemCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   return (
@@ -66,6 +70,9 @@ export default function ProblemCard({ problem }: ProblemCardProps) {
               >
                 {problem.category}
               </span>
+
+              {/* 社区投票：👍 热度高 / 👎 热度低 */}
+              <VoteButton problemId={problem.id} vote={vote} />
             </div>
 
             {/* Title */}

@@ -4,6 +4,7 @@ import { problems, categories, Category } from './data/problems';
 import ProblemCard from './components/ProblemCard';
 import SearchFilter from './components/SearchFilter';
 import { plainMath } from './lib/mathBlock';
+import { useVotes } from './lib/votes';
 import { Sun, Moon, BookOpen } from 'lucide-react';
 
 function ThemeToggle() {
@@ -26,6 +27,8 @@ function ThemeToggle() {
 }
 
 function AppContent() {
+  // 社区投票只拉一次，分发给所有卡片（见 src/lib/votes.ts）
+  const votes = useVotes();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
   const [selectedHot, setSelectedHot] = useState<number | null>(null);
@@ -166,7 +169,7 @@ function AppContent() {
             </div>
           ) : (
             filteredProblems.map(problem => (
-              <ProblemCard key={problem.id} problem={problem} />
+              <ProblemCard key={problem.id} problem={problem} vote={votes?.votes[problem.id]} />
             ))
           )}
         </div>
