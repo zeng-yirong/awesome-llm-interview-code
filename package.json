@@ -7,6 +7,7 @@
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "check": "node scripts/check-flow.mjs",
+    "check:code": "node scripts/check-code.mjs",
     "votes": "node scripts/sync-votes.mjs"
   },
   "dependencies": {

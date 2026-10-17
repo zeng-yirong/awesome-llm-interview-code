@@ -24,11 +24,21 @@ jobs:
           node-version: '24'
           cache: 'npm'
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          # 体检脚本只用标准库 ast，不需要装 torch / 不联网。
+          # 固定版本是为了让 AST 行为在不同时间跑出来的结果一致。
+          python-version: '3.12'
+
       - name: Install dependencies
         run: npm ci
 
       - name: 文档 ↔ TS 一致性校验
         run: npm run check
+
+      - name: Python 片段体检
+        run: npm run check:code
 
       - name: 类型检查
         run: npm run typecheck
