@@ -2703,7 +2703,7 @@ $$`,
 
 @torch.no_grad()
 def speculative_decode(draft_model, target_model, prompt_ids,
-                       gamma=5, temperature=1.0):
+                       gamma=5, temperature=1.0, max_len=100):
     """
     draft_model: 小模型 (快速生成候选)
     target_model: 大模型 (验证候选)
@@ -2714,13 +2714,15 @@ def speculative_decode(draft_model, target_model, prompt_ids,
     while len(generated) < max_len:
         # Step 1: Draft model 生成 γ 个候选
         draft_tokens = []
+        draft_probs = []
         input_ids = torch.tensor([generated])
         for _ in range(gamma):
             logits = draft_model(input_ids).logits[:, -1]
-            next_token = torch.multinomial(
-                F.softmax(logits/temperature, dim=-1), 1)
+            probs = F.softmax(logits/temperature, dim=-1)
+            next_token = torch.multinomial(probs, 1)
             draft_tokens.append(next_token.item())
-            input_ids = torch.cat([input_ids, next_token.unsqueeze(0)], dim=1)
+            draft_probs.append(probs)              # 拒绝采样要用它算 p_draft
+            input_ids = torch.cat([input_ids, next_token], dim=1)
 
         # Step 2: Target model 并行验证所有候选
         full_ids = torch.tensor([generated + draft_tokens])
@@ -2733,14 +2735,14 @@ def speculative_decode(draft_model, target_model, prompt_ids,
         accepted = 0
         for i, token in enumerate(draft_tokens):
             p_target = target_probs[i, token].item()
-            p_draft = draft_probs[i, token].item() if i < len(draft_probs) else 1.0
+            p_draft = draft_probs[i][0, token].item()
             r = torch.rand(1).item()
             if r < p_target / p_draft:
                 accepted += 1
                 generated.append(token)
             else:
                 # 拒绝: 从修正分布重新采样
-                corrected = torch.clamp(target_probs[i] - draft_probs[i], min=0)
+                corrected = torch.clamp(target_probs[i] - draft_probs[i][0], min=0)
                 corrected /= corrected.sum()
                 generated.append(torch.multinomial(corrected, 1).item())
                 break
