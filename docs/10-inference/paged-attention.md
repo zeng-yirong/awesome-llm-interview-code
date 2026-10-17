@@ -86,7 +86,8 @@ class PagedKVCache:
         block_idx = position // self.block_size
         block_offset = position % self.block_size
         phys_id = self.block_tables[seq_id][block_idx]
-        self.physical_blocks[phys_id, :, :, block_offset] = (key, value)
+        self.physical_blocks[phys_id, :, 0, block_offset] = key
+        self.physical_blocks[phys_id, :, 1, block_offset] = value
 
     def attention(self, seq_id, q):
         """使用块表进行注意力计算"""

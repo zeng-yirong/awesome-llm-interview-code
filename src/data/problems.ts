@@ -2614,19 +2614,25 @@ class PagedKVCache:
         )
         # 块表: 每个序列的逻辑块 → 物理块映射
         self.block_tables = {}   # seq_id → [physical_block_ids]
+        self.free_blocks = list(range(num_blocks))
 
     def allocate(self, seq_id, num_tokens):
         """为序列分配物理块"""
         num_blocks = (num_tokens + self.block_size - 1) // self.block_size
-        free_blocks = self._get_free_blocks(num_blocks)
-        self.block_tables[seq_id] = free_blocks
+        if num_blocks > len(self.free_blocks):
+            raise RuntimeError("Out of memory")
+
+        allocated = self.free_blocks[:num_blocks]
+        self.free_blocks = self.free_blocks[num_blocks:]
+        self.block_tables[seq_id] = allocated
 
     def write(self, seq_id, position, key, value):
         """写入 KV 到对应的物理块"""
         block_idx = position // self.block_size
         block_offset = position % self.block_size
         phys_id = self.block_tables[seq_id][block_idx]
-        self.physical_blocks[phys_id, :, :, block_offset] = (key, value)
+        self.physical_blocks[phys_id, :, 0, block_offset] = key
+        self.physical_blocks[phys_id, :, 1, block_offset] = value
 
     def attention(self, seq_id, q):
         """使用块表进行注意力计算"""
