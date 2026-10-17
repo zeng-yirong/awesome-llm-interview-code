@@ -1167,7 +1167,7 @@ class SwiGLU(nn.Module):
       },
     ],
     formula: String.raw`$$
-\text{MoE}(x)=\sum_{i\in\text{TopK}}\text{softmax}\!\left(\text{Router}(x)\right)_i E_i(x)
+\text{MoE}(x)=\sum_{i\in\text{TopK}}w_i E_i(x),\qquad w_i=\frac{e^{z_i}}{\sum_{j\in\text{TopK}}e^{z_j}},\qquad z=\text{Router}(x)\in\mathbb{R}^{N}
 $$
 
 $$
