@@ -87,8 +87,11 @@ class KVCacheAttention(nn.Module):
             v = torch.cat([kv_cache[1], v], dim=2)
         new_cache = (k, v)
 
-        # 注意力计算
+        # 注意力计算（Prefill 一次算多个位置，未来必须屏蔽；Decode 时 S=1，掩码自动失效）
         scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.dh)
+        if S > 1:
+            causal = torch.tril(torch.ones(S, S, dtype=torch.bool, device=x.device))
+            scores = scores.masked_fill(~causal, float('-inf'))
         out = torch.matmul(F.softmax(scores, dim=-1), v)
         out = out.transpose(1, 2).contiguous().view(B, S, -1)
         return self.wo(out), new_cache
@@ -119,5 +122,5 @@ if __name__ == "__main__":
 - **长序列推理的主要显存瓶颈**
 - **PagedAttention (vLLM)** 用分页管理 KV Cache 减少碎片
 - **面试常问**: KV Cache 有多大？如何优化？
-- **不缓存的代价**: 每步要对全部历史重算，累计 Σt = O(S²)；LLaMA 2 70B 在 4096 长度、fp16 下缓存约 80GB，比模型本身还大
+- **不缓存的代价**: 每步要对全部历史重算，累计 Σt = O(S²)；KV Cache 本身也不小 —— LLaMA 2 70B (GQA，8 个 KV head) 单条 4096 长度、fp16 约 1.3GB，并发 128 条就是 ~168GB，反超 fp16 权重的 ~140GB
 

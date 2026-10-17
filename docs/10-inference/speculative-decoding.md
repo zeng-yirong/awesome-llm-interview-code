@@ -82,7 +82,7 @@ def speculative_decode(draft_model, target_model, prompt_ids,
             next_token = torch.multinomial(probs, 1)
             draft_tokens.append(next_token.item())
             draft_probs.append(probs)
-            input_ids = torch.cat([input_ids, next_token.unsqueeze(0)], dim=1)
+            input_ids = torch.cat([input_ids, next_token], dim=1)
 
         # Step 2: Target model 并行验证所有候选
         full_ids = torch.tensor([generated + draft_tokens])

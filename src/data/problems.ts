@@ -404,12 +404,10 @@ $$`,
   end`,
     code: `import torch, math
 
-def flash_attention_qk(Q, K, V, block_size=64):
+def flash_attention(Q, K, V, block_size=64):
     """Flash Attention 简化实现 (核心思想)"""
     B, H, N, D = Q.shape
     O = torch.zeros_like(Q)
-    l = torch.zeros(B, H, N, 1, device=Q.device)
-    m = torch.full((B, H, N, 1), float('-inf'), device=Q.device)
 
     for i in range(0, N, block_size):
         Qi = Q[:, :, i:i+block_size]
@@ -522,6 +520,9 @@ class KVCacheAttention(nn.Module):
         new_cache = (k, v)
 
         scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.dh)
+        if S > 1:     # Prefill：一次算多个位置，未来必须屏蔽；Decode 时 S=1，掩码自动失效
+            causal = torch.tril(torch.ones(S, S, dtype=torch.bool, device=x.device))
+            scores = scores.masked_fill(~causal, float('-inf'))
         out = torch.matmul(F.softmax(scores, dim=-1), v)
         out = out.transpose(1, 2).contiguous().view(B, S, -1)
         return self.wo(out), new_cache`,
@@ -531,7 +532,7 @@ class KVCacheAttention(nn.Module):
       'GQA 减少 KV Cache (多个 Q 共享 KV)',
       '长序列推理的主要显存瓶颈',
       'PagedAttention (vLLM) 用分页管理 KV Cache 减少碎片',
-      '不缓存的代价: 每步要对全部历史重算，累计 Σt = O(S²)；LLaMA 2 70B 在 4096 长度、fp16 下缓存约 80GB，比模型本身还大',
+      '不缓存的代价: 每步要对全部历史重算，累计 Σt = O(S²)；KV Cache 本身也不小 —— LLaMA 2 70B (GQA，8 个 KV head) 单条 4096 长度、fp16 约 1.3GB，并发 128 条就是 ~168GB，反超 fp16 权重的 ~140GB',
     ],
     source: 'both',
   },
@@ -756,7 +757,7 @@ class LightningIndexer(nn.Module):
         k = self.wk(h)                                                          # [B,S,d]
         w = self.w_scale(h).transpose(1, 2)                                     # [B,H,S]
         dot = q @ k.transpose(-1, -2)                                           # [B,H,S,S]
-        score = (w * torch.relu(dot)).sum(dim=1)                                # [B,S,S]
+        score = (w.unsqueeze(-1) * torch.relu(dot)).sum(dim=1)                                # [B,S,S]
         causal = torch.tril(torch.ones(S, S, dtype=torch.bool, device=h.device))
         score = score.masked_fill(~causal, -1e9)                                # 只看过去
         return score.topk(min(top_k, S), dim=-1).indices                        # [B,S,top_k]`,
@@ -890,7 +891,7 @@ $$`,
     code: `import torch, torch.nn as nn
 
 class RMSNorm(nn.Module):
-    def __init__(self, d_model, eps=1e-8):
+    def __init__(self, d_model, eps=1e-5):
         super().__init__()
         self.eps = eps
         self.gamma = nn.Parameter(torch.ones(d_model))  # 只有缩放
@@ -1164,7 +1165,7 @@ class SwiGLU(nn.Module):
       },
     ],
     formula: String.raw`$$
-\text{MoE}(x)=\sum_{i\in\text{TopK}}\text{softmax}\!\left(\text{Router}(x)\right)_i E_i(x)
+\text{MoE}(x)=\sum_{i\in\text{TopK}}w_i E_i(x),\qquad w_i=\frac{e^{z_i}}{\sum_{j\in\text{TopK}}e^{z_j}},\qquad z=\text{Router}(x)\in\mathbb{R}^{N}
 $$
 
 $$
@@ -2614,19 +2615,25 @@ class PagedKVCache:
         )
         # 块表: 每个序列的逻辑块 → 物理块映射
         self.block_tables = {}   # seq_id → [physical_block_ids]
+        self.free_blocks = list(range(num_blocks))
 
     def allocate(self, seq_id, num_tokens):
         """为序列分配物理块"""
         num_blocks = (num_tokens + self.block_size - 1) // self.block_size
-        free_blocks = self._get_free_blocks(num_blocks)
-        self.block_tables[seq_id] = free_blocks
+        if num_blocks > len(self.free_blocks):
+            raise RuntimeError("Out of memory")
+
+        allocated = self.free_blocks[:num_blocks]
+        self.free_blocks = self.free_blocks[num_blocks:]
+        self.block_tables[seq_id] = allocated
 
     def write(self, seq_id, position, key, value):
         """写入 KV 到对应的物理块"""
         block_idx = position // self.block_size
         block_offset = position % self.block_size
         phys_id = self.block_tables[seq_id][block_idx]
-        self.physical_blocks[phys_id, :, :, block_offset] = (key, value)
+        self.physical_blocks[phys_id, :, 0, block_offset] = key
+        self.physical_blocks[phys_id, :, 1, block_offset] = value
 
     def attention(self, seq_id, q):
         """使用块表进行注意力计算"""
@@ -2703,7 +2710,7 @@ $$`,
 
 @torch.no_grad()
 def speculative_decode(draft_model, target_model, prompt_ids,
-                       gamma=5, temperature=1.0):
+                       gamma=5, temperature=1.0, max_len=100):
     """
     draft_model: 小模型 (快速生成候选)
     target_model: 大模型 (验证候选)
@@ -2714,13 +2721,15 @@ def speculative_decode(draft_model, target_model, prompt_ids,
     while len(generated) < max_len:
         # Step 1: Draft model 生成 γ 个候选
         draft_tokens = []
+        draft_probs = []
         input_ids = torch.tensor([generated])
         for _ in range(gamma):
             logits = draft_model(input_ids).logits[:, -1]
-            next_token = torch.multinomial(
-                F.softmax(logits/temperature, dim=-1), 1)
+            probs = F.softmax(logits/temperature, dim=-1)
+            next_token = torch.multinomial(probs, 1)
             draft_tokens.append(next_token.item())
-            input_ids = torch.cat([input_ids, next_token.unsqueeze(0)], dim=1)
+            draft_probs.append(probs)              # 拒绝采样要用它算 p_draft
+            input_ids = torch.cat([input_ids, next_token], dim=1)
 
         # Step 2: Target model 并行验证所有候选
         full_ids = torch.tensor([generated + draft_tokens])
@@ -2733,14 +2742,14 @@ def speculative_decode(draft_model, target_model, prompt_ids,
         accepted = 0
         for i, token in enumerate(draft_tokens):
             p_target = target_probs[i, token].item()
-            p_draft = draft_probs[i, token].item() if i < len(draft_probs) else 1.0
+            p_draft = draft_probs[i][0, token].item()
             r = torch.rand(1).item()
             if r < p_target / p_draft:
                 accepted += 1
                 generated.append(token)
             else:
                 # 拒绝: 从修正分布重新采样
-                corrected = torch.clamp(target_probs[i] - draft_probs[i], min=0)
+                corrected = torch.clamp(target_probs[i] - draft_probs[i][0], min=0)
                 corrected /= corrected.sum()
                 generated.append(torch.multinomial(corrected, 1).item())
                 break
@@ -2932,7 +2941,7 @@ def mtp_loss(mtp_modules, h0, input_ids, embed, lm_head, num_heads=1, lam=0.3):
             break
         target = input_ids[:, 1 + k:]             # 目标: x_{i+1+k}
         tok_emb = embed(input_ids[:, k:-1])       # 输入: x_{i+k}
-        h_prev = mtp_modules[k - 1](h_prev[:, :-1], tok_emb)
+        h_prev = mtp_modules[k - 1](h_prev[:, :tok_emb.size(1)], tok_emb)
 
         logits = lm_head(h_prev)                  # [B, T-k-1, V]
         logits_list.append(logits)
@@ -3105,7 +3114,7 @@ class TwoLayerNet:
 
     def backward(self, y_true, lr=0.01):
         # Loss = MSE = mean((y - y_true)²)
-        dy = 2 * (self.y - y_true) / y_true.size(0)  # ∂L/∂y
+        dy = 2 * (self.y - y_true) / y_true.numel()  # ∂L/∂y
 
         # ∂L/∂W2 = aᵀ · dy
         dW2 = self.a.T @ dy
