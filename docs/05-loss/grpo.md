@@ -110,13 +110,17 @@ class GRPOTrainer:
         advantages = grpo_advantages(rewards)
         
         # 4. GRPO 更新
+        # old_logp 必须是「更新前、采样时的策略」算出来的，而且要 detach：
+        # 它只是比值的基准常量；若和 new_logp 一样由当前策略现算，ratio 恒等于 1、梯度就没了
+        with torch.no_grad():
+            old_logps = [self.policy.get_logprobs(prompts, resp) for resp in responses]
+
         for i in range(self.group_size):
-            old_logp = self.policy.get_logprobs(prompts, responses[i])
             new_logp = self.policy.get_logprobs(prompts, responses[i])
             ref_logp = self.ref.get_logprobs(prompts, responses[i])
             
             kl = kl_penalty(new_logp, ref_logp)
-            loss = grpo_loss(old_logp, new_logp, advantages[:, i],
+            loss = grpo_loss(old_logps[i], new_logp, advantages[:, i],
                            ref_kl=kl)
             loss.backward()
 
