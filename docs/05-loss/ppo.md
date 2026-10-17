@@ -72,11 +72,15 @@ def ppo_loss(old_logp, new_logp, advantages, eps=0.2):
 
 # 完整 PPO 训练流程
 class PPOTrainer:
-    def __init__(self, policy_model, ref_model, reward_model, critic_model):
+    def __init__(self, policy_model, ref_model, reward_model, critic_model,
+                 optimizer, ppo_epochs=4, kl_coef=0.02):
         self.policy = policy_model
         self.ref = ref_model
         self.reward = reward_model
         self.critic = critic_model
+        self.optimizer = optimizer
+        self.ppo_epochs = ppo_epochs
+        self.kl_coef = kl_coef
     
     def train_step(self, prompts, responses):
         # 1. 计算 reward
@@ -87,20 +91,24 @@ class PPOTrainer:
         advantages = compute_gae(rewards, values)
         
         # 3. 计算 log probs
-        old_logp = self.policy.get_logprobs(prompts, responses)
+        # rollout 时（更新前）算，并 detach：它是比值的基准常量，
+        # 若跟着一起求梯度，ratio 里 new/old 两项的梯度会互相抵消
+        with torch.no_grad():
+            old_logp = self.policy.get_logprobs(prompts, responses)
         
         # 4. PPO 更新
-        for _ in range(ppo_epochs):
+        for _ in range(self.ppo_epochs):
             new_logp = self.policy.get_logprobs(prompts, responses)
             loss = ppo_loss(old_logp, new_logp, advantages)
             
             # KL penalty (防止偏离参考模型太远)
             ref_logp = self.ref.get_logprobs(prompts, responses)
             kl = (new_logp - ref_logp).mean()
-            loss += kl_coef * kl
+            loss += self.kl_coef * kl
             
+            self.optimizer.zero_grad()
             loss.backward()
-            optimizer.step()
+            self.optimizer.step()
 
 # 测试
 if __name__ == "__main__":
