@@ -68,8 +68,6 @@ def flash_attention(Q, K, V, block_size=64):
     """
     B, H, N, D = Q.shape
     O = torch.zeros_like(Q)
-    l = torch.zeros(B, H, N, 1, device=Q.device)
-    m = torch.full((B, H, N, 1), float('-inf'), device=Q.device)
 
     for i in range(0, N, block_size):
         Qi = Q[:, :, i:i+block_size]
