@@ -756,7 +756,7 @@ class LightningIndexer(nn.Module):
         k = self.wk(h)                                                          # [B,S,d]
         w = self.w_scale(h).transpose(1, 2)                                     # [B,H,S]
         dot = q @ k.transpose(-1, -2)                                           # [B,H,S,S]
-        score = (w * torch.relu(dot)).sum(dim=1)                                # [B,S,S]
+        score = (w.unsqueeze(-1) * torch.relu(dot)).sum(dim=1)                                # [B,S,S]
         causal = torch.tril(torch.ones(S, S, dtype=torch.bool, device=h.device))
         score = score.masked_fill(~causal, -1e9)                                # 只看过去
         return score.topk(min(top_k, S), dim=-1).indices                        # [B,S,top_k]`,

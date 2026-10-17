@@ -141,7 +141,7 @@ class LightningIndexer(nn.Module):
 
         # 每个 indexer head 打分后 ReLU（可跑 FP8），再用标量权重加权求和
         dot = q @ k.transpose(-1, -2)                                         # [B,H,S,S]
-        score = (w * torch.relu(dot)).sum(dim=1)                              # [B,S,S]
+        score = (w.unsqueeze(-1) * torch.relu(dot)).sum(dim=1)                              # [B,S,S]
 
         # 因果: 只看过去
         causal = torch.tril(torch.ones(S, S, dtype=torch.bool, device=h.device))
