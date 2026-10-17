@@ -928,12 +928,12 @@ class RMSNorm(nn.Module):
     hot: 3,
     difficulty: 4,
     oneLiner: '旋转 Q/K 向量注入位置信息，LLaMA 标配',
-    principle: '将位置信息编码为旋转角度，对 Q 和 K 的每对相邻维度施加旋转。旋转后 Q·K 的点积自然包含相对位置信息。相比绝对位置编码（无法处理变长序列）和 ALiBi（需要额外参数），RoPE 无需额外参数即可自然编码相对位置。',
+    principle: '将位置信息编码为旋转角度，对 Q 和 K 的 head 维度成对施加旋转：实现按前半区与后半区配对，即 (第 i 维, 第 i+d/2 维) 共用同一个角度。旋转后 Q·K 的点积自然包含相对位置信息。相比绝对位置编码（无法处理变长序列）和 ALiBi（需要额外参数），RoPE 无需额外参数即可自然编码相对位置。',
     principleSections: [
       {
         title: '核心思想',
         items: [
-          '通过旋转矩阵将位置信息注入 Q 和 K。对每对相邻维度 [x₁, x₂] 施加旋转 [-x₂, x₁]，等价于旋转 90°。旋转后 q_m · k_n 只依赖 m-n，天然具有相对位置感知能力。只对 Q 和 K 施加旋转，V 不变。',
+          '通过旋转矩阵将位置信息注入 Q 和 K。实现用的是 half-split 布局：把 head 维度劈成前后两半 x₁、x₂，第 i 组配对是 (x₁ 的第 i 维, x₂ 的第 i 维)，对每一对施加旋转 [-x₂, x₁]（单独看即旋转 90°）。原论文写的是相邻两维配对 (x₂ᵢ, x₂ᵢ₊₁)，与 half-split 只差一个维度排列、数学等价 —— 但两种布局混用会静默算错。旋转后 q_m · k_n 只依赖 m-n，天然具有相对位置感知能力。只对 Q 和 K 施加旋转，V 不变。',
         ],
       },
       {
@@ -942,7 +942,7 @@ class RMSNorm(nn.Module):
           '预计算频率：inv_freq = 1/(10000^(2i/d))',
           '计算角度：angles = outer(positions, inv_freq)',
           '预计算 cos/sin：cos = cos(angles), sin = sin(angles)',
-          '定义 rotate_half：chunk(x, 2, dim=-1) → cat(-x2, x1)',
+          '定义 rotate_half：chunk(x, 2, dim=-1) 劈成前后两半 → cat(-x2, x1)（配对是 (i, i+d/2)，不是相邻两维）',
           '应用旋转：q_rot = q × cos + rotate_half(q) × sin',
           '对 k 同样应用旋转',
         ],
@@ -953,7 +953,7 @@ f(q,m)=q\odot\cos(m\theta)+\text{rotate\_half}(q)\odot\sin(m\theta)
 $$
 
 $$
-\text{rotate\_half}([x_1,x_2])=[-x_2,\ x_1],
+\text{rotate\_half}\!\left(\left[x_1;x_2\right]\right)=\left[-x_2;x_1\right],\quad x_1,x_2\in\mathbb{R}^{d/2},
 \qquad
 R(m\theta)=\begin{pmatrix}\cos m\theta & -\sin m\theta\\[2pt] \sin m\theta & \cos m\theta\end{pmatrix}
 $$
@@ -1002,7 +1002,7 @@ class RotaryEmbedding(nn.Module):
         k_rot = k * cos + rotate_half(k) * sin
         return q_rot, k_rot`,
     keyPoints: [
-      'rotate_half: chunk 两半 → cat(-x2, x1) = 旋转 90°',
+      'rotate_half: chunk 两半 → cat(-x2, x1) = 旋转 90°；配对是 (i, i+d/2)，按相邻两维写会算错',
       '只对 Q 和 K 施加旋转，V 不变',
       '预计算 cos/sin 避免重复计算',
       '天然具有相对位置感知: q_m · k_n 只依赖 m-n',
@@ -1277,6 +1277,8 @@ $$`,
 
 def lm_loss(logits, labels, ignore_index=-100):
     """
+    语言模型损失（下一个 token 预测）
+
     logits: [B, S, vocab_size]
     labels: [B, S]
     """
@@ -2122,7 +2124,7 @@ def qk_clip_(model, tau=100.0):
     hot: 3,
     difficulty: 3,
     oneLiner: 'ΔW = BA，低秩分解高效微调',
-    principle: '冻结预训练权重 W，用低秩矩阵 B·A 近似权重更新 ΔW。相比全量微调需要巨大显存，LoRA 只训练少量参数（约 0.1%），效果接近全量微调。A 用高斯初始化，B 用零初始化，保证初始输出不变。',
+    principle: '冻结预训练权重 W，用低秩矩阵 B·A 近似权重更新 ΔW。相比全量微调需要巨大显存，LoRA 只训练少量参数（r=8 时单个矩阵约 0.4%，只挂在 q/v 上不到整个模型的 0.1%），效果接近全量微调。A 用 kaiming 初始化（与 nn.Linear 的默认初始化同一套；原论文写的是高斯），B 用零初始化，保证初始输出不变。',
     principleSections: [
       {
         title: '核心思想',
@@ -2157,7 +2159,7 @@ A\sim\text{kaiming},\qquad B=\mathbf{0}\ \Rightarrow\ BA=0\ \text{at init}
 $$
 
 $$
-\frac{\text{trainable}}{\text{total}}=\frac{r(d+k)}{dk}\approx 0.1\%,
+\frac{\text{trainable}}{\text{total}}=\frac{r(d+k)}{dk}\approx 0.4\%\quad(r=8,\ d=k=4096),
 \qquad
 W_{\text{new}}=W_0+\frac{\alpha}{r}BA\ \ \text{(mergeable at inference)}
 $$`,
@@ -2555,9 +2557,11 @@ def per_block_quant(x, block_size=128, fmt="e4m3"):
 
 def fp8_gemm_sim(x, w, block_size=128):
     """模拟 FP8 块级矩阵乘法: FP8 乘 + 高精度累加; x: [M, K]  w: [K, N]"""
-    # 激活按 1×128 的块量化（沿 K 维切块）
+    # 激活：沿 K 维每 128 个元素一块（per-token per-128-channel）
     x_hat, _ = per_block_quant(x, block_size, fmt="e4m3")
-    # 权重按 128×128 的块量化
+    # 权重：转置成 [N, K] 后同样只沿最后一维每 128 个一块 ——
+    # DeepSeek-V3 的真实实现按 128×128 的 tile 取一个 amax（两个维度都切），
+    # 这里只切 K 维，粒度更细、精度只会更好，是同一套缩放思路的简化
     w_hat, _ = per_block_quant(w.t().contiguous(), block_size, fmt="e4m3")
     # 真实实现是 FP8 张量核 + 高精度累加；这里用反量化后的值算等价的数学结果
     return x_hat @ w_hat.t().contiguous()`,

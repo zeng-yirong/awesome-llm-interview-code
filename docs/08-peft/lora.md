@@ -5,7 +5,7 @@
 ## 📌 原理与思想
 
 ### 核心概念
-冻结预训练权重 W，用低秩矩阵 B·A 近似权重更新 ΔW。相比全量微调需要巨大显存，LoRA 只训练少量参数（约 0.1%），效果接近全量微调。A 用高斯初始化，B 用零初始化，保证初始输出不变。
+冻结预训练权重 W，用低秩矩阵 B·A 近似权重更新 ΔW。相比全量微调需要巨大显存，LoRA 只训练少量参数（r=8 时单个矩阵约 0.4%，只挂在 q/v 上不到整个模型的 0.1%），效果接近全量微调。A 用 kaiming 初始化（与 nn.Linear 的默认初始化同一套；原论文写的是高斯），B 用零初始化，保证初始输出不变。
 
 ### 核心思想
 利用低秩分解近似权重更新：ΔW ≈ B·A，其中 A: [r, k]，B: [d, r]，r ≪ min(d, k)。B 初始化为零保证训练初期 LoRA 贡献为 0，通过 scaling = α/r 控制更新幅度。
@@ -35,7 +35,7 @@ A\sim\text{kaiming},\qquad B=\mathbf{0}\ \Rightarrow\ BA=0\ \text{at init}
 ```
 
 ```math
-\frac{\text{trainable}}{\text{total}}=\frac{r(d+k)}{dk}\approx 0.1\%,
+\frac{\text{trainable}}{\text{total}}=\frac{r(d+k)}{dk}\approx 0.4\%\quad(r=8,\ d=k=4096),
 \qquad
 W_{\text{new}}=W_0+\frac{\alpha}{r}BA\ \ \text{(mergeable at inference)}
 ```

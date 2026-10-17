@@ -92,9 +92,11 @@ def fp8_gemm_sim(x, w, block_size=128):
     模拟 FP8 块级矩阵乘法: FP8 乘 + 高精度累加
     x: [M, K]   w: [K, N]
     """
-    # 激活按 1×128 的块量化（沿 K 维切块）
+    # 激活：沿 K 维每 128 个元素一块（per-token per-128-channel）
     x_hat, _ = per_block_quant(x, block_size, fmt="e4m3")
-    # 权重按 128×128 的块量化
+    # 权重：转置成 [N, K] 后同样只沿最后一维每 128 个一块 ——
+    # DeepSeek-V3 的真实实现按 128×128 的 tile 取一个 amax（两个维度都切），
+    # 这里只切 K 维，粒度更细、精度只会更好，是同一套缩放思路的简化
     w_hat, _ = per_block_quant(w.t().contiguous(), block_size, fmt="e4m3")
 
     # 真实实现是 FP8 张量核 + 高精度累加；这里用反量化后的值算等价的数学结果
