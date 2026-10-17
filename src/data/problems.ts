@@ -2934,7 +2934,7 @@ def mtp_loss(mtp_modules, h0, input_ids, embed, lm_head, num_heads=1, lam=0.3):
             break
         target = input_ids[:, 1 + k:]             # 目标: x_{i+1+k}
         tok_emb = embed(input_ids[:, k:-1])       # 输入: x_{i+k}
-        h_prev = mtp_modules[k - 1](h_prev[:, :-1], tok_emb)
+        h_prev = mtp_modules[k - 1](h_prev[:, :tok_emb.size(1)], tok_emb)
 
         logits = lm_head(h_prev)                  # [B, T-k-1, V]
         logits_list.append(logits)
