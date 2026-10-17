@@ -2344,6 +2344,8 @@ $$`,
 # PyTorch 原生 AMP (Automatic Mixed Precision)
 scaler = torch.amp.GradScaler('cuda')
 
+# 下面这段要贴进训练循环里，model / optimizer / dataloader 由调用方提供
+# lint:allow model optimizer dataloader
 for batch in dataloader:
     optimizer.zero_grad()
     # 自动将操作转为 FP16
@@ -2415,14 +2417,16 @@ $$`,
     b["Layer₁ → act₁* → Layer₂ → Layer₃ → act₃* → …<br/>带 * 的是检查点；反向时从最近的检查点重跑一次前向"]
   end`,
     code: `import torch
+import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
+from transformers import AutoModel
 
 # 方法1: 使用 torch.utils.checkpoint
 def custom_forward(x, weight1, weight2):
     return torch.relu(x @ weight1) @ weight2
 
 # 不保存中间激活，反向时重新计算
-output = checkpoint(custom_forward, x, w1, w2, use_reentrant=False)
+output = checkpoint(custom_forward, x, weight1, weight2, use_reentrant=False)
 
 # 方法2: HuggingFace 模型直接开启
 model = AutoModel.from_pretrained(
@@ -2602,7 +2606,9 @@ $$`,
     direction LR
     lv["逻辑视图<br/>seq₁ = [block₀, block₁, block₂, …]"] --> bt["块表<br/>logical → physical<br/>seq₁_b₀ → GPU_block_3"] --> ph["物理显存<br/>[block₀][block₁]…[blockₙ]<br/>非连续，按需分配"] --> at["注意力<br/>按块表取物理块<br/>对计算本身透明，用完即还"]
   end`,
-    code: `# PagedAttention 核心思想 (简化伪代码)
+    code: `import torch
+
+# PagedAttention 核心思想 (简化伪代码)
 
 class PagedKVCache:
     def __init__(self, block_size=16, num_blocks=1000, n_layers=32,

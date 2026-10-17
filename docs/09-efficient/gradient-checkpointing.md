@@ -48,6 +48,7 @@ flowchart TD
 
 ```python
 import torch
+import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
 # 方法1: 使用 torch.utils.checkpoint
@@ -55,7 +56,7 @@ def custom_forward(x, weight1, weight2):
     return torch.relu(x @ weight1) @ weight2
 
 # 不保存中间激活，反向时重新计算
-output = checkpoint(custom_forward, x, w1, w2, use_reentrant=False)
+output = checkpoint(custom_forward, x, weight1, weight2, use_reentrant=False)
 
 # 方法2: HuggingFace 模型直接开启
 from transformers import AutoModel

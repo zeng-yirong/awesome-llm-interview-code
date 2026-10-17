@@ -170,17 +170,20 @@ const DOC_OF = {
 
 5. **一道题一个 PR。** 除非是同一个笔误的批量修正，否则别把多道题塞进一个 PR，review 会很痛苦。
 
-6. **别动 `main` 分支**，一律走 fork → 分支 → PR。`main` 受保护，且合并到 `main` 会自动触发 GitHub Pages 部署。
+6. **Python 片段要能通过静态体检。** `npm run check:code` 会扫题库和文档里每一个 Python 片段，`import` 少了、变量名和函数签名对不上、`self.X` 在类里从没赋值，都会失败。片段是**给人读的**，不必能直接跑，但提到的名字得有个出处；确实要引用调用方给的变量时，写一行 `# lint:allow`（见[本地自检](#本地自检)）。
+
+7. **别动 `main` 分支**，一律走 fork → 分支 → PR。`main` 受保护，且合并到 `main` 会自动触发 GitHub Pages 部署。
 
 ---
 
 ## 本地自检
 
-提交前请跑一遍，CI 跑的就是这两条：
+提交前请跑一遍，CI 跑的就是这三条：
 
 ```bash
 npm install
 npm run check        # 文档 ↔ TS 一致性 + 公式渲染 + 流程图语法
+npm run check:code   # Python 片段静态体检（未定义的名字、不存在的 self 方法…）
 npm run typecheck    # TypeScript 类型检查
 ```
 
@@ -190,7 +193,27 @@ npm run typecheck    # TypeScript 类型检查
 npm run dev          # http://localhost:3000
 ```
 
-`npm run check` 是只读的，只打印报告，不会改你的文件。
+两个 check 都是只读的，只打印报告，不会改你的文件。
+
+### Python 片段体检
+
+`npm run check:code` 用 Python 标准库的 `ast` 扫题库 36 段 + 文档 36 段，查三类问题：
+
+| 问题 | 例子 |
+|---|---|
+| 语法错误 | 括号/缩进写坏 |
+| 用了没定义的名字 | 忘了 `import torch`；函数签名是 `weight1`，调用处却写 `w1` |
+| `self.X` 在类里从未赋值 | 调了一个不存在的方法 |
+
+**片段只做静态检查、不执行** —— 不需要装 torch，也不需要联网，只要本机有 Python 3（CI 上是 3.12）。
+
+体检有意从宽（不做严格的词法域分析，宁可漏报不误报），所以片段里可以只写关键几行。遇到这几类误报，按由窄到宽的顺序处理：
+
+| 情况 | 做法 |
+|---|---|
+| 这一段引用调用方给的变量（如训练循环片段里的 `model` / `optimizer` / `dataloader`） | 片段里加一行 `# lint:allow model optimizer dataloader`，这行同时也是给读者的说明 |
+| 框架基类提供的属性（`nn.Module` 的 `register_buffer`、`Optimizer` 的 `param_groups`） | 已在 `scripts/code-lint.py` 的 `ALLOW_SELF` 里 |
+| 题库里别的题实现好的组件（`RMSNorm`、`MultiHeadAttention`…） | 已在同文件的 `ALLOW` 里 |
 
 ---
 
@@ -200,7 +223,7 @@ npm run dev          # http://localhost:3000
 - [ ] `problems.ts` 里加了条目，内容是从文档**复制**过去的
 - [ ] `check-flow.mjs` 的 `DOC_OF` 里注册了 id
 - [ ] `README.md` 总览表加了行，`rowspan` 数字已更新
-- [ ] `npm run check` 和 `npm run typecheck` 本地通过
+- [ ] `npm run check`、`npm run check:code` 和 `npm run typecheck` 本地通过
 - [ ] 公式在 GitHub 上预览确认能渲染（尤其是用了新宏时）
 
 ---

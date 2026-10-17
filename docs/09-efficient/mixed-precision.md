@@ -66,6 +66,8 @@ import torch
 # 方法1: PyTorch 原生 AMP (Automatic Mixed Precision)
 scaler = torch.amp.GradScaler('cuda')
 
+# 下面这段要贴进训练循环里，model / optimizer / dataloader 由调用方提供
+# lint:allow model optimizer dataloader
 for batch in dataloader:
     optimizer.zero_grad()
     
