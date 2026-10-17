@@ -3116,7 +3116,7 @@ class TwoLayerNet:
 
     def backward(self, y_true, lr=0.01):
         # Loss = MSE = mean((y - y_true)²)
-        dy = 2 * (self.y - y_true) / y_true.size(0)  # ∂L/∂y
+        dy = 2 * (self.y - y_true) / y_true.numel()  # ∂L/∂y
 
         # ∂L/∂W2 = aᵀ · dy
         dW2 = self.a.T @ dy
