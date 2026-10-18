@@ -2259,16 +2259,26 @@ class LoRALinear(nn.Module):
         nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
         nn.init.zeros_(self.lora_B)          # B=0 → 初始 ΔW=0
         self.dropout = nn.Dropout(dropout)
+        self.merged = False
 
     def forward(self, x):
         """x: [B, S, in_f]"""
         base = self.linear(x)                         # 冻结路径
+        if self.merged:                               # ΔW 已经在权重里，别再叠加一次
+            return base
         lora = self.dropout(x) @ self.lora_A.T @ self.lora_B.T * self.scaling
         return base + lora
 
     def merge(self):
-        """推理时合并权重 (无额外开销)"""
-        self.linear.weight.data += (self.lora_B @ self.lora_A) * self.scaling`,
+        """推理时合并权重 (无额外开销)
+
+        合并后必须让 LoRA 分支停下，否则同一份 ΔW 会被算两遍：再调一次 forward，
+        输出会多出整整一倍的 LoRA 贡献，而且不报任何错。
+        """
+        if self.merged:
+            return
+        self.linear.weight.data += (self.lora_B @ self.lora_A) * self.scaling
+        self.merged = True`,
     keyPoints: [
       'B 初始化为零 → 初始时 LoRA 贡献为 0',
       'scaling = α/r 控制 LoRA 更新幅度',
