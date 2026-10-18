@@ -1953,7 +1953,8 @@ $$`,
     code: `import torch
 
 class AdamW:
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999),
+    # β₂=0.95（LLM 经验标配，非 PyTorch 默认的 0.999），与上方公式一致
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.95),
                  eps=1e-8, weight_decay=0.01):
         self.params = list(params)
         self.lr, self.eps = lr, eps
