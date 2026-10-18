@@ -2911,7 +2911,7 @@ $$`,
     code: `import torch, torch.nn as nn, torch.nn.functional as F
 
 class RMSNorm(nn.Module):
-    def __init__(self, d, eps=1e-6):
+    def __init__(self, d, eps=1e-5):
         super().__init__()
         self.weight = nn.Parameter(torch.ones(d))
         self.eps = eps
@@ -2935,7 +2935,12 @@ class MTPModule(nn.Module):
         # h_prev:  [B, T, D] 上一层 MTP 的隐状态
         # tok_emb: [B, T, D] 第 i+k 个 token 的 embedding
         x = self.proj(torch.cat([self.norm_h(h_prev), self.norm_e(tok_emb)], dim=-1))
-        return self.block(x)                                      # [B, T, D]
+        T = x.size(1)
+        # 块内必须因果：位置 i 的目标是 x_{i+k+1}，而位置 i+1 的输入正好含 x_{i+k+1}，
+        # 双向注意力会让模型直接看到自己的标签（True = 屏蔽）
+        causal = torch.triu(torch.ones(T, T, dtype=torch.bool, device=x.device),
+                            diagonal=1)
+        return self.block(x, src_mask=causal)                     # [B, T, D]
 
 def mtp_loss(mtp_modules, h0, input_ids, embed, lm_head, num_heads=1, lam=0.3):
     """多 token 预测损失; h0: [B, T, D] 主模型最后一层隐状态
@@ -2961,6 +2966,7 @@ def mtp_loss(mtp_modules, h0, input_ids, embed, lm_head, num_heads=1, lam=0.3):
       '为什么能提升效果: 强迫隐状态编码更长程的信息，相当于给模型的「规划能力」加正则',
       '参数开销很小: embedding 和 lm_head 与主模型共享，每个 MTP 模块只有一个投影 + 一个 Transformer 块',
       '注意偏移: 模块的输入是 x_{i+k}，目标是 x_{i+1+k} —— 整体比主模型前移 k 步，别把两者搞反',
+      '模块内部必须因果: nn.TransformerEncoderLayer 默认是双向注意力，而位置 i+1 的输入恰好就是位置 i 的标签，不加 src_mask 会直接泄漏答案（loss 掉得飞快但推理时完全没用）',
       '为什么要除以 D: 把 k 个预测的损失归一化回与主损失同一量级，否则 k 越大辅助损失越压过主损失',
       'λ 为什么要衰减: 训练后期主损失收敛，辅助信号的边际价值下降，过大反而干扰',
       '推理时的双重身份: 训练时是辅助损失，推理时是投机解码的 draft —— 一次前向能给多个候选 token',
