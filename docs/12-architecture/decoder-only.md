@@ -11,7 +11,7 @@
 每层包含自注意力（带 causal mask）和 FFN，使用 Pre-Norm 结构（先归一化再进子层）。现代 LLM 标配：RMSNorm + SwiGLU + RoPE。
 
 ### 算法步骤
-1. Token Embedding + Position Embedding (RoPE)
+1. Token Embedding；位置信息由 RoPE 在每层注意力的 Q/K 上注入（不需要位置编码表）
 2. 创建因果掩码：mask = tril(ones(S, S))
 3. 逐层处理：x = x + Attn(LN(x), mask); x = x + FFN(LN(x))
 4. 最终归一化：x = RMSNorm(x)
@@ -46,36 +46,54 @@ flowchart TD
 ## 💻 代码实现
 
 ```python
+import math
 import torch
 import torch.nn as nn
 
 class DecoderBlock(nn.Module):
-    def __init__(self, d_model, n_heads, d_ff):
+    def __init__(self, d_model, n_heads, d_ff, max_len=2048):
         super().__init__()
-        self.attn_norm = RMSNorm(d_model)
-        self.attn = MultiHeadAttention(d_model, n_heads)
+        self.n_heads, self.dh = n_heads, d_model // n_heads
+        self.attn_norm = RMSNorm(d_model)               # 见「RMSNorm」一题
+        self.wq = nn.Linear(d_model, d_model, bias=False)
+        self.wk = nn.Linear(d_model, d_model, bias=False)
+        self.wv = nn.Linear(d_model, d_model, bias=False)
+        self.wo = nn.Linear(d_model, d_model, bias=False)
+        self.rope = RotaryEmbedding(self.dh, max_len)   # 见「RoPE」一题
         self.ffn_norm = RMSNorm(d_model)
-        self.ffn = SwiGLU(d_model, d_ff)
+        self.ffn = SwiGLU(d_model, d_ff)                # 见「SwiGLU」一题
 
     def forward(self, x, mask):
-        # Pre-Norm: 先归一化再进子层
-        x = x + self.attn(self.attn_norm(x), mask=mask)
-        x = x + self.ffn(self.ffn_norm(x))
-        return x
+        h = self.attn_norm(x)          # Pre-Norm: 先归一化再进子层
+        B, S, _ = h.shape
+
+        # RoPE 旋转的是每个头的 Q/K，所以先分头：RotaryEmbedding 吃 [B, S, H, Dh]
+        q = self.wq(h).view(B, S, self.n_heads, self.dh)
+        k = self.wk(h).view(B, S, self.n_heads, self.dh)
+        q, k = self.rope(q, k)                          # 只旋 Q、K，V 不动
+        q, k = q.transpose(1, 2), k.transpose(1, 2)     # [B, H, S, Dh]
+        v = self.wv(h).view(B, S, self.n_heads, self.dh).transpose(1, 2)
+
+        scores = q @ k.transpose(-2, -1) / math.sqrt(self.dh)
+        attn = torch.softmax(scores.masked_fill(mask == 0, -1e9), dim=-1)
+        out = (attn @ v).transpose(1, 2).reshape(B, S, -1)
+
+        x = x + self.wo(out)
+        return x + self.ffn(self.ffn_norm(x))
 
 class GPTModel(nn.Module):
     def __init__(self, vocab_size, d_model, n_heads, n_layers, d_ff, max_len=2048):
         super().__init__()
         self.tok_emb = nn.Embedding(vocab_size, d_model)
         self.blocks = nn.ModuleList([
-            DecoderBlock(d_model, n_heads, d_ff) for _ in range(n_layers)
+            DecoderBlock(d_model, n_heads, d_ff, max_len) for _ in range(n_layers)
         ])
         self.norm = RMSNorm(d_model)
         self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
 
     def forward(self, tokens):
         B, S = tokens.shape
-        x = self.tok_emb(tokens)
+        x = self.tok_emb(tokens)       # 位置信息由每层的 RoPE 注入，不需要位置编码表
         
         # 因果掩码
         mask = torch.tril(torch.ones(S, S, device=tokens.device))
@@ -87,7 +105,7 @@ class GPTModel(nn.Module):
 
 # 自回归生成
 @torch.no_grad()
-def generate(model, prompt_ids, max_new_tokens=100, temperature=0.7):
+def generate(model, prompt_ids, max_new_tokens=100, temperature=0.7, eos_token_id=None):
     input_ids = prompt_ids.clone()
     
     for _ in range(max_new_tokens):
@@ -97,7 +115,8 @@ def generate(model, prompt_ids, max_new_tokens=100, temperature=0.7):
         next_token = torch.multinomial(probs, num_samples=1)
         input_ids = torch.cat([input_ids, next_token], dim=1)
         
-        if next_token.item() == model.config.eos_token_id:
+        # GPTModel 不是 HuggingFace 模型，没有 model.config，EOS id 由调用方传入
+        if eos_token_id is not None and next_token.item() == eos_token_id:
             break
     
     return input_ids
@@ -114,7 +133,8 @@ if __name__ == "__main__":
     
     # 统计参数量
     total_params = sum(p.numel() for p in model.parameters())
-    print(f"Total parameters: {total_params:,}")  # 约 50M
+    print(f"Total parameters: {total_params:,}")  # 约 58M
+    # 词表两端的 Embedding / lm_head 占 32.8M，6 层各约 4.2M（attn 1.05M + SwiGLU 3.15M）
     
     # 前向传播
     tokens = torch.randint(0, vocab_size, (2, 10))
