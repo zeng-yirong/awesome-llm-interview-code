@@ -8,22 +8,28 @@
 将 KV 先下投影压缩到低维潜空间（存入 Cache），再上投影恢复。压缩比可达 90%+，远超 GQA 的 75%。相比 GQA，MLA 通过低秩压缩实现更极致的 KV Cache 压缩，是 DeepSeek-V2 的核心创新。
 
 ### 核心思想
-利用低秩矩阵分解压缩 KV：先下投影到 latent_dim（存入 Cache），再上投影恢复完整的 K/V。Q 也使用低秩投影，但不缓存（只用于当前 token）。RoPE 只应用于 k_rope 和 q_rope 部分。
+利用低秩矩阵分解压缩 KV：先下投影到 latent_dim（存入 Cache），再上投影恢复 k 的内容部分与 v。位置分量 k_rope 不走这条路 —— 它直接从 x 投出来（所有头共用一份），因为 RoPE 是位置相关的，挤进低秩空间会被压坏；这一项同样要进 Cache，所以每 token 的缓存是 C + D_r 而不是 C。Q 也使用低秩投影，但不缓存（只用于当前 token）。RoPE 只应用于 k_rope 和 q_rope 部分。
 
 ### 算法步骤
-1. KV 下投影压缩：c_kv = W_down(x) → [B, S, latent_dim]
-2. KV 上投影恢复：K,V = W_up(c_kv) → split → k_content, k_rope, v
-3. Q 下投影压缩：c_q = W_down_q(x)
-4. Q 上投影恢复：q = W_up_q(c_q) → split → q_content, q_rope
-5. 应用 RoPE：q_rope, k_rope = rope(q_rope, k_rope)
-6. 合并内容：q = cat(q_content, q_rope), k = cat(k_content, k_rope)
-7. 计算注意力并输出投影
+1. KV 下投影压缩：c_kv = W_down(x) → [B, S, latent_dim]，进 Cache
+2. 位置分量单独投，不走低秩：k_rope = W_kr(x) → [B, S, Dr]，所有头共用，也进 Cache
+3. KV 上投影恢复：k_content, v = W_up(c_kv) → split
+4. Q 下投影压缩：c_q = W_down_q(x)
+5. Q 上投影恢复：q = W_up_q(c_q) → split → q_content, q_rope
+6. 应用 RoPE：q_rope, k_rope = rope(q_rope, k_rope)
+7. 合并内容：q = cat(q_content, q_rope), k = cat(k_content, broadcast(k_rope))
+8. 计算注意力并输出投影
 
 ## 📐 核心公式
 
 ```math
 c^{KV}=x\,W^{DKV}\in\mathbb{R}^{B\times S\times C},\qquad
-[K;V]=\text{split}\!\left(c^{KV}W^{UK}\right)
+[k_{\text{content}};v]=\text{split}\!\left(c^{KV}W^{UK}\right)
+```
+
+```math
+k_{\text{rope}}=\text{RoPE}\!\left(x\,W^{KR}\right),\qquad
+W^{KR}\in\mathbb{R}^{d\times D_r}
 ```
 
 ```math
@@ -38,7 +44,7 @@ k=[k_{\text{content}};k_{\text{rope}}],\qquad q=[q_{\text{content}};q_{\text{rop
 ```math
 \begin{aligned}
 \text{GQA}: &\quad \text{KV cache}=2\,G\,D_h\\[2pt]
-\text{MLA}: &\quad \text{KV cache}=C\qquad (C=512,\ D_h=128)
+\text{MLA}: &\quad \text{KV cache}=C+D_r\qquad (C=512,\ D_r=64)
 \end{aligned}
 ```
 
@@ -46,11 +52,13 @@ k=[k_{\text{content}};k_{\text{rope}}],\qquad q=[q_{\text{content}};q_{\text{rop
 
 ```mermaid
 flowchart LR
-  x["x<br/>[B, S, D]"] --> ckv["c_kv = x·W_dkv<br/>[B, S, C]<br/>进 cache 的只有这一项"]
-  ckv --> kv["kv = c_kv·W_ukv<br/>[B, S, H·(D_h+Dr+D_h)]<br/>用时上投影恢复"]
-  kv --> sp["split<br/>k_content / k_rope / v"]
+  x["x<br/>[B, S, D]"] --> ckv["c_kv = x·W_dkv<br/>[B, S, C]<br/>cache 第一项"]
+  x --> kr["k_rope = x·W_kr<br/>[B, S, Dr]<br/>不走低秩，所有头共用<br/>cache 第二项"]
+  ckv --> kv["kv = c_kv·W_ukv<br/>[B, S, H·2D_h]<br/>用时上投影恢复"]
+  kv --> sp["split<br/>k_content / v"]
   x --> qc["q = cat(q_content, q_rope)<br/>[B, S, H, D_h+Dr]<br/>Q 也低秩，但不缓存"]
-  sp --> ck["k = cat(k_content, k_rope)<br/>[B, S, H, D_h+Dr]"]
+  sp --> ck["k = cat(k_content, k_rope)<br/>[B, S, H, D_h+Dr]<br/>k_rope 广播到 H 个头"]
+  kr --> ck
   ck --> o["O = SDPA(q, k, v)·W_o<br/>[B, S, D]"]
   qc --> o
   sp --> o
@@ -69,9 +77,12 @@ class MLA(nn.Module):
         super().__init__()
         self.h, self.dh, self.dr = n_heads, dh, rope_dim
         
-        # KV 压缩投影
+        # KV 压缩投影：低秩这条只恢复内容部分和 V
         self.kv_down = nn.Linear(d_model, latent_dim, bias=False)
-        self.kv_up = nn.Linear(latent_dim, n_heads*(dh+rope_dim+dh), bias=False)
+        self.kv_up = nn.Linear(latent_dim, n_heads*2*dh, bias=False)
+        # 位置分量直接投自 x，不走低秩（挤进低秩空间会被压坏），而且所有头共用
+        # 一份 —— 宽度是 rope_dim 而不是 n_heads*rope_dim，cache 里也只占 Dr
+        self.k_rope_proj = nn.Linear(d_model, rope_dim, bias=False)
         
         # Q 压缩投影
         self.q_down = nn.Linear(d_model, latent_dim, bias=False)
@@ -83,18 +94,23 @@ class MLA(nn.Module):
     def forward(self, x, mask=None):
         B, S, _ = x.shape
         
-        # KV 路径
-        kv = self.kv_up(self.kv_down(x)).view(B, S, self.h, -1)
-        k_c, k_r, v = kv.split([self.dh, self.dr, self.dh], dim=-1)
+        # 进 cache 的只有这两项：c_kv（C 维）+ k_rope（Dr 维），每 token 共 C+Dr
+        c_kv = self.kv_down(x)                                  # [B, S, C]
+        k_r = self.k_rope_proj(x).view(B, S, 1, self.dr)        # [B, S, 1, Dr]
         
-        # Q 路径
+        # KV 内容路径：从 c_kv 上投影恢复 k_content 与 v
+        k_c, v = self.kv_up(c_kv).view(B, S, self.h, -1).split([self.dh, self.dh], dim=-1)
+        
+        # Q 路径：内容与位置分量都来自同一个低秩潜变量（不缓存）
         q = self.q_up(self.q_down(x)).view(B, S, self.h, -1)
         q_c, q_r = q.split([self.dh, self.dr], dim=-1)
         
-        # RoPE 只作用在 rope 分量上（[B, S, H, Dr]，正好是 RotaryEmbedding 要的布局），
-        # content 分量不旋 —— 否则上投影就无法吸收进 Q 侧
+        # RoPE 只作用在 rope 分量上，content 分量不旋 —— 否则上投影就无法吸收进 Q 侧。
+        # k_r 是 [B, S, 1, Dr]（所有头共用一份），RoPE 逐位置施加、每个头角度相同，
+        # 所以先旋再广播到 H 个头，与逐头旋等价
         q_r, k_r = self.rope(q_r, k_r)
         
+        k_r = k_r.expand(B, S, self.h, self.dr)     # 独享一份 → 广播到 H 个头
         q = torch.cat([q_c, q_r], dim=-1).transpose(1, 2)
         k = torch.cat([k_c, k_r], dim=-1).transpose(1, 2)
         v = v.transpose(1, 2)
@@ -114,6 +130,9 @@ if __name__ == "__main__":
     out = mla(x)
     print(f"Input shape: {x.shape}")   # [2, 10, 512]
     print(f"Output shape: {out.shape}") # [2, 10, 512]
+    # 每 token 的 cache 宽度：C + Dr（对比 GQA 的 2·G·D_h，MHA 的 2·H·D_h）
+    print(f"每 token cache: {mla.kv_down.out_features + mla.k_rope_proj.out_features} 维"
+          f"  (GQA/G=2 要 {2*2*mla.dh} 维, MHA 要 {2*mla.h*mla.dh} 维)")
 ```
 
 ## 🎯 面试要点
@@ -123,6 +142,6 @@ if __name__ == "__main__":
 - **Q 也使用低秩投影**，但不缓存（只用于当前 token）
 - **DeepSeek-V2 用 MLA + MoE** 实现极高效率
 - **面试重点**: 理解低秩压缩的思想，不要求完整实现
-- **压缩发生的位置**: c_kv 是唯一进 cache 的东西 —— 压缩的是存储维度，不是头数（这是与 GQA 的本质区别）
-- **RoPE 必须单独走不压缩的分量**: 它是位置相关的，挤进低秩空间会被压坏
+- **压缩发生的位置**: 进 cache 的只有 c_kv（C）和 k_rope（D_r）—— 压缩的是存储维度，不是头数（这是与 GQA 的本质区别）
+- **RoPE 必须单独走不压缩的分量**: 它是位置相关的，挤进低秩空间会被压坏；代价就是每 token 的 cache 是 C + D_r（DeepSeek-V2 为 512 + 64），不是 C
 

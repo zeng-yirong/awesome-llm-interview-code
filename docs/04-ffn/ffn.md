@@ -68,7 +68,8 @@ if __name__ == "__main__":
     
     # 统计参数量
     total_params = sum(p.numel() for p in ffn.parameters())
-    print(f"FFN params: {total_params:,}")  # 约 4M
+    # 两个矩阵共 2·D·d_ff = 2×512×2048 ≈ 2.1M（再加偏置 2048+512）
+    print(f"FFN params: {total_params:,}")  # 2,099,712 ≈ 2.1M
 ```
 
 ## 🎯 面试要点

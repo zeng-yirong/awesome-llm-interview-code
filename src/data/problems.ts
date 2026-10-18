@@ -553,25 +553,31 @@ class KVCacheAttention(nn.Module):
       {
         title: '核心思想',
         items: [
-          '利用低秩矩阵分解压缩 KV：先下投影到 latent_dim（存入 Cache），再上投影恢复完整的 K/V。Q 也使用低秩投影，但不缓存（只用于当前 token）。RoPE 只应用于 k_rope 和 q_rope 部分。',
+          '利用低秩矩阵分解压缩 KV：先下投影到 latent_dim（存入 Cache），再上投影恢复 k 的内容部分与 v。位置分量 k_rope 不走这条路 —— 它直接从 x 投出来（所有头共用一份），因为 RoPE 是位置相关的，挤进低秩空间会被压坏；这一项同样要进 Cache，所以每 token 的缓存是 C + D_r 而不是 C。Q 也使用低秩投影，但不缓存（只用于当前 token）。RoPE 只应用于 k_rope 和 q_rope 部分。',
         ],
       },
       {
         title: '算法步骤',
         items: [
-          'KV 下投影压缩：c_kv = W_down(x) → [B, S, latent_dim]',
-          'KV 上投影恢复：K,V = W_up(c_kv) → split → k_content, k_rope, v',
+          'KV 下投影压缩：c_kv = W_down(x) → [B, S, latent_dim]，进 Cache',
+          '位置分量单独投，不走低秩：k_rope = W_kr(x) → [B, S, Dr]，所有头共用，也进 Cache',
+          'KV 上投影恢复：k_content, v = W_up(c_kv) → split',
           'Q 下投影压缩：c_q = W_down_q(x)',
           'Q 上投影恢复：q = W_up_q(c_q) → split → q_content, q_rope',
           '应用 RoPE：q_rope, k_rope = rope(q_rope, k_rope)',
-          '合并内容：q = cat(q_content, q_rope), k = cat(k_content, k_rope)',
+          '合并内容：q = cat(q_content, q_rope), k = cat(k_content, broadcast(k_rope))',
           '计算注意力并输出投影',
         ],
       },
     ],
     formula: String.raw`$$
 c^{KV}=x\,W^{DKV}\in\mathbb{R}^{B\times S\times C},\qquad
-[K;V]=\text{split}\!\left(c^{KV}W^{UK}\right)
+[k_{\text{content}};v]=\text{split}\!\left(c^{KV}W^{UK}\right)
+$$
+
+$$
+k_{\text{rope}}=\text{RoPE}\!\left(x\,W^{KR}\right),\qquad
+W^{KR}\in\mathbb{R}^{d\times D_r}
 $$
 
 $$
@@ -586,15 +592,17 @@ $$
 $$
 \begin{aligned}
 \text{GQA}: &\quad \text{KV cache}=2\,G\,D_h\\[2pt]
-\text{MLA}: &\quad \text{KV cache}=C\qquad (C=512,\ D_h=128)
+\text{MLA}: &\quad \text{KV cache}=C+D_r\qquad (C=512,\ D_r=64)
 \end{aligned}
 $$`,
     flowDiagram: `flowchart LR
-  x["x<br/>[B, S, D]"] --> ckv["c_kv = x·W_dkv<br/>[B, S, C]<br/>进 cache 的只有这一项"]
-  ckv --> kv["kv = c_kv·W_ukv<br/>[B, S, H·(D_h+Dr+D_h)]<br/>用时上投影恢复"]
-  kv --> sp["split<br/>k_content / k_rope / v"]
+  x["x<br/>[B, S, D]"] --> ckv["c_kv = x·W_dkv<br/>[B, S, C]<br/>cache 第一项"]
+  x --> kr["k_rope = x·W_kr<br/>[B, S, Dr]<br/>不走低秩，所有头共用<br/>cache 第二项"]
+  ckv --> kv["kv = c_kv·W_ukv<br/>[B, S, H·2D_h]<br/>用时上投影恢复"]
+  kv --> sp["split<br/>k_content / v"]
   x --> qc["q = cat(q_content, q_rope)<br/>[B, S, H, D_h+Dr]<br/>Q 也低秩，但不缓存"]
-  sp --> ck["k = cat(k_content, k_rope)<br/>[B, S, H, D_h+Dr]"]
+  sp --> ck["k = cat(k_content, k_rope)<br/>[B, S, H, D_h+Dr]<br/>k_rope 广播到 H 个头"]
+  kr --> ck
   ck --> o["O = SDPA(q, k, v)·W_o<br/>[B, S, D]"]
   qc --> o
   sp --> o`,
@@ -604,9 +612,12 @@ class MLA(nn.Module):
     def __init__(self, d_model, n_heads, dh, latent_dim, rope_dim, max_len=2048):
         super().__init__()
         self.h, self.dh, self.dr = n_heads, dh, rope_dim
-        # KV 压缩投影
+        # KV 压缩投影：低秩这条只恢复内容部分和 V
         self.kv_down = nn.Linear(d_model, latent_dim, bias=False)
-        self.kv_up = nn.Linear(latent_dim, n_heads*(dh+rope_dim+dh), bias=False)
+        self.kv_up = nn.Linear(latent_dim, n_heads*2*dh, bias=False)
+        # 位置分量直接投自 x，不走低秩（挤进低秩空间会被压坏），而且所有头共用
+        # 一份 —— 宽度是 rope_dim 而不是 n_heads*rope_dim，cache 里也只占 Dr
+        self.k_rope_proj = nn.Linear(d_model, rope_dim, bias=False)
         # Q 压缩投影
         self.q_down = nn.Linear(d_model, latent_dim, bias=False)
         self.q_up = nn.Linear(latent_dim, n_heads*(dh+rope_dim), bias=False)
@@ -615,15 +626,19 @@ class MLA(nn.Module):
 
     def forward(self, x, mask=None):
         B, S, _ = x.shape
-        # KV 路径
-        kv = self.kv_up(self.kv_down(x)).view(B, S, self.h, -1)
-        k_c, k_r, v = kv.split([self.dh, self.dr, self.dh], dim=-1)
-        # Q 路径
+        # 进 cache 的只有这两项：c_kv（C 维）+ k_rope（Dr 维），每 token 共 C+Dr
+        c_kv = self.kv_down(x)                                  # [B, S, C]
+        k_r = self.k_rope_proj(x).view(B, S, 1, self.dr)        # [B, S, 1, Dr]
+        # KV 内容路径：从 c_kv 上投影恢复 k_content 与 v
+        k_c, v = self.kv_up(c_kv).view(B, S, self.h, -1).split([self.dh, self.dh], dim=-1)
+        # Q 路径：内容与位置分量都来自同一个低秩潜变量（不缓存）
         q = self.q_up(self.q_down(x)).view(B, S, self.h, -1)
         q_c, q_r = q.split([self.dh, self.dr], dim=-1)
-        # RoPE 只作用在 rope 分量上（[B, S, H, Dr]，正好是 RotaryEmbedding 要的布局），
-        # content 分量不旋 —— 否则上投影就无法吸收进 Q 侧
+        # RoPE 只作用在 rope 分量上，content 分量不旋 —— 否则上投影就无法吸收进 Q 侧。
+        # k_r 是 [B, S, 1, Dr]（所有头共用一份），RoPE 逐位置施加、每个头角度相同，
+        # 所以先旋再广播到 H 个头，与逐头旋等价
         q_r, k_r = self.rope(q_r, k_r)
+        k_r = k_r.expand(B, S, self.h, self.dr)     # 独享一份 → 广播到 H 个头
         q = torch.cat([q_c, q_r], dim=-1).transpose(1, 2)
         k = torch.cat([k_c, k_r], dim=-1).transpose(1, 2)
         v = v.transpose(1, 2)
@@ -637,8 +652,8 @@ class MLA(nn.Module):
       '压缩比可达 90%+ (vs GQA 75%)',
       'Q 也使用低秩投影，但不缓存（只用于当前 token）',
       'DeepSeek-V2 用 MLA + MoE 实现极高效率',
-      '压缩发生的位置: c_kv 是唯一进 cache 的东西 —— 压缩的是存储维度，不是头数（这是与 GQA 的本质区别）',
-      'RoPE 必须单独走不压缩的分量: 它是位置相关的，挤进低秩空间会被压坏',
+      '压缩发生的位置: 进 cache 的只有 c_kv（C）和 k_rope（D_r）—— 压缩的是存储维度，不是头数（这是与 GQA 的本质区别）',
+      'RoPE 必须单独走不压缩的分量: 它是位置相关的，挤进低秩空间会被压坏；代价就是每 token 的 cache 是 C + D_r（DeepSeek-V2 为 512 + 64），不是 C',
     ],
     source: 'ckd0817',
   },
@@ -663,7 +678,7 @@ class MLA(nn.Module):
         items: [
           'NSA：先把 K/V 按块均值池化成 K_cmp（块大小 l），用压缩后的表示做一次粗粒度注意力。',
           '同一份 K_cmp 的分数用来挑 top-n 个块，再取回这些块的原始 KV 做精注意力；同时保留最近 w 个 token 的滑窗。',
-          '三路输出按 g = σ(wᵀ·[q_t ; ...]) 加权求和，门控是学出来的，模型自己决定何时依赖全局、何时只看局部。',
+          '三路输出按 g = σ(qᵀw_c) 加权求和，每个头、每条分支各有一个可学的 w_c，门控是学出来的，模型自己决定何时依赖全局、何时只看局部。',
           'DSA：k_s = W^{K,l}·h_s 是一个很轻的 key 投影（d^I 远小于 d），I_{t,s} = Σ_j w_{t,j}·ReLU(q_{t,j}·k_s) 给每个历史 token 打分，取 top-k 后再在这 k 个 token 上做 MLA 注意力。',
           'Indexer 维度极低且能用 FP8 跑，所以「给所有历史 token 打分」这一步的代价可以忽略。',
         ],
@@ -696,7 +711,7 @@ $$`,
     flowDiagram: `flowchart TD
   subgraph NSA["NSA：压缩 + 选择 + 滑窗，三路门控加权"]
     direction LR
-    cmp["压缩分支<br/>[B, H, S/l, D]<br/>mean_pool 给粗粒度全局"] --> g["g = σ(wᵀ·[q_t ; ...])<br/>[B, H, 1]<br/>学出来的加权系数"]
+    cmp["压缩分支<br/>[B, H, S/l, D]<br/>mean_pool 给粗粒度全局"] --> g["g = σ(qᵀw_c)<br/>[B, H, 3]<br/>每条分支一个学出来的系数"]
     sel["选择分支<br/>top-n 块<br/>聚焦重要中程区域"] --> g
     win["滑窗分支<br/>最近 w 个 token<br/>局部精确"] --> g
     g --> o1["o = Σ_b g_b·Attn(q, K_b, V_b)<br/>[B, H, S, D]"]
@@ -718,8 +733,10 @@ def sdpa(q, k, v, scale):
     """标准缩放点积注意力（q 可多一个 query 维度）"""
     return F.softmax(q @ k.transpose(-1, -2) * scale, dim=-1) @ v
 
-def nsa_attention(q, k, v, block_size=8, top_n=2, window=16):
-    """NSA 三分支稀疏注意力; q,k,v: [B,H,S,D]。为简洁省略因果掩码，真实实现必须加"""
+def nsa_attention(q, k, v, gate_w, block_size=8, top_n=2, window=16):
+    """NSA 三分支稀疏注意力; q,k,v: [B,H,S,D]
+    gate_w: [H,D,3] 可学习的门控向量（每个头、每条分支一个），模型里是 nn.Parameter
+    为简洁省略因果掩码，真实实现必须加"""
     B, H, S, D = q.shape
     scale = 1.0 / math.sqrt(D)
     n_blocks = S // block_size
@@ -742,9 +759,12 @@ def nsa_attention(q, k, v, block_size=8, top_n=2, window=16):
     win = min(window, S)
     o_win = sdpa(q, k[:, :, -win:, :], v[:, :, -win:, :], scale)
 
-    # 门控加权求和
-    g = torch.sigmoid(q.mean(dim=(1, 3), keepdim=True)).expand(-1, 1, -1, 3)
-    return g[..., 0:1] * o_cmp + g[..., 1:2] * o_slc + g[..., 2:3] * o_win
+    # 门控加权求和: g = σ(qᵀw_c)，每头每条分支各一个可学的 w_c
+    # 三个系数必须互相独立，否则「加权」退化成对所有分支乘同一个数
+    g = torch.sigmoid(torch.einsum("bhsd,hdc->bhsc", q, gate_w))            # [B,H,S,3]
+    return (g[..., 0].unsqueeze(-1) * o_cmp
+            + g[..., 1].unsqueeze(-1) * o_slc
+            + g[..., 2].unsqueeze(-1) * o_win)
 
 class LightningIndexer(nn.Module):
     """DSA 的 lightning indexer: 轻量投影 + ReLU 打分 + top-k"""
@@ -928,12 +948,12 @@ class RMSNorm(nn.Module):
     hot: 3,
     difficulty: 4,
     oneLiner: '旋转 Q/K 向量注入位置信息，LLaMA 标配',
-    principle: '将位置信息编码为旋转角度，对 Q 和 K 的每对相邻维度施加旋转。旋转后 Q·K 的点积自然包含相对位置信息。相比绝对位置编码（无法处理变长序列）和 ALiBi（需要额外参数），RoPE 无需额外参数即可自然编码相对位置。',
+    principle: '将位置信息编码为旋转角度，对 Q 和 K 的 head 维度成对施加旋转：实现按前半区与后半区配对，即 (第 i 维, 第 i+d/2 维) 共用同一个角度。旋转后 Q·K 的点积自然包含相对位置信息。相比绝对位置编码（无法处理变长序列）和 ALiBi（需要额外参数），RoPE 无需额外参数即可自然编码相对位置。',
     principleSections: [
       {
         title: '核心思想',
         items: [
-          '通过旋转矩阵将位置信息注入 Q 和 K。对每对相邻维度 [x₁, x₂] 施加旋转 [-x₂, x₁]，等价于旋转 90°。旋转后 q_m · k_n 只依赖 m-n，天然具有相对位置感知能力。只对 Q 和 K 施加旋转，V 不变。',
+          '通过旋转矩阵将位置信息注入 Q 和 K。实现用的是 half-split 布局：把 head 维度劈成前后两半 x₁、x₂，第 i 组配对是 (x₁ 的第 i 维, x₂ 的第 i 维)，对每一对施加旋转 [-x₂, x₁]（单独看即旋转 90°）。原论文写的是相邻两维配对 (x₂ᵢ, x₂ᵢ₊₁)，与 half-split 只差一个维度排列、数学等价 —— 但两种布局混用会静默算错。旋转后 q_m · k_n 只依赖 m-n，天然具有相对位置感知能力。只对 Q 和 K 施加旋转，V 不变。',
         ],
       },
       {
@@ -942,7 +962,7 @@ class RMSNorm(nn.Module):
           '预计算频率：inv_freq = 1/(10000^(2i/d))',
           '计算角度：angles = outer(positions, inv_freq)',
           '预计算 cos/sin：cos = cos(angles), sin = sin(angles)',
-          '定义 rotate_half：chunk(x, 2, dim=-1) → cat(-x2, x1)',
+          '定义 rotate_half：chunk(x, 2, dim=-1) 劈成前后两半 → cat(-x2, x1)（配对是 (i, i+d/2)，不是相邻两维）',
           '应用旋转：q_rot = q × cos + rotate_half(q) × sin',
           '对 k 同样应用旋转',
         ],
@@ -953,7 +973,7 @@ f(q,m)=q\odot\cos(m\theta)+\text{rotate\_half}(q)\odot\sin(m\theta)
 $$
 
 $$
-\text{rotate\_half}([x_1,x_2])=[-x_2,\ x_1],
+\text{rotate\_half}\!\left(\left[x_1;x_2\right]\right)=\left[-x_2;x_1\right],\quad x_1,x_2\in\mathbb{R}^{d/2},
 \qquad
 R(m\theta)=\begin{pmatrix}\cos m\theta & -\sin m\theta\\[2pt] \sin m\theta & \cos m\theta\end{pmatrix}
 $$
@@ -988,11 +1008,15 @@ class RotaryEmbedding(nn.Module):
         self.register_buffer('cos', angles.cos())
         self.register_buffer('sin', angles.sin())
 
-    def forward(self, q, k):
-        """q,k: [B, S, H, D]"""
+    def forward(self, q, k, start_pos=0):
+        """q,k: [B, S, H, D]
+        S 只是「这一步新算了几个 token」。增量解码（带 KV cache）时每步 S=1，
+        但位置必须从 start_pos（= 已缓存的长度）往后数 —— 写死 self.cos[:S]
+        会让每一步的新 token 都套上位置 0 的旋转角，和 cache 里按真实位置转过
+        的 K 对不上，注意力分数直接错掉。"""
         S = q.size(1)
-        cos = self.cos[:S].view(1, S, 1, -1)
-        sin = self.sin[:S].view(1, S, 1, -1)
+        cos = self.cos[start_pos:start_pos + S].view(1, S, 1, -1)
+        sin = self.sin[start_pos:start_pos + S].view(1, S, 1, -1)
 
         def rotate_half(x):
             x1, x2 = x.chunk(2, dim=-1)
@@ -1002,9 +1026,10 @@ class RotaryEmbedding(nn.Module):
         k_rot = k * cos + rotate_half(k) * sin
         return q_rot, k_rot`,
     keyPoints: [
-      'rotate_half: chunk 两半 → cat(-x2, x1) = 旋转 90°',
+      'rotate_half: chunk 两半 → cat(-x2, x1) = 旋转 90°；配对是 (i, i+d/2)，按相邻两维写会算错',
       '只对 Q 和 K 施加旋转，V 不变',
       '预计算 cos/sin 避免重复计算',
+      '增量解码要传 start_pos: 带 KV cache 每步只算 1 个 token，位置得从已缓存长度数起；写死 [:S] 会让每个新 token 都套上位置 0 的旋转角',
       '天然具有相对位置感知: q_m · k_n 只依赖 m-n',
       'theta=10000 是标准值，调整可实现长度外推 (NTK/YaRN)',
     ],
@@ -1277,6 +1302,8 @@ $$`,
 
 def lm_loss(logits, labels, ignore_index=-100):
     """
+    语言模型损失（下一个 token 预测）
+
     logits: [B, S, vocab_size]
     labels: [B, S]
     """
@@ -1444,6 +1471,7 @@ def ppo_loss(old_logp, new_logp, advantages, eps=0.2):
       'ChatGPT/InstructGPT 的 RLHF 核心算法',
       '需要 reward model + critic model + reference model',
       'ε 通常取 0.2；ratio 必须用旧策略的 logp 现算，rollout 与更新要严格配对',
+      'KL 惩罚的估计器要选对: k3 = exp(ref−new) − (ref−new) − 1 恒非负、最小值就在 new=ref，两侧的梯度都把人拉回参考模型；(new−ref) 的 k1 版本梯度恒为 +1，只会一路压低 logp，没有回拉力',
     ],
     source: 'ckd0817',
   },
@@ -1859,7 +1887,9 @@ $$`,
 
 @torch.no_grad()
 def teacher_forward(model, input_ids, privileged_ids):
-    """教师 = 同一模型 + 特权上下文，只做一次前向，不需要梯度"""
+    """教师 = 同一模型 + 特权上下文，只做一次前向，不需要梯度
+    特权上下文拼在最前面：因果 LM 只能看前面的内容，要让 c 影响答案 token 的预测
+    就只能排在答案之前（代价是教师侧答案 token 的绝对位置比学生侧多 P 个）"""
     full = torch.cat([privileged_ids, input_ids], dim=1)
     logits = model(full).logits
     # 只取答案段（去掉特权上下文那一段）
@@ -1877,12 +1907,14 @@ def self_opd_loss(model, input_ids, privileged_ids, answer_mask):
     t_logits = teacher_forward(model, input_ids, privileged_ids)   # [B, T, V]
 
     # 3. 逐 token 反向 KL: KL(p_S ‖ p_T)
-    s_logp = F.log_softmax(student_logits, dim=-1)
-    t_logp = F.log_softmax(t_logits, dim=-1)
-    kl = (s_logp.exp() * (s_logp - t_logp)).sum(dim=-1)            # [B, T]
+    #    对齐：因果 LM 里 logits[t] 预测的是 t+1 的 token，mask 标的是学生生成的
+    #    token 位置，所以要评 y_t 就得取 logits[t-1]：logits 切最后一列、mask 切第一列
+    s_logp = F.log_softmax(student_logits[:, :-1], dim=-1)         # [B, T-1, V]
+    t_logp = F.log_softmax(t_logits[:, :-1], dim=-1)
+    kl = (s_logp.exp() * (s_logp - t_logp)).sum(dim=-1)            # [B, T-1]
 
     # 4. 只在学生自己生成的 token 上回传
-    mask = answer_mask.float()
+    mask = answer_mask[:, 1:].float()                              # [B, T-1]
     return (kl * mask).sum() / mask.sum().clamp_min(1.0)`,
     keyPoints: [
       '与 OPD 的核心区别: OPD 的教师是另一个更强的模型；self-OPD 的教师是同一份权重 + 特权上下文',
@@ -1946,7 +1978,8 @@ $$`,
     code: `import torch
 
 class AdamW:
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999),
+    # β₂=0.95（LLM 经验标配，非 PyTorch 默认的 0.999），与上方公式一致
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.95),
                  eps=1e-8, weight_decay=0.01):
         self.params = list(params)
         self.lr, self.eps = lr, eps
@@ -2000,7 +2033,7 @@ class AdamW:
         title: '算法步骤',
         items: [
           '参数分组：只有 ≥2 维的隐藏层权重交给 Muon，embedding、lm_head 和所有 1D 参数（bias、norm）仍用 AdamW。',
-          '累积动量 → 除以 F 范数归一化（保证谱范数 ≤ 1，否则迭代发散）→ 5 次 NS 迭代 → θ ← θ - η·O。',
+          '累积动量 → 除以 F 范数归一化（保证谱范数 ≤ 1，否则迭代发散）→ 5 次 NS 迭代 → 乘 RMS 对齐系数 c = √max(1, m/n) → θ ← θ - η·c·O。',
           '5 步后奇异值落在约 [0.5, 1.5] 就够用：系数 (3.4445, -4.7750, 2.0315) 正是为「5 步内尽量压平」调出来的。',
         ],
       },
@@ -2009,7 +2042,7 @@ class AdamW:
 \begin{aligned}
 M_t &= \mu M_{t-1}+G_t,\qquad \mu\approx 0.95\\
 O_t &= \text{NS}_5(M_t)\\
-\theta_t &= \theta_{t-1}-\eta\,O_t
+\theta_t &= \theta_{t-1}-\eta\,c\,O_t,\qquad c=\sqrt{\max(1,\,m/n)}
 \end{aligned}
 $$
 
@@ -2036,7 +2069,7 @@ $$`,
   end
   subgraph STEP["Muon 单步"]
     direction LR
-    g["G<br/>[m, n] 本步梯度"] --> mom["M = μM + G<br/>[m, n] 累积动量"] --> nrm["X = M / (‖M‖_F + ε)<br/>谱范数 ≤ 1，否则迭代发散"] --> ns["NS5：重复 5 次<br/>X ← a·X + (b·A + c·A²)·X"] --> o["O<br/>[m, n] 奇异值 ≈ 1"]
+    g["G<br/>[m, n] 本步梯度"] --> mom["M = μM + G<br/>[m, n] 累积动量"] --> nrm["X = M / (‖M‖_F + ε)<br/>谱范数 ≤ 1，否则迭代发散"] --> ns["NS5：重复 5 次<br/>X ← a·X + (b·A + c·A²)·X"] --> o["O<br/>[m, n] 奇异值 ≈ 1"] --> rms["c·O<br/>c = √max(1, m/n)<br/>对齐不同长宽比的更新尺度"]
   end
   subgraph CLIP["MuonClip：周期性额外一步"]
     direction LR
@@ -2083,9 +2116,11 @@ class Muon(torch.optim.Optimizer):
                 # Nesterov: 用 g + μ·buf 作为动量方向
                 update = g.add(buf, alpha=group["momentum"]) if group["nesterov"] else buf
 
-                # 先正交化，再更新
-                p.add_(zeropower_via_newtonschulz5(update, group["ns_steps"]),
-                       alpha=-group["lr"])
+                # 先正交化；再乘 RMS 对齐系数 c = √max(1, m/n)：
+                # 宽矩阵一行元素多、单元素步长偏小，乘回来才能让 Adam 的 lr 直接迁移
+                update = zeropower_via_newtonschulz5(update, group["ns_steps"])
+                update = update * max(1.0, g.size(0) / g.size(1)) ** 0.5
+                p.add_(update, alpha=-group["lr"])
 
 @torch.no_grad()
 def qk_clip_(model, tau=100.0):
@@ -2122,7 +2157,7 @@ def qk_clip_(model, tau=100.0):
     hot: 3,
     difficulty: 3,
     oneLiner: 'ΔW = BA，低秩分解高效微调',
-    principle: '冻结预训练权重 W，用低秩矩阵 B·A 近似权重更新 ΔW。相比全量微调需要巨大显存，LoRA 只训练少量参数（约 0.1%），效果接近全量微调。A 用高斯初始化，B 用零初始化，保证初始输出不变。',
+    principle: '冻结预训练权重 W，用低秩矩阵 B·A 近似权重更新 ΔW。相比全量微调需要巨大显存，LoRA 只训练少量参数（r=8 时单个矩阵约 0.4%，只挂在 q/v 上不到整个模型的 0.1%），效果接近全量微调。A 用 kaiming 初始化（与 nn.Linear 的默认初始化同一套；原论文写的是高斯），B 用零初始化，保证初始输出不变。',
     principleSections: [
       {
         title: '核心思想',
@@ -2157,7 +2192,7 @@ A\sim\text{kaiming},\qquad B=\mathbf{0}\ \Rightarrow\ BA=0\ \text{at init}
 $$
 
 $$
-\frac{\text{trainable}}{\text{total}}=\frac{r(d+k)}{dk}\approx 0.1\%,
+\frac{\text{trainable}}{\text{total}}=\frac{r(d+k)}{dk}\approx 0.4\%\quad(r=8,\ d=k=4096),
 \qquad
 W_{\text{new}}=W_0+\frac{\alpha}{r}BA\ \ \text{(mergeable at inference)}
 $$`,
@@ -2169,11 +2204,11 @@ $$`,
     code: `import torch, torch.nn as nn, math
 
 class LoRALinear(nn.Module):
-    def __init__(self, in_f, out_f, rank=8, alpha=16.0, dropout=0.0):
+    def __init__(self, in_f, out_f, rank=8, alpha=16.0, dropout=0.0, bias=False):
         super().__init__()
         self.scaling = alpha / rank
-        # 冻结原始权重
-        self.linear = nn.Linear(in_f, out_f, bias=False)
+        # 冻结原始权重（bias 由调用方决定，见 apply_lora）
+        self.linear = nn.Linear(in_f, out_f, bias=bias)
         self.linear.requires_grad_(False)
         # LoRA 低秩矩阵
         self.lora_A = nn.Parameter(torch.zeros(rank, in_f))
@@ -2384,7 +2419,7 @@ optimizer.step()`,
     hot: 2,
     difficulty: 3,
     oneLiner: '时间换空间，重新计算代替存储激活',
-    principle: '不保存所有中间激活值，只保存检查点。反向传播时重新计算需要的激活值。相比标准训练保存所有层激活（显存 O(L)），梯度检查点只保存 √L 个检查点（显存 O(√L)），用约 20% 额外计算换取大量显存。',
+    principle: '不保存所有中间激活值，只保存检查点，反向传播时重新计算需要的激活值，用约 20% 额外计算换显存。粒度有两种，别混：经典结论（Chen et al., 2016）是每 √L 层放一个检查点、反向时把整段重算一遍，激活显存降到 O(√L)；工程上更常见的逐层包裹（HuggingFace 的 gradient_checkpointing=True 就是逐层）每层仍要留一份边界激活、显存还是 O(L)，省掉的是层内中间量（Q/K/V、注意力分数、FFN 中间层）—— 收益是常数倍，而不是 √L。',
     principleSections: [
       {
         title: '核心思想',
@@ -2395,9 +2430,9 @@ optimizer.step()`,
       {
         title: '算法步骤',
         items: [
-          '前向传播时只保存检查点（如每 √L 层保存一次）',
+          '前向传播时只保存检查点：每 √L 层保存一个 → 显存 O(√L)；逐层包裹则每层都要留一份边界激活 → 仍是 O(L)，只省层内中间量',
           '反向传播时从检查点重新计算需要的激活值',
-          '使用 torch.utils.checkpoint 包裹需要检查点的层',
+          '使用 torch.utils.checkpoint 包裹需要检查点的层（或按 √L 分块，把整段一起包）',
           'HuggingFace 模型可直接设置 gradient_checkpointing=True',
         ],
       },
@@ -2465,7 +2500,7 @@ class TransformerBlock(nn.Module):
         return x + self.ffn(self.norm2(x))`,
     keyPoints: [
       '用 ~20% 额外计算时间换取大量显存',
-      '显存从 O(L) 降到 O(√L)',
+      '显存从 O(L) 降到 O(√L)（每 √L 层放一块的经典方案）；逐层包裹（HF 的一行开关）省的是层内中间量，量级仍是 O(L)',
       'HuggingFace 模型一行开启: gradient_checkpointing=True',
       '常与 LoRA 配合: LoRA 减少参数 + 检查点减少激活',
       'use_reentrant=False 是新版推荐设置',
@@ -2555,9 +2590,11 @@ def per_block_quant(x, block_size=128, fmt="e4m3"):
 
 def fp8_gemm_sim(x, w, block_size=128):
     """模拟 FP8 块级矩阵乘法: FP8 乘 + 高精度累加; x: [M, K]  w: [K, N]"""
-    # 激活按 1×128 的块量化（沿 K 维切块）
+    # 激活：沿 K 维每 128 个元素一块（per-token per-128-channel）
     x_hat, _ = per_block_quant(x, block_size, fmt="e4m3")
-    # 权重按 128×128 的块量化
+    # 权重：转置成 [N, K] 后同样只沿最后一维每 128 个一块 ——
+    # DeepSeek-V3 的真实实现按 128×128 的 tile 取一个 amax（两个维度都切），
+    # 这里只切 K 维，粒度更细、精度只会更好，是同一套缩放思路的简化
     w_hat, _ = per_block_quant(w.t().contiguous(), block_size, fmt="e4m3")
     # 真实实现是 FP8 张量核 + 高精度累加；这里用反量化后的值算等价的数学结果
     return x_hat @ w_hat.t().contiguous()`,

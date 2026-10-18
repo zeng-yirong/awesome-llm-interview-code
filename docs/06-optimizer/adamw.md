@@ -48,10 +48,12 @@ flowchart TD
 ## 💻 代码实现
 
 ```python
-import torch
+import torch, math
 
 class AdamW:
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999),
+    # β₂ 取 0.95，不是 PyTorch 默认的 0.999：这是 LLM 训练的经验标配
+    # （GPT-3 / LLaMA 一路沿用），上方公式和面试要点给的也是这一组
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.95),
                  eps=1e-8, weight_decay=0.01):
         self.params = list(params)
         self.lr, self.eps = lr, eps
@@ -82,11 +84,16 @@ class AdamW:
             p.data.add_(-self.lr * m_hat / (v_hat.sqrt() + self.eps))
 
 # 学习率调度 (LLM 标配)
-def cosine_schedule_with_warmup(step, warmup_steps, total_steps, max_lr=3e-4):
+def cosine_schedule_with_warmup(step, warmup_steps, total_steps,
+                                max_lr=3e-4, min_lr=3e-5):
+    """warmup 线性升到 max_lr，再余弦退火到 min_lr（一般取 max_lr 的 10%，不退到 0）"""
     if step < warmup_steps:
         return max_lr * (step / warmup_steps)
-    progress = (step - warmup_steps) / (total_steps - warmup_steps)
-    return max_lr * 0.5 * (1 + torch.cos(torch.tensor(progress * 3.14159)))
+    # progress 必须夹到 [0, 1]：步数跑过 total_steps 时 progress > 1，cos 会继续往前走，
+    # 学习率不但不停在最小值，反而重新往上爬 —— warmup=100 / total=1000 时，
+    # step=2000 会返回 0.97·max_lr，等于又从头跑一轮
+    progress = min(1.0, (step - warmup_steps) / (total_steps - warmup_steps))
+    return min_lr + (max_lr - min_lr) * 0.5 * (1 + math.cos(math.pi * progress))
 
 # 测试
 if __name__ == "__main__":

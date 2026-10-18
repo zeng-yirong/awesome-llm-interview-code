@@ -103,10 +103,13 @@ class GRPOTrainer:
             responses = [self.policy.generate(prompts)
                          for _ in range(self.group_size)]
         
-        # 2. 计算每个回答的 reward
-        rewards = torch.stack([
-            self.reward(prompts, resp) for resp in responses
-        ], dim=1)  # [batch, group_size]
+        # 2. 计算每个回答的 reward（奖励模型是冻结的，奖励也只当常量用）
+        # 不套 no_grad 的话，advantages 会一路带着奖励模型的计算图，
+        # 循环里第 2 次 backward 就会撞上「图已释放」的报错
+        with torch.no_grad():
+            rewards = torch.stack([
+                self.reward(prompts, resp) for resp in responses
+            ], dim=1)  # [batch, group_size]
         
         # 3. 组内归一化优势
         advantages = grpo_advantages(rewards)

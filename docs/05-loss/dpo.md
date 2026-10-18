@@ -70,12 +70,39 @@ def dpo_loss(policy_chosen_logps, policy_rejected_logps,
 
 # 完整训练流程
 def compute_logps(model, input_ids, labels):
-    """计算模型对 labels 的对数概率之和"""
+    """计算模型对 labels 的对数概率之和
+    labels: prompt 与 pad 位置置成 -100（HF 的惯例，-100 表示不计入损失）"""
     logits = model(input_ids).logits
     log_probs = F.log_softmax(logits[:, :-1], dim=-1)
     labels = labels[:, 1:]
-    per_token_logps = log_probs.gather(-1, labels.unsqueeze(-1)).squeeze(-1)
-    return per_token_logps.sum(dim=-1)
+
+    mask = labels != -100
+    # 先把 -100 换成 0 再 gather：gather 只认合法下标，负下标会被当成「从末尾数」，
+    # 静默取到另一个 token 的概率（-100 在词表大小以内时不会报错）
+    safe_labels = labels.masked_fill(~mask, 0)
+    per_token_logps = log_probs.gather(-1, safe_labels.unsqueeze(-1)).squeeze(-1)
+
+    # 只在 completion 上求和：公式里的比值是 log π_θ(y|x)，y 只有回答部分。
+    # （prompt 那一段在 chosen / rejected 两侧是同一前缀、逐 token 的 logp 完全相同，
+    #  相减时正好抵消 —— 这也正是它容易被漏掉的原因；但 pad 位置的标签是填充出来的，
+    #  两侧语境不同，不屏蔽就会往 Δ 里掺噪声）
+    return (per_token_logps * mask).sum(dim=-1)
+
+def dpo_step(policy_model, ref_model, batch, optimizer, beta=0.1):
+    """batch: 同一个 prompt 的 chosen / rejected 两条序列（各含 input_ids 与 labels）"""
+    policy_chosen = compute_logps(policy_model, batch["chosen_ids"], batch["chosen_labels"])
+    policy_rejected = compute_logps(policy_model, batch["rejected_ids"], batch["rejected_labels"])
+
+    # 参考模型只是固定锚点，必须 no_grad：它本来就不更新，建图纯属白费显存
+    with torch.no_grad():
+        ref_chosen = compute_logps(ref_model, batch["chosen_ids"], batch["chosen_labels"])
+        ref_rejected = compute_logps(ref_model, batch["rejected_ids"], batch["rejected_labels"])
+
+    loss = dpo_loss(policy_chosen, policy_rejected, ref_chosen, ref_rejected, beta)
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    return loss.item()
 
 # 测试
 if __name__ == "__main__":
