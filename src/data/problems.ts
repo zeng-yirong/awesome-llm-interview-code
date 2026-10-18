@@ -2985,7 +2985,21 @@ class GPTModel(nn.Module):
         mask = torch.tril(torch.ones(S, S, device=tokens.device))
         for block in self.blocks:
             x = block(x, mask)
-        return self.lm_head(self.norm(x))`,
+        return self.lm_head(self.norm(x))
+
+# 自回归生成：推理那半边
+@torch.no_grad()
+def generate(model, prompt_ids, max_new_tokens=100, temperature=0.7, eos_token_id=None):
+    input_ids = prompt_ids.clone()
+    for _ in range(max_new_tokens):
+        logits = model(input_ids)[:, -1, :] / temperature   # 只要末位（因果注意力下它看得到全部）
+        probs = torch.softmax(logits, dim=-1)
+        next_token = torch.multinomial(probs, num_samples=1)
+        input_ids = torch.cat([input_ids, next_token], dim=1)
+        # GPTModel 不是 HuggingFace 模型，没有 model.config，EOS id 由调用方传入
+        if eos_token_id is not None and next_token.item() == eos_token_id:
+            break
+    return input_ids`,
     keyPoints: [
       'Causal mask: 只能看到之前的 token',
       'Pre-Norm: 先归一化再进子层 (更稳定)',

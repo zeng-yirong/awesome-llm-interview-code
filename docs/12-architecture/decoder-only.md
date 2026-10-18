@@ -123,6 +123,7 @@ def generate(model, prompt_ids, max_new_tokens=100, temperature=0.7, eos_token_i
 
 # 测试
 if __name__ == "__main__":
+    torch.manual_seed(0)
     vocab_size = 32000
     d_model = 512
     n_heads = 8
@@ -135,12 +136,37 @@ if __name__ == "__main__":
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Total parameters: {total_params:,}")  # 约 58M
     # 词表两端的 Embedding / lm_head 占 32.8M，6 层各约 4.2M（attn 1.05M + SwiGLU 3.15M）
+    # 这个拆分不该只是印象，按结构写出来对一遍：
+    #   2·V·D  Embedding + lm_head（权重不共享，所以是两份）
+    # + 每层 4·D²  Q/K/V/O 四个矩阵（都没 bias）+ 3·D·d_ff  SwiGLU 的三个矩阵
+    # + 每层 2·D  block 里两个 RMSNorm（只有缩放，没有偏置）+ D  最后那个 RMSNorm
+    # RoPE 的 cos/sin 是 buffer 不是 parameter，不进 parameters()，所以能精确对上
+    expected = (2 * vocab_size * d_model
+                + n_layers * (4 * d_model ** 2 + 3 * d_model * d_ff + 2 * d_model)
+                + d_model)
+    print(f"闭式算出来: {expected:,}（差 {total_params - expected} 个参数）")
     
     # 前向传播
     tokens = torch.randint(0, vocab_size, (2, 10))
     logits = model(tokens)
     print(f"Input shape: {tokens.shape}")   # [2, 10]
     print(f"Output shape: {logits.shape}")  # [2, 10, 32000]
+    
+    # 因果性：改掉后面的 token，前面位置的 logits 必须一点不变 —— 这就是 causal mask
+    # 存在的全部意义。被掩掉的位置在 softmax 里是精确的 0（-1e9 减完直接上溢），不是
+    # 「很小」，所以这里应当逐位相同，而不是「差异可忽略」。
+    altered = tokens.clone()
+    altered[:, 5:] = torch.randint(0, vocab_size, (2, 5))
+    logits_alt = model(altered)
+    print(f"改后 5 个 token，前 5 个位置的 logits 变化 (应为 0): "
+          f"{(logits[:, :5] - logits_alt[:, :5]).abs().max().item():.2e}")
+    # 对照：后面确实变了 —— 否则上面那个 0 也可能是「改动根本没生效」的假通过
+    print(f"后 5 个位置的变化 (应远大于 0): "
+          f"{(logits[:, 5:] - logits_alt[:, 5:]).abs().max().item():.2e}")
+    
+    # 推理那半边：每次取末位 logits 采样一个 token，拼回去再跑一轮
+    out = generate(model, tokens[:1, :3], max_new_tokens=3, temperature=1.0)
+    print(f"generate: prompt {tokens[:1, :3].shape[1]} 个 token → 一共 {out.shape[1]} 个")
 ```
 
 ## 🎯 面试要点
