@@ -2002,7 +2002,7 @@ class AdamW:
         title: '算法步骤',
         items: [
           '参数分组：只有 ≥2 维的隐藏层权重交给 Muon，embedding、lm_head 和所有 1D 参数（bias、norm）仍用 AdamW。',
-          '累积动量 → 除以 F 范数归一化（保证谱范数 ≤ 1，否则迭代发散）→ 5 次 NS 迭代 → θ ← θ - η·O。',
+          '累积动量 → 除以 F 范数归一化（保证谱范数 ≤ 1，否则迭代发散）→ 5 次 NS 迭代 → 乘 RMS 对齐系数 c = √max(1, m/n) → θ ← θ - η·c·O。',
           '5 步后奇异值落在约 [0.5, 1.5] 就够用：系数 (3.4445, -4.7750, 2.0315) 正是为「5 步内尽量压平」调出来的。',
         ],
       },
@@ -2011,7 +2011,7 @@ class AdamW:
 \begin{aligned}
 M_t &= \mu M_{t-1}+G_t,\qquad \mu\approx 0.95\\
 O_t &= \text{NS}_5(M_t)\\
-\theta_t &= \theta_{t-1}-\eta\,O_t
+\theta_t &= \theta_{t-1}-\eta\,c\,O_t,\qquad c=\sqrt{\max(1,\,m/n)}
 \end{aligned}
 $$
 
@@ -2038,7 +2038,7 @@ $$`,
   end
   subgraph STEP["Muon 单步"]
     direction LR
-    g["G<br/>[m, n] 本步梯度"] --> mom["M = μM + G<br/>[m, n] 累积动量"] --> nrm["X = M / (‖M‖_F + ε)<br/>谱范数 ≤ 1，否则迭代发散"] --> ns["NS5：重复 5 次<br/>X ← a·X + (b·A + c·A²)·X"] --> o["O<br/>[m, n] 奇异值 ≈ 1"]
+    g["G<br/>[m, n] 本步梯度"] --> mom["M = μM + G<br/>[m, n] 累积动量"] --> nrm["X = M / (‖M‖_F + ε)<br/>谱范数 ≤ 1，否则迭代发散"] --> ns["NS5：重复 5 次<br/>X ← a·X + (b·A + c·A²)·X"] --> o["O<br/>[m, n] 奇异值 ≈ 1"] --> rms["c·O<br/>c = √max(1, m/n)<br/>对齐不同长宽比的更新尺度"]
   end
   subgraph CLIP["MuonClip：周期性额外一步"]
     direction LR
@@ -2085,9 +2085,11 @@ class Muon(torch.optim.Optimizer):
                 # Nesterov: 用 g + μ·buf 作为动量方向
                 update = g.add(buf, alpha=group["momentum"]) if group["nesterov"] else buf
 
-                # 先正交化，再更新
-                p.add_(zeropower_via_newtonschulz5(update, group["ns_steps"]),
-                       alpha=-group["lr"])
+                # 先正交化；再乘 RMS 对齐系数 c = √max(1, m/n)：
+                # 宽矩阵一行元素多、单元素步长偏小，乘回来才能让 Adam 的 lr 直接迁移
+                update = zeropower_via_newtonschulz5(update, group["ns_steps"])
+                update = update * max(1.0, g.size(0) / g.size(1)) ** 0.5
+                p.add_(update, alpha=-group["lr"])
 
 @torch.no_grad()
 def qk_clip_(model, tau=100.0):
