@@ -597,7 +597,7 @@ $$`,
     code: `import torch, torch.nn as nn, torch.nn.functional as F, math
 
 class MLA(nn.Module):
-    def __init__(self, d_model, n_heads, dh, latent_dim, rope_dim):
+    def __init__(self, d_model, n_heads, dh, latent_dim, rope_dim, max_len=2048):
         super().__init__()
         self.h, self.dh, self.dr = n_heads, dh, rope_dim
         # KV 压缩投影
@@ -607,6 +607,7 @@ class MLA(nn.Module):
         self.q_down = nn.Linear(d_model, latent_dim, bias=False)
         self.q_up = nn.Linear(latent_dim, n_heads*(dh+rope_dim), bias=False)
         self.wo = nn.Linear(n_heads*dh, d_model, bias=False)
+        self.rope = RotaryEmbedding(rope_dim, max_len)   # 见「RoPE」一题
 
     def forward(self, x, mask=None):
         B, S, _ = x.shape
@@ -616,8 +617,9 @@ class MLA(nn.Module):
         # Q 路径
         q = self.q_up(self.q_down(x)).view(B, S, self.h, -1)
         q_c, q_r = q.split([self.dh, self.dr], dim=-1)
-        # RoPE (需要配合 RotaryEmbedding)
-        # q_r, k_r = rope(q_r, k_r)
+        # RoPE 只作用在 rope 分量上（[B, S, H, Dr]，正好是 RotaryEmbedding 要的布局），
+        # content 分量不旋 —— 否则上投影就无法吸收进 Q 侧
+        q_r, k_r = self.rope(q_r, k_r)
         q = torch.cat([q_c, q_r], dim=-1).transpose(1, 2)
         k = torch.cat([k_c, k_r], dim=-1).transpose(1, 2)
         v = v.transpose(1, 2)

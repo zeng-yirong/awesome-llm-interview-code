@@ -33,10 +33,11 @@ ALLOW = {
     "paged_attention_kernel",   # 真实实现是 CUDA/Triton kernel
     "compute_gae",              # GAE 在另一道题里实现
     "ppo_loss",                 # PPO 的损失函数在另一道题里实现
-    "RMSNorm",                  # 以下四个都是题库里其他题给出的组件
+    "RMSNorm",                  # 以下五个都是题库里其他题给出的组件
     "MultiHeadAttention",
     "SwiGLU",
     "FFN",
+    "RotaryEmbedding",          # RoPE 在「位置编码」一题里实现
     "build_model",              # 组装模型的辅助函数
 }
 
