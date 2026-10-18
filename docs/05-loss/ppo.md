@@ -83,29 +83,35 @@ class PPOTrainer:
         self.kl_coef = kl_coef
     
     def train_step(self, prompts, responses):
-        # 1. 计算 reward
-        rewards = self.reward(prompts, responses)
-        
-        # 2. 计算 value 和 advantage
-        values = self.critic(prompts, responses)
-        advantages = compute_gae(rewards, values)
-        
-        # 3. 计算 log probs
-        # rollout 时（更新前）算，并 detach：它是比值的基准常量，
-        # 若跟着一起求梯度，ratio 里 new/old 两项的梯度会互相抵消
+        # 1~3 步算出来的都是「只当基准的常量」：reward / value / advantage / old_logp
+        # 在下面 4 个 epoch 里会被反复用到，必须在 no_grad 下算 —— 否则第二次
+        # backward 要去访问第一次已经释放的图，直接报错；梯度还会往冻结的模型上累
         with torch.no_grad():
+            # 1. 计算 reward（奖励模型是冻结的，输出只当常量用）
+            rewards = self.reward(prompts, responses)
+
+            # 2. 计算 value 和 advantage：用更新前的 critic，算完就是常量
+            #    （critic 自己的 value loss 要另走一次带梯度的前向，不能复用这里）
+            values = self.critic(prompts, responses)
+            advantages = compute_gae(rewards, values)
+
+            # 3. 计算 old log probs：更新前算，它是比值的基准常量，
+            #    若和 new_logp 一样由当前策略现算，ratio 恒等于 1、梯度就没了
             old_logp = self.policy.get_logprobs(prompts, responses)
-        
+
+            # 参考模型的 logp 与策略无关、全程不变：算一次就够，
+            # 更不能带梯度 —— 每个 epoch 重建一遍图纯属浪费
+            ref_logp = self.ref.get_logprobs(prompts, responses)
+
         # 4. PPO 更新
         for _ in range(self.ppo_epochs):
             new_logp = self.policy.get_logprobs(prompts, responses)
             loss = ppo_loss(old_logp, new_logp, advantages)
-            
+
             # KL penalty (防止偏离参考模型太远)
-            ref_logp = self.ref.get_logprobs(prompts, responses)
             kl = (new_logp - ref_logp).mean()
             loss += self.kl_coef * kl
-            
+
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
