@@ -69,11 +69,23 @@ class RMSNorm(nn.Module):
 # 测试
 if __name__ == "__main__":
     B, S, D = 2, 10, 64
+    torch.manual_seed(0)
     x = torch.randn(B, S, D)
     rms = RMSNorm(D)
     out = rms(x)
     print(f"Input shape: {x.shape}")   # [2, 10, 64]
     print(f"Output shape: {out.shape}") # [2, 10, 64]
+    
+    # γ=1 时，归一化后每个位置的 RMS 应当正好是 1（eps 会压掉一点点）。
+    # 这就是「只用均方根」的定义，也是它和 LayerNorm 之间的分野 ——
+    # 打印形状和打一遍前向都验证不了这件事
+    print("归一化后的 RMS (应 ≈ 1):",
+          rms._norm(x).pow(2).mean(-1).sqrt().mean().item())
+    
+    # 不减均值：RMSNorm 输出的均值不为 0，LayerNorm 的恒为 0
+    print("RMSNorm 输出均值:", rms._norm(x).mean(-1).abs().mean().item())
+    print("LayerNorm 输出均值:", nn.LayerNorm(D, eps=1e-5)(x).mean(-1).abs().mean().item())
+    # 两者的差别只在中心化那一步: RMSNorm 保留了 x 的符号与均值方向，只改尺度
 ```
 
 ## 🎯 面试要点
