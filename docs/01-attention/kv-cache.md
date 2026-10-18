@@ -104,27 +104,41 @@ class KVCacheAttention(nn.Module):
 
 # 测试
 if __name__ == "__main__":
-    B, S, D, H = 1, 10, 512, 8
+    B, D, H = 1, 512, 8
+    torch.manual_seed(0)
     attn = KVCacheAttention(D, H)
     
-    # Prefill: 处理整个 prompt
-    x = torch.randn(B, S, D)
-    out, cache = attn(x)
-    print(f"Prefill output: {out.shape}")  # [1, 10, 512]
-    print(f"Cache K shape: {cache[0].shape}")  # [1, 8, 10, 64]
+    tokens = torch.randn(B, 15, D)      # 一条 15 个 token 的序列
+    ref, _ = attn(tokens)               # 一次性前向：分步计算的参照
     
-    # Decode: 逐个生成 token
-    new_token = torch.randn(B, 1, D)
-    out, cache = attn(new_token, kv_cache=cache)
-    print(f"Decode output: {out.shape}")  # [1, 1, 512]
-    print(f"Cache K shape: {cache[0].shape}")  # [1, 8, 11, 64]
+    def check(name, outs, start):
+        """分步算出来的那几段，必须和一次性前向逐位对上"""
+        got = torch.cat(outs, dim=1)
+        err = (got - ref[:, start:start + got.size(1)]).abs().max().item()
+        print(f"{name}: 与前向参照的最大误差 {err:.1e}")
     
-    # Chunked prefill: 带缓存一次喂多个新 token（past_len=11, S=4）
-    # S > 1 且有缓存，掩码必须覆盖 15 个 key，这里才是最容易写错的分支
-    chunk = torch.randn(B, 4, D)
-    out, cache = attn(chunk, kv_cache=cache)
-    print(f"Chunked prefill output: {out.shape}")  # [1, 4, 512]
-    print(f"Cache K shape: {cache[0].shape}")  # [1, 8, 15, 64]
+    # 1) Prefill: 一次处理整个 prompt（10 个 token）
+    out, cache = attn(tokens[:, :10])
+    print(f"Prefill output: {out.shape}")     # [1, 10, 512]
+    print(f"Cache K shape: {cache[0].shape}") # [1, 8, 10, 64]
+    check("Prefill", [out], 0)
+    
+    # 2) Decode: 逐个生成 token，cache 每步 +1
+    outs = []
+    for t in range(10, 13):
+        out, cache = attn(tokens[:, t:t+1], kv_cache=cache)
+        outs.append(out)
+    print(f"Decode output: {outs[0].shape}")  # [1, 1, 512]
+    print(f"Cache K shape: {cache[0].shape}") # [1, 8, 13, 64]
+    check("Decode", outs, 10)
+    
+    # 3) Chunked prefill: 带缓存一次喂多个新 token（past_len=13, S=2）
+    #    S > 1 且有缓存，掩码必须覆盖 15 个 key —— 写成 S×S 会对不上 scores 的形状，
+    #    这里才是最容易被漏掉的分支
+    out, cache = attn(tokens[:, 13:15], kv_cache=cache)
+    print(f"Chunked prefill output: {out.shape}")  # [1, 2, 512]
+    print(f"Cache K shape: {cache[0].shape}")      # [1, 8, 15, 64]
+    check("Chunked prefill", [out], 13)
 ```
 
 ## 🎯 面试要点
