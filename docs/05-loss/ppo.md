@@ -92,8 +92,10 @@ class PPOTrainer:
 
             # 2. 计算 value 和 advantage：用更新前的 critic，算完就是常量
             #    （critic 自己的 value loss 要另走一次带梯度的前向，不能复用这里）
+            #    compute_gae 返回的是 (advantages, returns) 二元组，必须解包 ——
+            #    只接一个变量的话 advantages 拿到的是整个 tuple，后面 ratio * advantages 会报类型错
             values = self.critic(prompts, responses)
-            advantages = compute_gae(rewards, values)
+            advantages, returns = compute_gae(rewards, values)   # returns 用来算 critic 的 value loss，这里省略
 
             # 3. 计算 old log probs：更新前算，它是比值的基准常量，
             #    若和 new_logp 一样由当前策略现算，ratio 恒等于 1、梯度就没了
