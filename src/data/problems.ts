@@ -993,11 +993,15 @@ class RotaryEmbedding(nn.Module):
         self.register_buffer('cos', angles.cos())
         self.register_buffer('sin', angles.sin())
 
-    def forward(self, q, k):
-        """q,k: [B, S, H, D]"""
+    def forward(self, q, k, start_pos=0):
+        """q,k: [B, S, H, D]
+        S 只是「这一步新算了几个 token」。增量解码（带 KV cache）时每步 S=1，
+        但位置必须从 start_pos（= 已缓存的长度）往后数 —— 写死 self.cos[:S]
+        会让每一步的新 token 都套上位置 0 的旋转角，和 cache 里按真实位置转过
+        的 K 对不上，注意力分数直接错掉。"""
         S = q.size(1)
-        cos = self.cos[:S].view(1, S, 1, -1)
-        sin = self.sin[:S].view(1, S, 1, -1)
+        cos = self.cos[start_pos:start_pos + S].view(1, S, 1, -1)
+        sin = self.sin[start_pos:start_pos + S].view(1, S, 1, -1)
 
         def rotate_half(x):
             x1, x2 = x.chunk(2, dim=-1)
@@ -1010,6 +1014,7 @@ class RotaryEmbedding(nn.Module):
       'rotate_half: chunk 两半 → cat(-x2, x1) = 旋转 90°；配对是 (i, i+d/2)，按相邻两维写会算错',
       '只对 Q 和 K 施加旋转，V 不变',
       '预计算 cos/sin 避免重复计算',
+      '增量解码要传 start_pos: 带 KV cache 每步只算 1 个 token，位置得从已缓存长度数起；写死 [:S] 会让每个新 token 都套上位置 0 的旋转角',
       '天然具有相对位置感知: q_m · k_n 只依赖 m-n',
       'theta=10000 是标准值，调整可实现长度外推 (NTK/YaRN)',
     ],
