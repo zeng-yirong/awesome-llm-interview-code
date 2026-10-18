@@ -89,17 +89,19 @@ def kl_penalty(logp, ref_logp):
 
 # 完整 GRPO 训练流程
 class GRPOTrainer:
-    def __init__(self, policy_model, ref_model, reward_model, group_size=8):
+    def __init__(self, policy_model, ref_model, reward_model, optimizer,
+                 group_size=8):
         self.policy = policy_model
         self.ref = ref_model
         self.reward = reward_model
+        self.optimizer = optimizer
         self.group_size = group_size
     
     def train_step(self, prompts):
-        # 1. 对每个 prompt 生成 group_size 个回答
-        responses = []
-        for _ in range(self.group_size):
-            responses.append(self.policy.generate(prompts))
+        # 1. 对每个 prompt 生成 group_size 个回答（采样不需要梯度）
+        with torch.no_grad():
+            responses = [self.policy.generate(prompts)
+                         for _ in range(self.group_size)]
         
         # 2. 计算每个回答的 reward
         rewards = torch.stack([
@@ -115,14 +117,19 @@ class GRPOTrainer:
         with torch.no_grad():
             old_logps = [self.policy.get_logprobs(prompts, resp) for resp in responses]
 
+        self.optimizer.zero_grad()          # 少了它，上一步的梯度会累加进来
         for i in range(self.group_size):
             new_logp = self.policy.get_logprobs(prompts, responses[i])
-            ref_logp = self.ref.get_logprobs(prompts, responses[i])
+            # 参考模型永远是冻结的，也走 no_grad：否则梯度会一路累积到它身上
+            with torch.no_grad():
+                ref_logp = self.ref.get_logprobs(prompts, responses[i])
             
             kl = kl_penalty(new_logp, ref_logp)
             loss = grpo_loss(old_logps[i], new_logp, advantages[:, i],
                            ref_kl=kl)
-            loss.backward()
+            # 逐条累加梯度，除以 group_size 后等价于对整个 group 取平均
+            (loss / self.group_size).backward()
+        self.optimizer.step()               # 少了它，参数根本没更新
 
 # 测试
 if __name__ == "__main__":
