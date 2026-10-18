@@ -95,6 +95,7 @@ def flash_attention(Q, K, V, block_size=64):
 
 # 测试
 if __name__ == "__main__":
+    torch.manual_seed(0)
     B, H, N, D = 2, 8, 256, 64
     Q = torch.randn(B, H, N, D)
     K = torch.randn(B, H, N, D)
@@ -102,6 +103,20 @@ if __name__ == "__main__":
     
     output = flash_attention(Q, K, V, block_size=32)
     print(f"Output shape: {output.shape}")  # [2, 8, 256, 64]
+    
+    # 分块 + Online Softmax 只改「怎么算」，不改「算出什么」：结果必须和朴素实现一致。
+    # 只打印形状是验不出这个的 —— 递推里少乘一次 exp 修正、或 li 忘了跟着缩放，
+    # 输出的形状照样是对的，只有数值对不上
+    def naive_attention(Q, K, V):
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(D)
+        return torch.matmul(torch.softmax(scores, dim=-1), V)
+    
+    ref = naive_attention(Q, K, V)
+    # 7 不是 N 的因数，最后一块只有 4 行 —— 顺带把零头块也过一遍
+    for bs in (64, 7):
+        out = flash_attention(Q, K, V, block_size=bs)
+        print(f"block_size={bs}: 与朴素实现的最大绝对误差 "
+              f"{(out - ref).abs().max().item():.3e}")
 ```
 
 ## 🎯 面试要点
