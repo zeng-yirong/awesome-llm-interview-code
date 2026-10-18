@@ -2395,7 +2395,7 @@ optimizer.step()`,
     hot: 2,
     difficulty: 3,
     oneLiner: '时间换空间，重新计算代替存储激活',
-    principle: '不保存所有中间激活值，只保存检查点。反向传播时重新计算需要的激活值。相比标准训练保存所有层激活（显存 O(L)），梯度检查点只保存 √L 个检查点（显存 O(√L)），用约 20% 额外计算换取大量显存。',
+    principle: '不保存所有中间激活值，只保存检查点，反向传播时重新计算需要的激活值，用约 20% 额外计算换显存。粒度有两种，别混：经典结论（Chen et al., 2016）是每 √L 层放一个检查点、反向时把整段重算一遍，激活显存降到 O(√L)；工程上更常见的逐层包裹（HuggingFace 的 gradient_checkpointing=True 就是逐层）每层仍要留一份边界激活、显存还是 O(L)，省掉的是层内中间量（Q/K/V、注意力分数、FFN 中间层）—— 收益是常数倍，而不是 √L。',
     principleSections: [
       {
         title: '核心思想',
@@ -2406,9 +2406,9 @@ optimizer.step()`,
       {
         title: '算法步骤',
         items: [
-          '前向传播时只保存检查点（如每 √L 层保存一次）',
+          '前向传播时只保存检查点：每 √L 层保存一个 → 显存 O(√L)；逐层包裹则每层都要留一份边界激活 → 仍是 O(L)，只省层内中间量',
           '反向传播时从检查点重新计算需要的激活值',
-          '使用 torch.utils.checkpoint 包裹需要检查点的层',
+          '使用 torch.utils.checkpoint 包裹需要检查点的层（或按 √L 分块，把整段一起包）',
           'HuggingFace 模型可直接设置 gradient_checkpointing=True',
         ],
       },
@@ -2476,7 +2476,7 @@ class TransformerBlock(nn.Module):
         return x + self.ffn(self.norm2(x))`,
     keyPoints: [
       '用 ~20% 额外计算时间换取大量显存',
-      '显存从 O(L) 降到 O(√L)',
+      '显存从 O(L) 降到 O(√L)（每 √L 层放一块的经典方案）；逐层包裹（HF 的一行开关）省的是层内中间量，量级仍是 O(L)',
       'HuggingFace 模型一行开启: gradient_checkpointing=True',
       '常与 LoRA 配合: LoRA 减少参数 + 检查点减少激活',
       'use_reentrant=False 是新版推荐设置',
