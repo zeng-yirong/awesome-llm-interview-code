@@ -100,11 +100,13 @@ trainer.train()
 
 # 验证混合精度
 def check_mixed_precision(model):
-    """检查模型是否使用混合精度"""
+    """看参数精度：AMP 不转权重，转的是算子 —— autocast 只在每个算子内部把输入
+    临时降到 fp16/bf16，主权重始终是 fp32，所以这里打出来全是 torch.float32。
+    （autocast 里真正被留在 fp32 的是少数算子，如 softmax / layernorm / loss。）
+    真把权重变成 fp16/bf16 的是 model.half() / model.to(torch.bfloat16)，
+    那是另一条路线 —— 没有 fp32 主权重兜底，更容易掉点。"""
     for name, param in model.named_parameters():
-        print(f"{name}: {param.dtype}")
-        # 应该看到大部分参数是 fp16/bf16
-        # 但某些关键参数（如 LayerNorm）保持 fp32
+        print(f"{name}: {param.dtype}")      # torch.float32，不是 fp16
 ```
 
 ## 🎯 面试要点
