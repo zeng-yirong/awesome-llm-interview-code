@@ -70,6 +70,11 @@ def ppo_loss(old_logp, new_logp, advantages, eps=0.2):
 
     return -torch.min(surr1, surr2).mean()            # 保守更新
 
+def kl_penalty(logp, ref_logp):
+    """KL(π_θ‖π_ref) 的 Schulman 估计器（与 GRPO 一题用的是同一个，恒非负、方差低）"""
+    ratio = torch.exp(ref_logp - logp)
+    return (ratio - (ref_logp - logp) - 1).mean()
+
 # 完整 PPO 训练流程
 class PPOTrainer:
     def __init__(self, policy_model, ref_model, reward_model, critic_model,
@@ -111,7 +116,10 @@ class PPOTrainer:
             loss = ppo_loss(old_logp, new_logp, advantages)
 
             # KL penalty (防止偏离参考模型太远)
-            kl = (new_logp - ref_logp).mean()
+            # 用上面那个 k3 估计器，与 GRPO 一题保持一致。
+            # 原来直接写的 (new_logp - ref_logp).mean() 是 k1：期望上也是 KL，
+            # 但能取到负值、方差大；k3 恒非负、低方差，代价是多一次 exp
+            kl = kl_penalty(new_logp, ref_logp)
             loss += self.kl_coef * kl
 
             self.optimizer.zero_grad()
@@ -139,4 +147,5 @@ if __name__ == "__main__":
 - **需要 reward model + critic model + reference model**
 - **面试常问**: PPO 的 clip 机制是如何工作的？
 - ε 通常取 0.2；ratio 必须用旧策略的 logp 现算，rollout 与更新要严格配对
+- **KL 惩罚的估计器要选对**: k3 = exp(ref−new) − (ref−new) − 1 恒非负、最小值就在 new=ref，两侧的梯度都把人拉回参考模型；(new−ref) 的 k1 版本梯度恒为 +1，只会一路压低 logp，没有回拉力
 

@@ -1451,6 +1451,7 @@ def ppo_loss(old_logp, new_logp, advantages, eps=0.2):
       'ChatGPT/InstructGPT 的 RLHF 核心算法',
       '需要 reward model + critic model + reference model',
       'ε 通常取 0.2；ratio 必须用旧策略的 logp 现算，rollout 与更新要严格配对',
+      'KL 惩罚的估计器要选对: k3 = exp(ref−new) − (ref−new) − 1 恒非负、最小值就在 new=ref，两侧的梯度都把人拉回参考模型；(new−ref) 的 k1 版本梯度恒为 +1，只会一路压低 logp，没有回拉力',
     ],
     source: 'ckd0817',
   },
