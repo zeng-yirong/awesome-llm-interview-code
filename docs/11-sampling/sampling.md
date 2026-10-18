@@ -55,7 +55,7 @@ import torch
 import torch.nn.functional as F
 
 def top_k_top_p_sampling(logits, temperature=0.7, top_k=50, top_p=0.9):
-    """组合采样策略"""
+    """组合采样策略：返回过滤后的 logits（-inf = 被截掉的候选），不负责采样"""
     logits = logits / temperature
 
     # Top-k: 只保留最大的 k 个
@@ -74,33 +74,8 @@ def top_k_top_p_sampling(logits, temperature=0.7, top_k=50, top_p=0.9):
         sorted_logits[mask] = float('-inf')
         logits = sorted_logits.scatter(1, sorted_idx, sorted_logits)
 
-    probs = F.softmax(logits, dim=-1)
-    return torch.multinomial(probs, num_samples=1)
-
-# 单独的采样函数
-def temperature_sampling(logits, temperature=1.0):
-    """温度采样"""
-    return logits / temperature
-
-def top_k_sampling(logits, top_k=50, temperature=1.0):
-    """Top-K 采样"""
-    logits = logits / temperature
-    top_k_vals, _ = torch.topk(logits, top_k)
-    threshold = top_k_vals[..., -1:]
-    return logits.masked_fill(logits < threshold, float('-inf'))
-
-def top_p_sampling(logits, top_p=0.9, temperature=1.0):
-    """Top-P (Nucleus) 采样"""
-    logits = logits / temperature
-    sorted_logits, sorted_idx = torch.sort(logits, descending=True)
-    cum_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
-    
-    mask = cum_probs > top_p
-    mask[..., 1:] = mask[..., :-1].clone()
-    mask[..., 0] = False
-    sorted_logits[mask] = float('-inf')
-    
-    return sorted_logits.scatter(1, sorted_idx, sorted_logits)
+    # 只截断，不采样：softmax + multinomial 由调用方做（两步分开才不会漏掉归一化）
+    return logits
 
 # 自回归生成
 @torch.no_grad()
@@ -132,18 +107,12 @@ if __name__ == "__main__":
     V = 32000
     logits = torch.randn(1, V)
     
-    # 不同采样策略
-    print("Temperature=0.1 (更确定):")
-    sampled = top_k_top_p_sampling(logits, temperature=0.1, top_k=50, top_p=0.9)
-    print(f"  Non-inf tokens: {(sampled > float('-inf')).sum().item()}")
-    
-    print("\nTemperature=1.0 (标准):")
-    sampled = top_k_top_p_sampling(logits, temperature=1.0, top_k=50, top_p=0.9)
-    print(f"  Non-inf tokens: {(sampled > float('-inf')).sum().item()}")
-    
-    print("\nTemperature=2.0 (更随机):")
-    sampled = top_k_top_p_sampling(logits, temperature=2.0, top_k=50, top_p=0.9)
-    print(f"  Non-inf tokens: {(sampled > float('-inf')).sum().item()}")
+    # 温度越低分布越尖，top-p 砍掉的候选越多（top-k=50 是候选数的上限）
+    for temperature in (0.1, 1.0, 2.0):
+        filtered = top_k_top_p_sampling(logits, temperature=temperature,
+                                        top_k=50, top_p=0.9)
+        left = int((filtered > float('-inf')).sum())
+        print(f"T={temperature}: 剩余候选 {left} 个")
 ```
 
 ## 🎯 面试要点

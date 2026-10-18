@@ -2249,7 +2249,7 @@ $$`,
     code: `import torch, torch.nn.functional as F
 
 def top_k_top_p_sampling(logits, temperature=0.7, top_k=50, top_p=0.9):
-    """组合采样策略"""
+    """组合采样策略：返回过滤后的 logits（-inf = 被截掉的候选），不负责采样"""
     logits = logits / temperature
 
     # Top-k: 只保留最大的 k 个
@@ -2268,8 +2268,8 @@ def top_k_top_p_sampling(logits, temperature=0.7, top_k=50, top_p=0.9):
         sorted_logits[mask] = float('-inf')
         logits = sorted_logits.scatter(1, sorted_idx, sorted_logits)
 
-    probs = F.softmax(logits, dim=-1)
-    return torch.multinomial(probs, num_samples=1)`,
+    # 只截断，不采样：softmax + multinomial 由调用方做
+    return logits`,
     keyPoints: [
       'T<1: 更确定 (适合翻译/代码); T>1: 更随机 (适合创作)',
       'Top-k 固定数量，Top-p 动态集合 → Top-p 更灵活',
