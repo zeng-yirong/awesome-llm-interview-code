@@ -68,11 +68,20 @@ class SwiGLU(nn.Module):
 # 测试
 if __name__ == "__main__":
     B, S, D = 2, 10, 512
+    torch.manual_seed(0)
     x = torch.randn(B, S, D)
     swiglu = SwiGLU(D)
     out = swiglu(x)
     print(f"Input shape: {x.shape}")   # [2, 10, 512]
     print(f"Output shape: {out.shape}") # [2, 10, 512]
+    
+    # 注释里写了「d_ff = 8/3·d 是为了保持参数量与标准 FFN 相当」，
+    # 但这笔账从没算过：SwiGLU 有三个矩阵、标准 FFN 只有两个，
+    # 所以 d_ff 必须缩到 2/3 才能在参数上打平 —— 值得直接印出来对一遍
+    ffn = FFN(D)                       # 见「FFN」一题
+    count = lambda m: sum(p.numel() for p in m.parameters())
+    print(f"参数量: SwiGLU {count(swiglu):,} vs FFN {count(ffn):,} "
+          f"({count(swiglu) / count(ffn):.2%})")
 ```
 
 ## 🎯 面试要点
