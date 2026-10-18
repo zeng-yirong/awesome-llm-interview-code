@@ -3070,6 +3070,7 @@ def compute_gae(rewards, values, gamma=0.99, lam=0.95):
       '递推实现 O(T): A_t = δ_t + γλ·A_{t+1}',
       '通常 γ=0.99, λ=0.95',
       'PPO 训练的标准优势估计方法',
+      '优势与 old_logp 都要 detach / no_grad: 它们是比值的基准常量，若带着图在多个 PPO epoch 里反复反向，第二次就会撞上「图已释放」的 RuntimeError',
       'GRPO 不需要 GAE (用组内归一化代替)',
     ],
     source: 'cdhx',
