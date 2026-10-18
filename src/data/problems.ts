@@ -1867,7 +1867,9 @@ $$`,
 
 @torch.no_grad()
 def teacher_forward(model, input_ids, privileged_ids):
-    """教师 = 同一模型 + 特权上下文，只做一次前向，不需要梯度"""
+    """教师 = 同一模型 + 特权上下文，只做一次前向，不需要梯度
+    特权上下文拼在最前面：因果 LM 只能看前面的内容，要让 c 影响答案 token 的预测
+    就只能排在答案之前（代价是教师侧答案 token 的绝对位置比学生侧多 P 个）"""
     full = torch.cat([privileged_ids, input_ids], dim=1)
     logits = model(full).logits
     # 只取答案段（去掉特权上下文那一段）
@@ -1885,12 +1887,14 @@ def self_opd_loss(model, input_ids, privileged_ids, answer_mask):
     t_logits = teacher_forward(model, input_ids, privileged_ids)   # [B, T, V]
 
     # 3. 逐 token 反向 KL: KL(p_S ‖ p_T)
-    s_logp = F.log_softmax(student_logits, dim=-1)
-    t_logp = F.log_softmax(t_logits, dim=-1)
-    kl = (s_logp.exp() * (s_logp - t_logp)).sum(dim=-1)            # [B, T]
+    #    对齐：因果 LM 里 logits[t] 预测的是 t+1 的 token，mask 标的是学生生成的
+    #    token 位置，所以要评 y_t 就得取 logits[t-1]：logits 切最后一列、mask 切第一列
+    s_logp = F.log_softmax(student_logits[:, :-1], dim=-1)         # [B, T-1, V]
+    t_logp = F.log_softmax(t_logits[:, :-1], dim=-1)
+    kl = (s_logp.exp() * (s_logp - t_logp)).sum(dim=-1)            # [B, T-1]
 
     # 4. 只在学生自己生成的 token 上回传
-    mask = answer_mask.float()
+    mask = answer_mask[:, 1:].float()                              # [B, T-1]
     return (kl * mask).sum() / mask.sum().clamp_min(1.0)`,
     keyPoints: [
       '与 OPD 的核心区别: OPD 的教师是另一个更强的模型；self-OPD 的教师是同一份权重 + 特权上下文',
