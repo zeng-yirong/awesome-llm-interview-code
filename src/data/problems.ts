@@ -2184,11 +2184,11 @@ $$`,
     code: `import torch, torch.nn as nn, math
 
 class LoRALinear(nn.Module):
-    def __init__(self, in_f, out_f, rank=8, alpha=16.0, dropout=0.0):
+    def __init__(self, in_f, out_f, rank=8, alpha=16.0, dropout=0.0, bias=False):
         super().__init__()
         self.scaling = alpha / rank
-        # 冻结原始权重
-        self.linear = nn.Linear(in_f, out_f, bias=False)
+        # 冻结原始权重（bias 由调用方决定，见 apply_lora）
+        self.linear = nn.Linear(in_f, out_f, bias=bias)
         self.linear.requires_grad_(False)
         # LoRA 低秩矩阵
         self.lora_A = nn.Parameter(torch.zeros(rank, in_f))

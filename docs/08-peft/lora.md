@@ -58,12 +58,12 @@ import torch.nn as nn
 import math
 
 class LoRALinear(nn.Module):
-    def __init__(self, in_f, out_f, rank=8, alpha=16.0, dropout=0.0):
+    def __init__(self, in_f, out_f, rank=8, alpha=16.0, dropout=0.0, bias=False):
         super().__init__()
         self.scaling = alpha / rank
         
-        # 冻结原始权重
-        self.linear = nn.Linear(in_f, out_f, bias=False)
+        # 冻结原始权重（bias 由调用方决定，见 apply_lora）
+        self.linear = nn.Linear(in_f, out_f, bias=bias)
         self.linear.requires_grad_(False)
         
         # LoRA 低秩矩阵
@@ -95,9 +95,18 @@ def apply_lora(model, rank=8, alpha=16.0):
                     module.in_features,
                     module.out_features,
                     rank=rank,
-                    alpha=alpha
+                    alpha=alpha,
+                    # 原投影带 bias（Qwen 的 q_proj/v_proj 就带）时必须跟着带上：
+                    # 只 copy 权重会把 bias 悄悄丢掉，替换完模型输出当场就变了，
+                    # 「B=0 所以初始输出不变」这条保证跟着一起失效
+                    bias=module.bias is not None,
                 )
+                # 新模块默认建在 CPU / float32 上，而原模块可能已经在 GPU 或 bf16 上。
+                # copy_ 要求两侧同 device 同 dtype，所以先搬过去再复制，否则直接报错
+                lora_layer.to(module.weight.device, module.weight.dtype)
                 lora_layer.linear.weight.data.copy_(module.weight.data)
+                if module.bias is not None:
+                    lora_layer.linear.bias.data.copy_(module.bias.data)
                 # 替换原模块
                 parts = name.rsplit('.', 1)
                 parent = model.get_submodule(parts[0]) if len(parts) > 1 else model
@@ -117,6 +126,21 @@ if __name__ == "__main__":
     base_out = lora.linear(x)
     diff = (out - base_out).abs().sum()
     print(f"Diff at init (should be 0): {diff.item():.6f}")
+    
+    # apply_lora 的等价性：原投影带 bias 时，替换后初始输出也必须完全一致
+    class ToyBlock(nn.Module):
+        def __init__(self, d=8):
+            super().__init__()
+            self.q_proj = nn.Linear(d, d, bias=True)   # 故意带 bias
+            self.v_proj = nn.Linear(d, d, bias=True)
+    
+    torch.manual_seed(0)
+    blk = ToyBlock()
+    x_small = torch.randn(2, 3, 8)
+    before = blk.q_proj(x_small)
+    apply_lora(blk, rank=4, alpha=8.0)
+    after = blk.q_proj(x_small)
+    print(f"Diff after apply_lora (should be 0): {(before - after).abs().max().item():.6f}")
 ```
 
 ## 🎯 面试要点
