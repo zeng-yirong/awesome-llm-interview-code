@@ -2608,16 +2608,17 @@ $$`,
   end`,
     code: `import torch
 
-# PagedAttention 核心思想 (简化伪代码)
+# PagedAttention 核心思想
+# 真实的 kernel 是 CUDA/Triton，这里用块表映射 + gather 把语义写清楚
 
 class PagedKVCache:
     def __init__(self, block_size=16, num_blocks=1000, n_layers=32,
-                 n_heads=32, head_dim=128):
+                 n_heads=32, head_dim=128, device='cuda'):
         self.block_size = block_size
         # 物理块池 (预分配所有显存)
         self.physical_blocks = torch.zeros(
             num_blocks, n_layers, 2, block_size, n_heads, head_dim,
-            dtype=torch.float16, device='cuda'
+            dtype=torch.float16, device=device
         )
         # 块表: 每个序列的逻辑块 → 物理块映射
         self.block_tables = {}   # seq_id → [physical_block_ids]
@@ -2633,21 +2634,24 @@ class PagedKVCache:
         self.free_blocks = self.free_blocks[num_blocks:]
         self.block_tables[seq_id] = allocated
 
-    def write(self, seq_id, position, key, value):
-        """写入 KV 到对应的物理块"""
+    def write(self, seq_id, layer, position, key, value):
+        """把一个 token 在某层的 K/V 写进对应的物理块
+        key / value: [n_heads, head_dim]"""
         block_idx = position // self.block_size
         block_offset = position % self.block_size
         phys_id = self.block_tables[seq_id][block_idx]
-        self.physical_blocks[phys_id, :, 0, block_offset] = key
-        self.physical_blocks[phys_id, :, 1, block_offset] = value
+        self.physical_blocks[phys_id, layer, 0, block_offset] = key
+        self.physical_blocks[phys_id, layer, 1, block_offset] = value
 
-    def attention(self, seq_id, q):
-        """使用块表进行注意力计算"""
+    def attention(self, seq_id, layer, q, seq_len):
+        """使用块表进行注意力计算
+        layer: 当前算到第几层（每层的 KV 是独立的，别把不同层混进来）
+        seq_len: 这个序列实际写入了多少 token"""
         phys_ids = self.block_tables[seq_id]
         # 从非连续物理块中 gather K/V → 计算注意力
-        k = self.physical_blocks[phys_ids, :, 0]   # gather
-        v = self.physical_blocks[phys_ids, :, 1]
-        return paged_attention_kernel(q, k, v)`,
+        k = self.physical_blocks[phys_ids, layer, 0]   # [n_blocks, block_size, H, D]
+        v = self.physical_blocks[phys_ids, layer, 1]
+        return paged_attention_kernel(q, k, v, seq_len, self.block_size)`,
     keyPoints: [
       '借鉴 OS 虚拟内存分页思想',
       '逻辑块连续，物理块可以不连续',
