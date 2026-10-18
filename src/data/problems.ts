@@ -3350,8 +3350,9 @@ def relu(x):
 def gelu(x):
     return 0.5 * x * (1 + torch.tanh(
         (2/3.14159)**0.5 * (x + 0.044715 * x**3)
+        # 常数写的是 3.14159 而非 math.pi：相对差 4.2e-07，影响 ~1e-07，可以忽略
     ))
-    # 或直接用 F.gelu(x)
+    # 或直接用 F.gelu(x)；tanh 近似与精确版（erf）相差 4.7e-04 量级
 
 # SiLU (Swish)
 def silu(x):
@@ -3360,10 +3361,21 @@ def silu(x):
 # 梯度对比
 x = torch.linspace(-3, 3, 100, requires_grad=True)
 y_relu = relu(x).sum(); y_relu.backward()
-print("ReLU grad:", x.grad[:5])     # [0, 0, 0, ..., 1, 1]
-x.grad.zero_()
+print("ReLU grad:", x.grad[:5])     # 前 5 个点全为负，梯度应当是 0
+relu_grad = x.grad.clone(); x.grad.zero_()
 y_gelu = gelu(x).sum(); y_gelu.backward()
-print("GELU grad:", x.grad[:5])     # 平滑过渡`,
+print("GELU grad:", x.grad[:5])     # 平滑过渡：负区间也有非零梯度
+x.grad.zero_()
+y_silu = silu(x).sum(); y_silu.backward()
+print("SiLU grad:", x.grad[:5])     # 平滑 + 门控
+silu_grad = x.grad.clone()
+
+# 公式块里的 ReLU′ = (x>0)、SiLU′ = SiLU + σ(1−SiLU) 对一遍 autograd
+# （0 处 ReLU 不可导，取哪一侧是框架约定，跳过那个点）
+xd = x.detach(); safe = xd != 0
+print("ReLU′ 误差:", ((xd > 0).float()[safe] - relu_grad[safe]).abs().max().item())
+s = torch.sigmoid(xd)
+print("SiLU′ 误差:", (silu(xd) + s * (1 - silu(xd)) - silu_grad).abs().max().item())`,
     keyPoints: [
       'ReLU: 简单高效，但有 dead neuron (负区间梯度=0)',
       'GELU: 平滑版 ReLU，BERT/GPT 使用',
