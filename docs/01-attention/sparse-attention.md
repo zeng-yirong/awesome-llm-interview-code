@@ -13,7 +13,7 @@
 ### 算法步骤
 1. NSA：先把 `K/V` 按块均值池化成 `K_cmp`（块大小 `l`），用压缩后的表示做一次粗粒度注意力。
 2. 同一份 `K_cmp` 的分数用来挑 top-n 个块，再取回这些块的**原始** `KV` 做精注意力；同时保留最近 `w` 个 token 的滑窗。
-3. 三路输出按 `g = σ(wᵀ·[q_t ; ...])` 加权求和，门控是学出来的，模型自己决定何时依赖全局、何时只看局部。
+3. 三路输出按 `g = σ(qᵀw_c)` 加权求和，每个头、每条分支各有一个可学的 `w_c`，门控是学出来的，模型自己决定何时依赖全局、何时只看局部。
 4. DSA：`k_s = W^{K,l}·h_s` 是一个很轻的 key 投影（`d^I` 远小于 `d`），`I_{t,s} = Σ_j w_{t,j}·ReLU(q_{t,j}·k_s)` 给每个历史 token 打分，取 top-k 后再在这 `k` 个 token 上做 MLA 注意力。
 5. Indexer 维度极低且能用 FP8 跑，所以「给所有历史 token 打分」这一步的代价可以忽略。
 
@@ -50,7 +50,7 @@ I_{t,s}=\sum_j w_{t,j}\text{ReLU}(q_{t,j}\cdot k_s),\qquad
 flowchart TD
   subgraph NSA["NSA：压缩 + 选择 + 滑窗，三路门控加权"]
     direction LR
-    cmp["压缩分支<br/>[B, H, S/l, D]<br/>mean_pool 给粗粒度全局"] --> g["g = σ(wᵀ·[q_t ; ...])<br/>[B, H, 1]<br/>学出来的加权系数"]
+    cmp["压缩分支<br/>[B, H, S/l, D]<br/>mean_pool 给粗粒度全局"] --> g["g = σ(qᵀw_c)<br/>[B, H, 3]<br/>每条分支一个学出来的系数"]
     sel["选择分支<br/>top-n 块<br/>聚焦重要中程区域"] --> g
     win["滑窗分支<br/>最近 w 个 token<br/>局部精确"] --> g
     g --> o1["o = Σ_b g_b·Attn(q, K_b, V_b)<br/>[B, H, S, D]"]
@@ -83,10 +83,11 @@ def sdpa(q, k, v, scale):
     return F.softmax(q @ k.transpose(-1, -2) * scale, dim=-1) @ v
 
 
-def nsa_attention(q, k, v, block_size=8, top_n=2, window=16):
+def nsa_attention(q, k, v, gate_w, block_size=8, top_n=2, window=16):
     """
     NSA 三分支稀疏注意力
     q, k, v: [B, H, S, D]；返回 o: [B, H, S, D]
+    gate_w:  [H, D, 3] 可学习的门控向量（每个头、每个分支一个），模型里是 nn.Parameter
     注意: 为简洁起见这里省略了因果掩码，真实实现必须加
     """
     B, H, S, D = q.shape
@@ -117,9 +118,14 @@ def nsa_attention(q, k, v, block_size=8, top_n=2, window=16):
     o_win = sdpa(q, k[:, :, -win:, :], v[:, :, -win:, :], scale)
 
     # ---------- 门控加权求和 ----------
-    g = torch.sigmoid(q.mean(dim=(1, 3), keepdim=True)).expand(-1, 1, -1, 3)
-    w_cmp, w_slc, w_win = g[..., 0:1], g[..., 1:2], g[..., 2:3]
-    return w_cmp * o_cmp + w_slc * o_slc + w_win * o_win
+    # 门控必须学出来：三条分支的相对重要性随层数、位置、任务变化，硬相加不行。
+    # g = σ(qᵀw_c)，每个头、每条分支各有一个可学的 w_c，三个系数互相独立 ——
+    # 若三条分支拿到同一个系数，「加权」就退化成了对所有分支乘同一个数
+    g = torch.sigmoid(torch.einsum("bhsd,hdc->bhsc", q, gate_w))      # [B, H, S, 3]
+    w_cmp, w_slc, w_win = g[..., 0], g[..., 1], g[..., 2]             # 各 [B, H, S]
+    return (w_cmp.unsqueeze(-1) * o_cmp
+            + w_slc.unsqueeze(-1) * o_slc
+            + w_win.unsqueeze(-1) * o_win)
 
 
 class LightningIndexer(nn.Module):
@@ -154,7 +160,7 @@ if __name__ == "__main__":
     B, H, S, D = 1, 4, 64, 16
     q, k, v = (torch.randn(B, H, S, D) for _ in range(3))
 
-    o = nsa_attention(q, k, v, block_size=8, top_n=2, window=16)
+    o = nsa_attention(q, k, v, gate_w=torch.randn(H, D, 3), block_size=8, top_n=2, window=16)
     print("NSA 输出:", tuple(o.shape), "(与输入同形)")
 
     indexer = LightningIndexer(H, D, d_index=16)

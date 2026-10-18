@@ -663,7 +663,7 @@ class MLA(nn.Module):
         items: [
           'NSA：先把 K/V 按块均值池化成 K_cmp（块大小 l），用压缩后的表示做一次粗粒度注意力。',
           '同一份 K_cmp 的分数用来挑 top-n 个块，再取回这些块的原始 KV 做精注意力；同时保留最近 w 个 token 的滑窗。',
-          '三路输出按 g = σ(wᵀ·[q_t ; ...]) 加权求和，门控是学出来的，模型自己决定何时依赖全局、何时只看局部。',
+          '三路输出按 g = σ(qᵀw_c) 加权求和，每个头、每条分支各有一个可学的 w_c，门控是学出来的，模型自己决定何时依赖全局、何时只看局部。',
           'DSA：k_s = W^{K,l}·h_s 是一个很轻的 key 投影（d^I 远小于 d），I_{t,s} = Σ_j w_{t,j}·ReLU(q_{t,j}·k_s) 给每个历史 token 打分，取 top-k 后再在这 k 个 token 上做 MLA 注意力。',
           'Indexer 维度极低且能用 FP8 跑，所以「给所有历史 token 打分」这一步的代价可以忽略。',
         ],
@@ -696,7 +696,7 @@ $$`,
     flowDiagram: `flowchart TD
   subgraph NSA["NSA：压缩 + 选择 + 滑窗，三路门控加权"]
     direction LR
-    cmp["压缩分支<br/>[B, H, S/l, D]<br/>mean_pool 给粗粒度全局"] --> g["g = σ(wᵀ·[q_t ; ...])<br/>[B, H, 1]<br/>学出来的加权系数"]
+    cmp["压缩分支<br/>[B, H, S/l, D]<br/>mean_pool 给粗粒度全局"] --> g["g = σ(qᵀw_c)<br/>[B, H, 3]<br/>每条分支一个学出来的系数"]
     sel["选择分支<br/>top-n 块<br/>聚焦重要中程区域"] --> g
     win["滑窗分支<br/>最近 w 个 token<br/>局部精确"] --> g
     g --> o1["o = Σ_b g_b·Attn(q, K_b, V_b)<br/>[B, H, S, D]"]
@@ -718,8 +718,10 @@ def sdpa(q, k, v, scale):
     """标准缩放点积注意力（q 可多一个 query 维度）"""
     return F.softmax(q @ k.transpose(-1, -2) * scale, dim=-1) @ v
 
-def nsa_attention(q, k, v, block_size=8, top_n=2, window=16):
-    """NSA 三分支稀疏注意力; q,k,v: [B,H,S,D]。为简洁省略因果掩码，真实实现必须加"""
+def nsa_attention(q, k, v, gate_w, block_size=8, top_n=2, window=16):
+    """NSA 三分支稀疏注意力; q,k,v: [B,H,S,D]
+    gate_w: [H,D,3] 可学习的门控向量（每个头、每条分支一个），模型里是 nn.Parameter
+    为简洁省略因果掩码，真实实现必须加"""
     B, H, S, D = q.shape
     scale = 1.0 / math.sqrt(D)
     n_blocks = S // block_size
@@ -742,9 +744,12 @@ def nsa_attention(q, k, v, block_size=8, top_n=2, window=16):
     win = min(window, S)
     o_win = sdpa(q, k[:, :, -win:, :], v[:, :, -win:, :], scale)
 
-    # 门控加权求和
-    g = torch.sigmoid(q.mean(dim=(1, 3), keepdim=True)).expand(-1, 1, -1, 3)
-    return g[..., 0:1] * o_cmp + g[..., 1:2] * o_slc + g[..., 2:3] * o_win
+    # 门控加权求和: g = σ(qᵀw_c)，每头每条分支各一个可学的 w_c
+    # 三个系数必须互相独立，否则「加权」退化成对所有分支乘同一个数
+    g = torch.sigmoid(torch.einsum("bhsd,hdc->bhsc", q, gate_w))            # [B,H,S,3]
+    return (g[..., 0].unsqueeze(-1) * o_cmp
+            + g[..., 1].unsqueeze(-1) * o_slc
+            + g[..., 2].unsqueeze(-1) * o_win)
 
 class LightningIndexer(nn.Module):
     """DSA 的 lightning indexer: 轻量投影 + ReLU 打分 + top-k"""
