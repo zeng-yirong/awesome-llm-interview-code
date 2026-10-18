@@ -82,6 +82,9 @@ class TwoLayerNet:
         self.W1 -= lr * dW1
         self.W2 -= lr * dW2
 
+        # 把手算的梯度交出去：它有没有复现 autograd，是这一题唯一值得验的东西
+        return dW1, dW2
+
 # 使用 PyTorch 自动求导
 class TwoLayerNetAuto:
     def __init__(self, d_in, d_hidden, d_out):
@@ -96,6 +99,7 @@ class TwoLayerNetAuto:
 
 # 测试
 if __name__ == "__main__":
+    torch.manual_seed(0)
     # 手动反向传播
     net = TwoLayerNet(10, 20, 5)
     x = torch.randn(4, 10)
@@ -105,19 +109,28 @@ if __name__ == "__main__":
     loss = ((y_pred - y_true) ** 2).mean()
     print(f"Loss before: {loss.item():.4f}")
     
-    net.backward(y_true, lr=0.01)
+    W1_before, W2_before = net.W1.clone(), net.W2.clone()
+    dW1, dW2 = net.backward(y_true, lr=0.01)
     
     y_pred = net.forward(x)
     loss = ((y_pred - y_true) ** 2).mean()
-    print(f"Loss after: {loss.item():.4f}")
+    print(f"Loss after: {loss.item():.4f}  (lr=0.01 时一步只挪一点点)")
     
-    # PyTorch 自动求导
+    # 手写反向的意义就是复现 autograd：必须把两份梯度对一遍
+    # 注意要让两边是同一个函数 —— 手动那份已经被更新过了，所以 autograd 这侧
+    # 要装回更新前的权重，否则比的是两个不同的网络
     net_auto = TwoLayerNetAuto(10, 20, 5)
-    y_pred = net_auto.forward(x)
-    loss = ((y_pred - y_true) ** 2).mean()
-    loss.backward()
+    with torch.no_grad():
+        net_auto.W1.copy_(W1_before)
+        net_auto.W2.copy_(W2_before)
+    loss_auto = ((net_auto.forward(x) - y_true) ** 2).mean()
+    loss_auto.backward()
     
-    print(f"\nW1 grad shape: {net_auto.W1.grad.shape}")
+    print(f"\n手写 vs autograd: ∂L/∂W1 最大误差 "
+          f"{(dW1 - net_auto.W1.grad).abs().max().item():.2e} / ∂L/∂W2 "
+          f"{(dW2 - net_auto.W2.grad).abs().max().item():.2e}"
+          f"（梯度量级 {dW2.abs().max().item():.2e}）")
+    print(f"W1 grad shape: {net_auto.W1.grad.shape}")
     print(f"W2 grad shape: {net_auto.W2.grad.shape}")
 ```
 

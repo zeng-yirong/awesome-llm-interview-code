@@ -3275,7 +3275,10 @@ class TwoLayerNet:
 
         # 更新
         self.W1 -= lr * dW1
-        self.W2 -= lr * dW2`,
+        self.W2 -= lr * dW2
+
+        # 把手算的梯度交出去，方便与 autograd 对照
+        return dW1, dW2`,
     keyPoints: [
       '链式法则是反向传播的数学基础',
       '前向保存中间变量，反向利用它们计算梯度',
