@@ -87,10 +87,16 @@ class KVCacheAttention(nn.Module):
             v = torch.cat([kv_cache[1], v], dim=2)
         new_cache = (k, v)
 
-        # 注意力计算（Prefill 一次算多个位置，未来必须屏蔽；Decode 时 S=1，掩码自动失效）
+        # 注意力计算（Prefill 一次算多个位置，未来必须屏蔽；Decode 时 S=1，此时唯一
+        # 的 query 可以看全部历史，不屏蔽即正确）
         scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.dh)
         if S > 1:
-            causal = torch.tril(torch.ones(S, S, dtype=torch.bool, device=x.device))
+            # 掩码宽度必须等于完整的 key 长度，不能写 S×S：带缓存时 key 里有 past_len
+            # 个历史位置，S×S 的掩码对不上 [B, H, S, past_len+S] 的 scores，会直接报错
+            past_len = k.size(2) - S
+            causal = torch.tril(
+                torch.ones(S, k.size(2), dtype=torch.bool, device=x.device),
+                diagonal=past_len)      # 允许 j ≤ i + past_len：历史全可见，新 token 保持下三角
             scores = scores.masked_fill(~causal, float('-inf'))
         out = torch.matmul(F.softmax(scores, dim=-1), v)
         out = out.transpose(1, 2).contiguous().view(B, S, -1)
@@ -112,6 +118,13 @@ if __name__ == "__main__":
     out, cache = attn(new_token, kv_cache=cache)
     print(f"Decode output: {out.shape}")  # [1, 1, 512]
     print(f"Cache K shape: {cache[0].shape}")  # [1, 8, 11, 64]
+    
+    # Chunked prefill: 带缓存一次喂多个新 token（past_len=11, S=4）
+    # S > 1 且有缓存，掩码必须覆盖 15 个 key，这里才是最容易写错的分支
+    chunk = torch.randn(B, 4, D)
+    out, cache = attn(chunk, kv_cache=cache)
+    print(f"Chunked prefill output: {out.shape}")  # [1, 4, 512]
+    print(f"Cache K shape: {cache[0].shape}")  # [1, 8, 15, 64]
 ```
 
 ## 🎯 面试要点
@@ -122,5 +135,6 @@ if __name__ == "__main__":
 - **长序列推理的主要显存瓶颈**
 - **PagedAttention (vLLM)** 用分页管理 KV Cache 减少碎片
 - **面试常问**: KV Cache 有多大？如何优化？
+- **掩码宽度按完整 key 长度算**: 带缓存又一次喂多个 token（chunked prefill / 投机解码）时，`S×S` 的掩码对不上 `[S, past_len+S]` 的 scores，必须用 `diagonal=past_len` 的下三角把历史位置放行
 - **不缓存的代价**: 每步要对全部历史重算，累计 Σt = O(S²)；KV Cache 本身也不小 —— LLaMA 2 70B (GQA，8 个 KV head) 单条 4096 长度、fp16 约 1.3GB，并发 128 条就是 ~168GB，反超 fp16 权重的 ~140GB
 

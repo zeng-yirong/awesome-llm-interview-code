@@ -520,8 +520,11 @@ class KVCacheAttention(nn.Module):
         new_cache = (k, v)
 
         scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.dh)
-        if S > 1:     # Prefill：一次算多个位置，未来必须屏蔽；Decode 时 S=1，掩码自动失效
-            causal = torch.tril(torch.ones(S, S, dtype=torch.bool, device=x.device))
+        if S > 1:     # Prefill：一次算多个位置，未来必须屏蔽；Decode 时 S=1，唯一的 query 看全部历史即是正确的
+            past_len = k.size(2) - S             # 掩码宽度必须等于完整 key 长度，不能写 S×S
+            causal = torch.tril(
+                torch.ones(S, k.size(2), dtype=torch.bool, device=x.device),
+                diagonal=past_len)               # 允许 j ≤ i + past_len
             scores = scores.masked_fill(~causal, float('-inf'))
         out = torch.matmul(F.softmax(scores, dim=-1), v)
         out = out.transpose(1, 2).contiguous().view(B, S, -1)
@@ -532,6 +535,7 @@ class KVCacheAttention(nn.Module):
       'GQA 减少 KV Cache (多个 Q 共享 KV)',
       '长序列推理的主要显存瓶颈',
       'PagedAttention (vLLM) 用分页管理 KV Cache 减少碎片',
+      '掩码宽度按完整 key 长度算: 带缓存又一次喂多个 token（chunked prefill / 投机解码）时，S×S 的掩码对不上 [S, past_len+S] 的 scores，必须用 diagonal=past_len 的下三角把历史位置放行',
       '不缓存的代价: 每步要对全部历史重算，累计 Σt = O(S²)；KV Cache 本身也不小 —— LLaMA 2 70B (GQA，8 个 KV head) 单条 4096 长度、fp16 约 1.3GB，并发 128 条就是 ~168GB，反超 fp16 权重的 ~140GB',
     ],
     source: 'both',
