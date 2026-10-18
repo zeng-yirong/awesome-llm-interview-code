@@ -106,15 +106,75 @@ def dpo_step(policy_model, ref_model, batch, optimizer, beta=0.1):
 
 # 测试
 if __name__ == "__main__":
+    import math
+    from types import SimpleNamespace
+
+    torch.manual_seed(0)
+
+    # ---------- 1) dpo_loss：只由四个 logp 的差值决定 ----------
     B = 4
-    policy_chosen = torch.randn(B)
-    policy_rejected = torch.randn(B)
-    ref_chosen = torch.randn(B)
-    ref_rejected = torch.randn(B)
-    
-    loss = dpo_loss(policy_chosen, policy_rejected,
-                    ref_chosen, ref_rejected, beta=0.1)
+    ref_chosen, ref_rejected = torch.randn(B), torch.randn(B)
+    pc = torch.randn(B, requires_grad=True)
+    pr = torch.randn(B, requires_grad=True)
+    loss = dpo_loss(pc, pr, ref_chosen, ref_rejected, beta=0.1)
     print(f"DPO Loss: {loss.item():.4f}")
+
+    # 策略与参考完全一致 → Δ=0 → loss 退化成 -logsigmoid(0) = ln2（与 β 无关）
+    same = torch.randn(B)
+    print(f"策略 == 参考: {dpo_loss(same, same, same, same).item():.4f}"
+          f" (ln2 = {math.log(2):.4f})")
+
+    # 四项同时平移一个 2 的幂（浮点精确，不该被舍入干扰）后 loss 不变：
+    # 公式里只有差值 (π_θ/π_ref) 有意义
+    shifted = dpo_loss(pc + 2.0, pr + 2.0, ref_chosen + 2.0, ref_rejected + 2.0, beta=0.1)
+    print(f"四项同时平移 2.0 后的变化 (should be 0): {(shifted - loss).abs().item():.2e}")
+
+    # 「chosen 概率↑、rejected 概率↓」：∂loss/∂Δ = −β·σ(−βΔ) 恒为负，
+    # 而 Δ 里 pc 带 +1、pr 带 −1 —— 梯度符号必然相反，不需要真模型就能验
+    loss.backward()
+    print(f"∂loss/∂policy_chosen 全为负 {(pc.grad < 0).all().item()} / "
+          f"∂loss/∂policy_rejected 全为正 {(pr.grad > 0).all().item()}")
+
+    # ---------- 2) compute_logps：-100 的屏蔽不是可选项 ----------
+    class ToyModel:
+        """测试替身：查表 + 前缀累加（因果、无随机性）。真模型换成 Transformer 即可"""
+        def __init__(self, vocab, seed):
+            g = torch.Generator().manual_seed(seed)
+            self.table = torch.randn(vocab, vocab, generator=g)
+
+        def __call__(self, ids):
+            return SimpleNamespace(logits=self.table[ids].cumsum(dim=1))
+
+    def logps_unmasked(model, ids, labels):
+        """不屏蔽 -100 的版本（就是那个坑）：-100 会被当成负下标，
+        静默取到词表倒数第 100 个 token 的概率"""
+        log_probs = F.log_softmax(model(ids).logits[:, :-1], dim=-1)
+        return log_probs.gather(-1, labels[:, 1:].unsqueeze(-1)).squeeze(-1).sum(dim=-1)
+
+    V, prompt = 128, [7, 9]          # V 要 > 100，-100 才是合法的负下标
+    policy, ref = ToyModel(V, seed=1), ToyModel(V, seed=2)
+
+    def pair(completion, pad=0):
+        ids = torch.tensor([prompt + completion + [0] * pad])
+        labels = torch.tensor([[-100, -100] + completion + [-100] * pad])
+        return ids, labels
+
+    ch = pair([11, 25, 33])
+    rj = pair([42, 5, 61])
+    rj_short = pair([42])            # 同一段 rejected，只是短
+    rj_pad = pair([42], pad=2)       # 短的那段再补 2 个 pad
+
+    def delta(a, b, fn):
+        return (fn(policy, *a) - fn(ref, *a) - fn(policy, *b) + fn(ref, *b))
+
+    print(f"不屏蔽时 -100 取到的是词表下标 {V - 100} 的概率（在词表内就是合法负下标）")
+    print(f"无 pad 时屏蔽与否 Δ 相同: {delta(ch, rj, compute_logps).item():.4f} vs "
+          f"{delta(ch, rj, logps_unmasked).item():.4f}"
+          f" —— prompt 两侧逐 token logp 一致，相减刚好抵消")
+    print(f"补 pad 后屏蔽过的 Δ 不变: {delta(ch, rj_short, compute_logps).item():.4f} vs "
+          f"{delta(ch, rj_pad, compute_logps).item():.4f}"
+          f" (应相等) / 不屏蔽: {delta(ch, rj_short, logps_unmasked).item():.4f} vs "
+          f"{delta(ch, rj_pad, logps_unmasked).item():.4f} (被 pad 带偏)")
 ```
 
 ## 🎯 面试要点
