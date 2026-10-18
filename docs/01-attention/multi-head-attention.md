@@ -95,9 +95,25 @@ if __name__ == "__main__":
     B, S, D, H = 2, 10, 64, 8
     x = torch.randn(B, S, D)
     mha = MultiHeadAttention(D, H)
-    out = mha(x, x)  # self-attention
+    
+    # self-attention 写成 mha(x) 就够了：xk 省略时 forward 会兜底成 xq。
+    # 传 mha(x, x) 是把同一份输入传两遍，走的是交叉注意力那条分支，
+    # 「xk 为 None」这个兜底反而没被覆盖到 —— 两条分支等价，顺手比一下
+    out = mha(x)
     print(f"Input shape: {x.shape}")   # [2, 10, 64]
     print(f"Output shape: {out.shape}") # [2, 10, 64]
+    print("xk=None 与 xk=x 等价:", torch.allclose(out, mha(x, x)))
+    
+    # xk 存在的意义是交叉注意力（解码器的 Q 看编码器的 K/V），两条序列长度可以不同
+    enc = torch.randn(B, 6, D)
+    print(f"交叉注意力输出 (S_q=10, S_k=6): {mha(x, enc).shape}")  # [2, 10, 64]
+    
+    # mask 的形状是 [B, 1, S_q, S_k]，不是 [S, S]：位置 0 在因果掩码下只剩自己一个
+    # 可看的位置，输出应当正好等于对 V_0 做输出投影
+    causal = torch.tril(torch.ones(S, S)).view(1, 1, S, S)
+    masked = mha(x, mask=causal)
+    print("掩码后位置 0 = W_o·V_0:",
+          torch.allclose(masked[:, 0], mha.wo(mha.wv(x)[:, 0]), atol=1e-6))
 ```
 
 ## 🎯 面试要点
