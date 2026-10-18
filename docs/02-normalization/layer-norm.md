@@ -69,6 +69,7 @@ class LayerNorm(nn.Module):
 # 测试
 if __name__ == "__main__":
     B, S, D = 2, 10, 64
+    torch.manual_seed(0)
     x = torch.randn(B, S, D)
     ln = LayerNorm(D)
     out = ln(x)
@@ -78,6 +79,21 @@ if __name__ == "__main__":
     # 验证归一化效果
     print(f"Mean: {out[0, 0].mean().item():.6f}")   # ≈ 0
     print(f"Var: {out[0, 0].var().item():.6f}")     # ≈ 1
+    
+    # 和官方实现对一下：eps 取同一个值、γ/β 拷过去，两边应该逐位相同。
+    # 归一化本身只有三行，能写歪的地方全在口径上 —— 差一点就说明口径没对上
+    ref = torch.nn.LayerNorm(D, eps=1e-5)
+    with torch.no_grad():
+        ref.weight.copy_(ln.gamma)
+        ref.bias.copy_(ln.beta)
+    print("与 nn.LayerNorm 的最大误差 (应为 0):",
+          (out - ref(x)).abs().max().item())
+    
+    # 反例: 方差用 unbiased=True（除以 N-1）会偏多少 —— 这就是「面试陷阱」那条
+    wrong = (x - x.mean(-1, keepdim=True)) / torch.sqrt(
+        x.var(-1, keepdim=True, unbiased=True) + 1e-5)
+    print("方差改成 unbiased=True 后的差异:",
+          (out - (wrong * ln.gamma + ln.beta)).abs().max().item())
 ```
 
 ## 🎯 面试要点
