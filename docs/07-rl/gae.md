@@ -92,20 +92,26 @@ if __name__ == "__main__":
     assert torch.allclose(returns, advantages + values[:-1])
 
 # PPO 中使用
-def ppo_step(model, data, gamma=0.99, lam=0.95):
-    rewards = data['rewards']
-    values = model.compute_values(data['states'])
-    advantages, returns = compute_gae(rewards, values, gamma, lam)
-    
-    # 归一化优势
-    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-    
+def ppo_step(model, optimizer, data, gamma=0.99, lam=0.95):
+    # advantages / old_logp 都是「比值的基准常量」，必须在 no_grad 下算：
+    # 它们在循环外只算一次，却会被 4 个 epoch 各反向一次，
+    # 第二次反向要去访问第一次已经释放的图 → RuntimeError
+    with torch.no_grad():
+        rewards = data['rewards']
+        values = model.compute_values(data['states'])
+        advantages, returns = compute_gae(rewards, values, gamma, lam)
+        # 归一化优势
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        old_logp = model.get_logprobs(data['states'], data['actions'])
+    # returns 用来算 critic 的 value loss，这里省略
+
     # PPO 更新
-    old_logp = model.get_logprobs(data['states'], data['actions'])
     for _ in range(4):  # PPO epochs
         new_logp = model.get_logprobs(data['states'], data['actions'])
         loss = ppo_loss(old_logp, new_logp, advantages)
+        optimizer.zero_grad()      # 少了它梯度会跨 epoch 累加
         loss.backward()
+        optimizer.step()           # 少了它参数根本没更新
 ```
 
 ## 🎯 面试要点
@@ -114,6 +120,7 @@ def ppo_step(model, data, gamma=0.99, lam=0.95):
 - **递推实现 O(T)**: A_t = δ_t + γλ·A_{t+1}
 - **通常 γ=0.99, λ=0.95**
 - **PPO 训练的标准优势估计方法**
+- **优势与 old_logp 都要 detach / no_grad**: 它们是比值的基准常量，若带着图在多个 PPO epoch 里反复反向，第二次就会撞上「图已释放」的 RuntimeError
 - **GRPO 不需要 GAE** (用组内归一化代替)
 - **面试常问**: GAE 的 λ 参数有什么作用？
 
