@@ -1203,6 +1203,7 @@ class SwiGLU(nn.Module):
           '权重归一化：weights = softmax(top_k_logits)',
           '专家处理：每个 expert 处理分配到的 token',
           '加权融合：output = Σ(weights[i] × expert[i](x))',
+          '负载均衡：训练时再加一项辅助损失 aux = N·Σ f_i·P_i，逼 Router 把 token 摊平（不加会塌到少数专家上）',
         ],
       },
     ],
@@ -1212,6 +1213,17 @@ $$
 
 $$
 \text{Router}(x)=W_rx,\qquad W_r\in\mathbb{R}^{D\times N},\qquad K=2
+$$
+
+$$
+\mathcal{L}=\mathcal{L}_{\text{CE}}+\alpha\,\text{aux},\qquad
+\text{aux}=N\sum_{i=1}^{N}f_iP_i,\qquad
+f_i=\frac{1}{KT}\sum_{t}\mathbf{1}\!\left[i\in\text{TopK}(x_t)\right],\qquad
+P_i=\frac{1}{T}\sum_{t}p_{t,i}
+$$
+
+$$
+\text{uniform}\ \Rightarrow\ f_i=P_i=\frac{1}{N}\ \Rightarrow\ \text{aux}=1
 $$
 
 $$
@@ -1249,7 +1261,17 @@ class MoE(nn.Module):
             if token_idx.numel() > 0:
                 out = expert(x_flat[token_idx])
                 output.index_add_(0, token_idx, out * weights[token_idx, topk_pos].unsqueeze(-1))
-        return output.view(B, S, D)`,
+        return output.view(B, S, D)
+
+    def aux_loss(self, x, coeff=0.01):
+        """负载均衡辅助损失 N·Σ f_i·P_i（Switch Transformer），训练时加到总损失里"""
+        B, S, D = x.shape
+        probs = F.softmax(self.router(x.view(-1, D)), dim=-1)          # [B*S, N]
+        indices = torch.topk(probs, self.top_k, dim=-1).indices
+        one_hot = F.one_hot(indices, self.n_experts).sum(dim=1).float()  # [B*S, N]
+        f = one_hot.mean(dim=0) / self.top_k                           # [N]
+        p = probs.mean(dim=0)                                          # [N]
+        return coeff * self.n_experts * torch.sum(f * p)`,
     keyPoints: [
       'Router 决定每个 token 由哪些专家处理',
       'Top-K 路由: 每个 token 只激活 K 个专家',
