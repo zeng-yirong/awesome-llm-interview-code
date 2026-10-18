@@ -1347,7 +1347,17 @@ def lm_loss(logits, labels, ignore_index=-100):
         shift_logits.view(-1, shift_logits.size(-1)),
         shift_labels.view(-1),
         ignore_index=ignore_index
-    )`,
+    )
+
+
+def sft_loss(logits, labels, prompt_lengths):
+    """
+    SFT 损失：prompt 部分设为 -100（既不算 loss，也不算进均值）
+    """
+    masked_labels = labels.clone()
+    for i, plen in enumerate(prompt_lengths):
+        masked_labels[i, :plen] = -100
+    return lm_loss(logits, masked_labels)`,
     keyPoints: [
       'Shift 操作是核心: logits 去尾，labels 去头',
       'ignore_index=-100 的位置不参与梯度',
