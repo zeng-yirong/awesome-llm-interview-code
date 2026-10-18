@@ -713,7 +713,7 @@ $$`,
     direction LR
     cmp["压缩分支<br/>[B, H, S/l, D]<br/>mean_pool 给粗粒度全局"] --> g["g = σ(qᵀw_c)<br/>[B, H, 3]<br/>每条分支一个学出来的系数"]
     sel["选择分支<br/>top-n 块<br/>聚焦重要中程区域"] --> g
-    win["滑窗分支<br/>最近 w 个 token<br/>局部精确"] --> g
+    win["滑窗分支<br/>每个 query 看 t-w+1…t<br/>局部精确"] --> g
     g --> o1["o = Σ_b g_b·Attn(q, K_b, V_b)<br/>[B, H, S, D]"]
   end
   subgraph DSA["DSA：极轻的 indexer 粗筛，只对 top-k 做真注意力"]
@@ -733,10 +733,16 @@ def sdpa(q, k, v, scale):
     """标准缩放点积注意力（q 可多一个 query 维度）"""
     return F.softmax(q @ k.transpose(-1, -2) * scale, dim=-1) @ v
 
+def causal_window_index(seq_len, window, device='cpu'):
+    """滑窗的 key 下标: query t 对应 k[t-w+1 … t]，返回 (下标 [S,w], 有效位 [S,w])"""
+    offset = torch.arange(window, device=device) - (window - 1)     # [-(w-1), …, 0]
+    key_idx = torch.arange(seq_len, device=device)[:, None] + offset[None, :]
+    return key_idx.clamp_min(0), key_idx >= 0                       # 越界补 0 再掩掉
+
 def nsa_attention(q, k, v, gate_w, block_size=8, top_n=2, window=16):
     """NSA 三分支稀疏注意力; q,k,v: [B,H,S,D]
     gate_w: [H,D,3] 可学习的门控向量（每个头、每条分支一个），模型里是 nn.Parameter
-    为简洁省略因果掩码，真实实现必须加"""
+    只补齐了窗口支的因果性；压缩、选择两支仍省略块级因果掩码"""
     B, H, S, D = q.shape
     scale = 1.0 / math.sqrt(D)
     n_blocks = S // block_size
@@ -746,7 +752,8 @@ def nsa_attention(q, k, v, gate_w, block_size=8, top_n=2, window=16):
 
     # 分支 2: top-n 块选择（中粒度重要区域）
     k_cmp = compress_blocks(k, block_size)
-    top_idx = (q @ k_cmp.transpose(-1, -2) * scale).topk(top_n, dim=-1).indices   # [B,H,S,top_n]
+    scores = q @ k_cmp.transpose(-1, -2) * scale                                  # [B,H,S,n_blocks]
+    top_idx = scores.topk(min(top_n, n_blocks), dim=-1).indices                   # [B,H,S,top_n]
     k_blk = k[:, :, :n_blocks * block_size].reshape(B, H, n_blocks, block_size, D)
     v_blk = v[:, :, :n_blocks * block_size].reshape(B, H, n_blocks, block_size, D)
     bidx = torch.arange(B, device=q.device).view(B, 1, 1, 1)
@@ -755,9 +762,13 @@ def nsa_attention(q, k, v, gate_w, block_size=8, top_n=2, window=16):
     v_sel = v_blk[bidx, hidx, top_idx].reshape(B, H, S, -1, D)
     o_slc = sdpa(q.unsqueeze(3), k_sel, v_sel, scale).squeeze(3)
 
-    # 分支 3: 滑动窗口（局部精确）
+    # 分支 3: 滑动窗口（局部精确）—— 每个 query 自己往前 w 个，不是全局最后 w 个
     win = min(window, S)
-    o_win = sdpa(q, k[:, :, -win:, :], v[:, :, -win:, :], scale)
+    key_idx, win_valid = causal_window_index(S, win, q.device)
+    k_win, v_win = k[:, :, key_idx], v[:, :, key_idx]              # [B,H,S,win,D]
+    win_scores = (q.unsqueeze(3) @ k_win.transpose(-1, -2)) * scale    # [B,H,S,1,win]
+    win_scores = win_scores.masked_fill(~win_valid.view(1, 1, S, 1, win), float('-inf'))
+    o_win = (F.softmax(win_scores, dim=-1) @ v_win.unsqueeze(3)).squeeze(3)
 
     # 门控加权求和: g = σ(qᵀw_c)，每头每条分支各一个可学的 w_c
     # 三个系数必须互相独立，否则「加权」退化成对所有分支乘同一个数
