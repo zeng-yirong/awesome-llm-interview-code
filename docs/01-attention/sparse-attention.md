@@ -52,7 +52,7 @@ flowchart TD
     direction LR
     cmp["压缩分支<br/>[B, H, S/l, D]<br/>mean_pool 给粗粒度全局"] --> g["g = σ(qᵀw_c)<br/>[B, H, 3]<br/>每条分支一个学出来的系数"]
     sel["选择分支<br/>top-n 块<br/>聚焦重要中程区域"] --> g
-    win["滑窗分支<br/>最近 w 个 token<br/>局部精确"] --> g
+    win["滑窗分支<br/>每个 query 看 t-w+1…t<br/>局部精确"] --> g
     g --> o1["o = Σ_b g_b·Attn(q, K_b, V_b)<br/>[B, H, S, D]"]
   end
   subgraph DSA["DSA：极轻的 indexer 粗筛，只对 top-k 做真注意力"]
@@ -83,12 +83,23 @@ def sdpa(q, k, v, scale):
     return F.softmax(q @ k.transpose(-1, -2) * scale, dim=-1) @ v
 
 
+def causal_window_index(seq_len, window, device='cpu'):
+    """滑窗的 key 下标：query t 对应 k[t-w+1 … t]，返回 (下标 [S, w], 有效位 [S, w])
+
+    左侧越界的位置下标补成 0，再靠有效位掩掉 —— 补 0 是为了能一次性 gather 出
+    整张 [S, w] 的表，而不是退回逐 query 的循环。"""
+    offset = torch.arange(window, device=device) - (window - 1)      # [-(w-1), …, 0]
+    key_idx = torch.arange(seq_len, device=device)[:, None] + offset[None, :]
+    return key_idx.clamp_min(0), key_idx >= 0
+
+
 def nsa_attention(q, k, v, gate_w, block_size=8, top_n=2, window=16):
     """
     NSA 三分支稀疏注意力
     q, k, v: [B, H, S, D]；返回 o: [B, H, S, D]
     gate_w:  [H, D, 3] 可学习的门控向量（每个头、每个分支一个），模型里是 nn.Parameter
-    注意: 为简洁起见这里省略了因果掩码，真实实现必须加
+    注意: 这里只补齐了窗口支的因果性；压缩、选择两支仍省略了块级因果掩码 ——
+    真实实现还要按块排除未来块、并对选中的块做 token 级掩码
     """
     B, H, S, D = q.shape
     scale = 1.0 / math.sqrt(D)
@@ -114,8 +125,15 @@ def nsa_attention(q, k, v, gate_w, block_size=8, top_n=2, window=16):
     o_slc = sdpa(q.unsqueeze(3), k_sel, v_sel, scale).squeeze(3)
 
     # ---------- 分支 3: 滑动窗口（局部精确）----------
+    # 窗口是「每个 query 自己往前 w 个 token」：query t 只看 k[t-w+1 … t]。
+    # 注意别写成 k[:, :, -win:, :] —— 那是给所有 query 都切全局最后 w 个，
+    # 第 0 个 query 会看到第 16 个 token：既不是滑窗，也不再因果
     win = min(window, S)
-    o_win = sdpa(q, k[:, :, -win:, :], v[:, :, -win:, :], scale)
+    key_idx, win_valid = causal_window_index(S, win, q.device)
+    k_win, v_win = k[:, :, key_idx], v[:, :, key_idx]        # [B, H, S, win, D]
+    win_scores = (q.unsqueeze(3) @ k_win.transpose(-1, -2)) * scale   # [B,H,S,1,win]
+    win_scores = win_scores.masked_fill(~win_valid.view(1, 1, S, 1, win), float('-inf'))
+    o_win = (F.softmax(win_scores, dim=-1) @ v_win.unsqueeze(3)).squeeze(3)
 
     # ---------- 门控加权求和 ----------
     # 门控必须学出来：三条分支的相对重要性随层数、位置、任务变化，硬相加不行。
@@ -162,6 +180,14 @@ if __name__ == "__main__":
 
     o = nsa_attention(q, k, v, gate_w=torch.randn(H, D, 3), block_size=8, top_n=2, window=16)
     print("NSA 输出:", tuple(o.shape), "(与输入同形)")
+
+    # 窗口支验一眼语义：每个 query 的窗口右端必须正好落在自己身上（= 不看未来）。
+    # 原来那版是给所有 query 切全局最后 w 个 key，这条根本不成立
+    key_idx, valid = causal_window_index(S, window=16)
+    print("query 0 的窗口下标:", key_idx[0].tolist())
+    print("窗口右端都等于自身位置:",
+          bool((key_idx.max(dim=1).values == torch.arange(S)).all()))
+    print("左侧越界的窗口位置:", int((~valid).sum()), "(补成下标 0 后被 -inf 掩掉)")
 
     indexer = LightningIndexer(H, D, d_index=16)
     idx = indexer(torch.randn(B, S, D), top_k=8)

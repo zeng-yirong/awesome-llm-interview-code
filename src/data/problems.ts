@@ -713,7 +713,7 @@ $$`,
     direction LR
     cmp["压缩分支<br/>[B, H, S/l, D]<br/>mean_pool 给粗粒度全局"] --> g["g = σ(qᵀw_c)<br/>[B, H, 3]<br/>每条分支一个学出来的系数"]
     sel["选择分支<br/>top-n 块<br/>聚焦重要中程区域"] --> g
-    win["滑窗分支<br/>最近 w 个 token<br/>局部精确"] --> g
+    win["滑窗分支<br/>每个 query 看 t-w+1…t<br/>局部精确"] --> g
     g --> o1["o = Σ_b g_b·Attn(q, K_b, V_b)<br/>[B, H, S, D]"]
   end
   subgraph DSA["DSA：极轻的 indexer 粗筛，只对 top-k 做真注意力"]
@@ -733,10 +733,16 @@ def sdpa(q, k, v, scale):
     """标准缩放点积注意力（q 可多一个 query 维度）"""
     return F.softmax(q @ k.transpose(-1, -2) * scale, dim=-1) @ v
 
+def causal_window_index(seq_len, window, device='cpu'):
+    """滑窗的 key 下标: query t 对应 k[t-w+1 … t]，返回 (下标 [S,w], 有效位 [S,w])"""
+    offset = torch.arange(window, device=device) - (window - 1)     # [-(w-1), …, 0]
+    key_idx = torch.arange(seq_len, device=device)[:, None] + offset[None, :]
+    return key_idx.clamp_min(0), key_idx >= 0                       # 越界补 0 再掩掉
+
 def nsa_attention(q, k, v, gate_w, block_size=8, top_n=2, window=16):
     """NSA 三分支稀疏注意力; q,k,v: [B,H,S,D]
     gate_w: [H,D,3] 可学习的门控向量（每个头、每条分支一个），模型里是 nn.Parameter
-    为简洁省略因果掩码，真实实现必须加"""
+    只补齐了窗口支的因果性；压缩、选择两支仍省略块级因果掩码"""
     B, H, S, D = q.shape
     scale = 1.0 / math.sqrt(D)
     n_blocks = S // block_size
@@ -746,7 +752,8 @@ def nsa_attention(q, k, v, gate_w, block_size=8, top_n=2, window=16):
 
     # 分支 2: top-n 块选择（中粒度重要区域）
     k_cmp = compress_blocks(k, block_size)
-    top_idx = (q @ k_cmp.transpose(-1, -2) * scale).topk(top_n, dim=-1).indices   # [B,H,S,top_n]
+    scores = q @ k_cmp.transpose(-1, -2) * scale                                  # [B,H,S,n_blocks]
+    top_idx = scores.topk(min(top_n, n_blocks), dim=-1).indices                   # [B,H,S,top_n]
     k_blk = k[:, :, :n_blocks * block_size].reshape(B, H, n_blocks, block_size, D)
     v_blk = v[:, :, :n_blocks * block_size].reshape(B, H, n_blocks, block_size, D)
     bidx = torch.arange(B, device=q.device).view(B, 1, 1, 1)
@@ -755,9 +762,13 @@ def nsa_attention(q, k, v, gate_w, block_size=8, top_n=2, window=16):
     v_sel = v_blk[bidx, hidx, top_idx].reshape(B, H, S, -1, D)
     o_slc = sdpa(q.unsqueeze(3), k_sel, v_sel, scale).squeeze(3)
 
-    # 分支 3: 滑动窗口（局部精确）
+    # 分支 3: 滑动窗口（局部精确）—— 每个 query 自己往前 w 个，不是全局最后 w 个
     win = min(window, S)
-    o_win = sdpa(q, k[:, :, -win:, :], v[:, :, -win:, :], scale)
+    key_idx, win_valid = causal_window_index(S, win, q.device)
+    k_win, v_win = k[:, :, key_idx], v[:, :, key_idx]              # [B,H,S,win,D]
+    win_scores = (q.unsqueeze(3) @ k_win.transpose(-1, -2)) * scale    # [B,H,S,1,win]
+    win_scores = win_scores.masked_fill(~win_valid.view(1, 1, S, 1, win), float('-inf'))
+    o_win = (F.softmax(win_scores, dim=-1) @ v_win.unsqueeze(3)).squeeze(3)
 
     # 门控加权求和: g = σ(qᵀw_c)，每头每条分支各一个可学的 w_c
     # 三个系数必须互相独立，否则「加权」退化成对所有分支乘同一个数
@@ -1192,6 +1203,7 @@ class SwiGLU(nn.Module):
           '权重归一化：weights = softmax(top_k_logits)',
           '专家处理：每个 expert 处理分配到的 token',
           '加权融合：output = Σ(weights[i] × expert[i](x))',
+          '负载均衡：训练时再加一项辅助损失 aux = N·Σ f_i·P_i，逼 Router 把 token 摊平（不加会塌到少数专家上）',
         ],
       },
     ],
@@ -1201,6 +1213,17 @@ $$
 
 $$
 \text{Router}(x)=W_rx,\qquad W_r\in\mathbb{R}^{D\times N},\qquad K=2
+$$
+
+$$
+\mathcal{L}=\mathcal{L}_{\text{CE}}+\alpha\,\text{aux},\qquad
+\text{aux}=N\sum_{i=1}^{N}f_iP_i,\qquad
+f_i=\frac{1}{KT}\sum_{t}\mathbf{1}\!\left[i\in\text{TopK}(x_t)\right],\qquad
+P_i=\frac{1}{T}\sum_{t}p_{t,i}
+$$
+
+$$
+\text{uniform}\ \Rightarrow\ f_i=P_i=\frac{1}{N}\ \Rightarrow\ \text{aux}=1
 $$
 
 $$
@@ -1238,7 +1261,17 @@ class MoE(nn.Module):
             if token_idx.numel() > 0:
                 out = expert(x_flat[token_idx])
                 output.index_add_(0, token_idx, out * weights[token_idx, topk_pos].unsqueeze(-1))
-        return output.view(B, S, D)`,
+        return output.view(B, S, D)
+
+    def aux_loss(self, x, coeff=0.01):
+        """负载均衡辅助损失 N·Σ f_i·P_i（Switch Transformer），训练时加到总损失里"""
+        B, S, D = x.shape
+        probs = F.softmax(self.router(x.view(-1, D)), dim=-1)          # [B*S, N]
+        indices = torch.topk(probs, self.top_k, dim=-1).indices
+        one_hot = F.one_hot(indices, self.n_experts).sum(dim=1).float()  # [B*S, N]
+        f = one_hot.mean(dim=0) / self.top_k                           # [N]
+        p = probs.mean(dim=0)                                          # [N]
+        return coeff * self.n_experts * torch.sum(f * p)`,
     keyPoints: [
       'Router 决定每个 token 由哪些专家处理',
       'Top-K 路由: 每个 token 只激活 K 个专家',
@@ -1314,7 +1347,17 @@ def lm_loss(logits, labels, ignore_index=-100):
         shift_logits.view(-1, shift_logits.size(-1)),
         shift_labels.view(-1),
         ignore_index=ignore_index
-    )`,
+    )
+
+
+def sft_loss(logits, labels, prompt_lengths):
+    """
+    SFT 损失：prompt 部分设为 -100（既不算 loss，也不算进均值）
+    """
+    masked_labels = labels.clone()
+    for i, plen in enumerate(prompt_lengths):
+        masked_labels[i, :plen] = -100
+    return lm_loss(logits, masked_labels)`,
     keyPoints: [
       'Shift 操作是核心: logits 去尾，labels 去头',
       'ignore_index=-100 的位置不参与梯度',
@@ -2216,16 +2259,26 @@ class LoRALinear(nn.Module):
         nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
         nn.init.zeros_(self.lora_B)          # B=0 → 初始 ΔW=0
         self.dropout = nn.Dropout(dropout)
+        self.merged = False
 
     def forward(self, x):
         """x: [B, S, in_f]"""
         base = self.linear(x)                         # 冻结路径
+        if self.merged:                               # ΔW 已经在权重里，别再叠加一次
+            return base
         lora = self.dropout(x) @ self.lora_A.T @ self.lora_B.T * self.scaling
         return base + lora
 
     def merge(self):
-        """推理时合并权重 (无额外开销)"""
-        self.linear.weight.data += (self.lora_B @ self.lora_A) * self.scaling`,
+        """推理时合并权重 (无额外开销)
+
+        合并后必须让 LoRA 分支停下，否则同一份 ΔW 会被算两遍：再调一次 forward，
+        输出会多出整整一倍的 LoRA 贡献，而且不报任何错。
+        """
+        if self.merged:
+            return
+        self.linear.weight.data += (self.lora_B @ self.lora_A) * self.scaling
+        self.merged = True`,
     keyPoints: [
       'B 初始化为零 → 初始时 LoRA 贡献为 0',
       'scaling = α/r 控制 LoRA 更新幅度',
@@ -2932,7 +2985,21 @@ class GPTModel(nn.Module):
         mask = torch.tril(torch.ones(S, S, device=tokens.device))
         for block in self.blocks:
             x = block(x, mask)
-        return self.lm_head(self.norm(x))`,
+        return self.lm_head(self.norm(x))
+
+# 自回归生成：推理那半边
+@torch.no_grad()
+def generate(model, prompt_ids, max_new_tokens=100, temperature=0.7, eos_token_id=None):
+    input_ids = prompt_ids.clone()
+    for _ in range(max_new_tokens):
+        logits = model(input_ids)[:, -1, :] / temperature   # 只要末位（因果注意力下它看得到全部）
+        probs = torch.softmax(logits, dim=-1)
+        next_token = torch.multinomial(probs, num_samples=1)
+        input_ids = torch.cat([input_ids, next_token], dim=1)
+        # GPTModel 不是 HuggingFace 模型，没有 model.config，EOS id 由调用方传入
+        if eos_token_id is not None and next_token.item() == eos_token_id:
+            break
+    return input_ids`,
     keyPoints: [
       'Causal mask: 只能看到之前的 token',
       'Pre-Norm: 先归一化再进子层 (更稳定)',
@@ -3222,7 +3289,10 @@ class TwoLayerNet:
 
         # 更新
         self.W1 -= lr * dW1
-        self.W2 -= lr * dW2`,
+        self.W2 -= lr * dW2
+
+        # 把手算的梯度交出去，方便与 autograd 对照
+        return dW1, dW2`,
     keyPoints: [
       '链式法则是反向传播的数学基础',
       '前向保存中间变量，反向利用它们计算梯度',
@@ -3294,8 +3364,9 @@ def relu(x):
 def gelu(x):
     return 0.5 * x * (1 + torch.tanh(
         (2/3.14159)**0.5 * (x + 0.044715 * x**3)
+        # 常数写的是 3.14159 而非 math.pi：相对差 4.2e-07，影响 ~1e-07，可以忽略
     ))
-    # 或直接用 F.gelu(x)
+    # 或直接用 F.gelu(x)；tanh 近似与精确版（erf）相差 4.7e-04 量级
 
 # SiLU (Swish)
 def silu(x):
@@ -3304,10 +3375,21 @@ def silu(x):
 # 梯度对比
 x = torch.linspace(-3, 3, 100, requires_grad=True)
 y_relu = relu(x).sum(); y_relu.backward()
-print("ReLU grad:", x.grad[:5])     # [0, 0, 0, ..., 1, 1]
-x.grad.zero_()
+print("ReLU grad:", x.grad[:5])     # 前 5 个点全为负，梯度应当是 0
+relu_grad = x.grad.clone(); x.grad.zero_()
 y_gelu = gelu(x).sum(); y_gelu.backward()
-print("GELU grad:", x.grad[:5])     # 平滑过渡`,
+print("GELU grad:", x.grad[:5])     # 平滑过渡：负区间也有非零梯度
+x.grad.zero_()
+y_silu = silu(x).sum(); y_silu.backward()
+print("SiLU grad:", x.grad[:5])     # 平滑 + 门控
+silu_grad = x.grad.clone()
+
+# 公式块里的 ReLU′ = (x>0)、SiLU′ = SiLU + σ(1−SiLU) 对一遍 autograd
+# （0 处 ReLU 不可导，取哪一侧是框架约定，跳过那个点）
+xd = x.detach(); safe = xd != 0
+print("ReLU′ 误差:", ((xd > 0).float()[safe] - relu_grad[safe]).abs().max().item())
+s = torch.sigmoid(xd)
+print("SiLU′ 误差:", (silu(xd) + s * (1 - silu(xd)) - silu_grad).abs().max().item())`,
     keyPoints: [
       'ReLU: 简单高效，但有 dead neuron (负区间梯度=0)',
       'GELU: 平滑版 ReLU，BERT/GPT 使用',

@@ -91,6 +91,7 @@ class RotaryEmbedding(nn.Module):
 # 测试
 if __name__ == "__main__":
     B, S, H, D = 2, 10, 8, 64
+    torch.manual_seed(0)
     q = torch.randn(B, S, H, D)
     k = torch.randn(B, S, H, D)
     
@@ -103,6 +104,21 @@ if __name__ == "__main__":
     # 增量解码要和一次性前向一致：单独算第 5 个位置，位置得从 start_pos=5 数起
     q5, k5 = rope(q[:, 5:6], k[:, 5:6], start_pos=5)
     print(f"增量解码位置对齐误差 (should be 0): {(q_rot[:, 5:6] - q5).abs().max().item():.6f}")
+    
+    # 核心结论：q_m·k_n 只依赖 m-n。注意底下的 q、k 必须是同一对向量 ——
+    # 同一个 token 在不同位置上的表示本来就不同，这里验的是编码本身的平移不变性
+    base_q, base_k = q[0, 0], k[0, 0]                 # [H, D]
+    qs, ks = rope(base_q[None].expand(1, S, -1, -1),
+                  base_k[None].expand(1, S, -1, -1))  # qs[0, m] = R_m·q，ks[0, n] = R_n·k
+    norm = (base_q * base_k).sum().item()             # 未旋转时的点积，作为量级参照
+    print(f"未旋转的 q·k: {norm:.6f}")
+    for diff in (0, 3, -2):
+        dots = [float((qs[0, m] * ks[0, m + diff]).sum())
+                for m in range(S) if 0 <= m + diff < S]
+        print(f"n-m={diff:+d}: {len(dots)} 组点积极差 {max(dots) - min(dots):.2e} "
+              f"(值 {dots[0]:.6f})")
+    # n-m=0 那一行应当正好等于上面未旋转的 q·k（R_mᵀR_m = I）；其余各行只由 n-m 决定，
+    # 极差只来自浮点误差
 ```
 
 ## 🎯 面试要点

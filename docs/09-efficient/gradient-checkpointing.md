@@ -115,9 +115,51 @@ def measure_memory(use_checkpoint=False):
 
 # 对比
 if __name__ == "__main__":
-    mem1 = measure_memory(use_checkpoint=False)
-    mem2 = measure_memory(use_checkpoint=True)
-    print(f"\nMemory saved: {(mem1 - mem2):.2f} GB ({(1 - mem2/mem1)*100:.1f}%)")
+    torch.manual_seed(0)
+
+    # 1) 检查点唯一的保证：梯度与不开检查点完全一致 —— 它省的是存储，不是计算
+    def run(use_ckpt):
+        torch.manual_seed(0)                      # 两次跑必须拿到同一组张量
+        x = torch.randn(4, 16, requires_grad=True)
+        w1 = torch.randn(16, 64, requires_grad=True)
+        w2 = torch.randn(64, 8, requires_grad=True)
+        out = (checkpoint(custom_forward, x, w1, w2, use_reentrant=False)
+               if use_ckpt else custom_forward(x, w1, w2))
+        out.sum().backward()
+        return [t.grad.clone() for t in (x, w1, w2)]
+
+    plain, ckpt = run(False), run(True)
+    print(f"三份梯度最大误差 (重算走的是同一套算子，应为 0): "
+          f"{max((a - b).abs().max().item() for a, b in zip(plain, ckpt)):.2e}")
+    assert all(torch.allclose(a, b) for a, b in zip(plain, ckpt))
+
+    # 2) 「重新计算」不是修辞：反向时前向函数会被再调一次
+    def count_calls(use_ckpt):
+        calls = 0
+
+        def fn(x, w1, w2):
+            nonlocal calls
+            calls += 1
+            return custom_forward(x, w1, w2)
+
+        x = torch.randn(4, 16, requires_grad=True)
+        w1 = torch.randn(16, 64, requires_grad=True)
+        w2 = torch.randn(64, 8, requires_grad=True)
+        out = checkpoint(fn, x, w1, w2, use_reentrant=False) if use_ckpt else fn(x, w1, w2)
+        out.sum().backward()
+        return calls
+
+    n_plain, n_ckpt = count_calls(False), count_calls(True)
+    print(f"前向函数调用次数: 不开检查点 {n_plain} 次 / 开了 {n_ckpt} 次"
+          f" —— 多出来的就是反向时的重算")
+
+    # 3) 显存对比需要 CUDA，没有 GPU 时直接跳过（原来这里会当场报错）
+    if torch.cuda.is_available():
+        mem1 = measure_memory(use_checkpoint=False)
+        mem2 = measure_memory(use_checkpoint=True)
+        print(f"\nMemory saved: {(mem1 - mem2):.2f} GB ({(1 - mem2/mem1)*100:.1f}%)")
+    else:
+        print("\n显存对比需要 CUDA，当前环境跳过")
 ```
 
 ## 🎯 面试要点

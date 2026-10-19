@@ -134,6 +134,7 @@ def paged_attention_kernel(q, k_blocks, v_blocks, seq_len, block_size=16):
 
 # 使用示例
 if __name__ == "__main__":
+    torch.manual_seed(0)
     B, H, D, L = 1, 8, 64, 4      # 4 层足够演示
     cache = PagedKVCache(block_size=16, num_blocks=100, n_layers=L,
                          n_heads=H, head_dim=D, device='cpu')
@@ -143,17 +144,58 @@ if __name__ == "__main__":
     cache.allocate(seq_id=1, num_tokens=seq_len)
     print(f"Allocated blocks for seq 1: {cache.block_tables[1]}")
     
-    # 逐 token 写入第 0 层的 K/V
+    # 逐 token 写入第 0 层的 K/V，同时留一份普通（不分页）的 KV 作参考
+    keys, values = [], []
     for pos in range(seq_len):
-        cache.write(1, layer=0, position=pos,
-                    key=torch.randn(H, D), value=torch.randn(H, D))
+        key, value = torch.randn(H, D), torch.randn(H, D)
+        keys.append(key)
+        values.append(value)
+        cache.write(1, layer=0, position=pos, key=key, value=value)
     
     q = torch.randn(B, H, 1, D)
     out = cache.attention(seq_id=1, layer=0, q=q, seq_len=seq_len)
     print(f"Attention output: {out.shape}")   # [1, 8, 1, 64]
     
-    # 注意：第 2 个块只写了 4 个槽位，剩下 12 个是 0 —— 必须靠 seq_len 截掉，
-    # 否则模型会去注意一串全零的假 KV
+    # 1) 「分页对计算透明」：从非连续块里 gather 出来的就是普通 KV，输出必须完全一致
+    def plain_attention(q, k, v):
+        k = torch.stack(k).transpose(0, 1)                 # [H, S, D]
+        v = torch.stack(v).transpose(0, 1)
+        scores = torch.matmul(q, k.transpose(-2, -1)) / (D ** 0.5)
+        return torch.matmul(torch.softmax(scores, dim=-1), v)
+    
+    ref = plain_attention(q, keys, values)
+    print(f"分页 vs 普通 KV 最大误差: {(out - ref).abs().max().item():.2e}")
+    
+    # 2) 逻辑连续、物理离散：把同一批 token 挪到两块不相邻的物理块上（先搬数据再改块表），
+    #    计算应当一点不变 —— 块表只是个映射，物理 id 连不连续无所谓
+    cache.allocate(seq_id=3, num_tokens=seq_len)
+    for pos, (key, value) in enumerate(zip(keys, values)):
+        cache.write(3, layer=0, position=pos, key=key, value=value)
+    scattered = [77, 12]
+    cache.physical_blocks[scattered] = cache.physical_blocks[cache.block_tables[3]].clone()
+    cache.block_tables[3] = scattered
+    for pid in scattered:
+        cache.free_blocks.remove(pid)          # 记账要跟上，别让池子把这两块再分给别人
+    out_scattered = cache.attention(seq_id=3, layer=0, q=q, seq_len=seq_len)
+    print(f"块表改成 {scattered}（不连续）后最大误差: "
+          f"{(out_scattered - ref).abs().max().item():.2e}")
+    
+    # 3) 第 2 个块只写了 4 个槽位，剩下 12 个是 0 —— 必须靠 seq_len 截掉，
+    #    否则模型会去注意一串全零的假 KV
+    padded = cache.attention(seq_id=1, layer=0, q=q,
+                             seq_len=len(cache.block_tables[1]) * cache.block_size)
+    print(f"不截断（32 个位置）与正确输出差: {(padded - out).abs().max().item():.3f}"
+          f"（输出量级 {out.abs().max().item():.3f}）")
+    
+    # 4) 按需分配的账：这块序列实际占用 vs 按 max_len 预分配
+    print(f"块内利用率 {seq_len / (len(cache.block_tables[1]) * cache.block_size):.1%}（20/32）"
+          f"；若按 max_len=512 预分配只有 {seq_len / 512:.1%}")
+    
+    # 5) free 把块还给池子（算法步骤最后一步）
+    free_before = len(cache.free_blocks)
+    cache.free(3)
+    print(f"释放 seq 3 后空闲块 {free_before} → {len(cache.free_blocks)}（+2 = 它占的块数），"
+          f"块表里还留着吗: {3 in cache.block_tables}")
     
     # 序列 2: 20 tokens
     cache.allocate(seq_id=2, num_tokens=20)

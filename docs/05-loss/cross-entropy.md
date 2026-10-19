@@ -70,24 +70,63 @@ def lm_loss(logits, labels, ignore_index=-100):
         ignore_index=ignore_index
     )
 
-# 测试
-if __name__ == "__main__":
-    B, S, V = 2, 10, 32000
-    logits = torch.randn(B, S, V)
-    labels = torch.randint(0, V, (B, S))
-    
-    loss = lm_loss(logits, labels)
-    print(f"Loss: {loss.item():.4f}")
-
-# SFT Loss: 只计算 response 部分
 def sft_loss(logits, labels, prompt_lengths):
     """
     SFT 损失：prompt 部分设为 -100
+
+    注意 -100 同时改了分子和分母：这些位置既不算 loss，也不算进均值。
     """
     masked_labels = labels.clone()
     for i, plen in enumerate(prompt_lengths):
         masked_labels[i, :plen] = -100
     return lm_loss(logits, masked_labels)
+
+# 测试
+if __name__ == "__main__":
+    import math
+    torch.manual_seed(0)
+    B, S, V = 2, 10, 32000
+    logits = torch.randn(B, S, V)
+    labels = torch.randint(0, V, (B, S))
+
+    loss = lm_loss(logits, labels)
+    print(f"Loss: {loss.item():.4f}  (随机 logits 会略高于 ln(V) = {math.log(V):.2f}，"
+          f"多出来的是 logits 偏离均匀的 KL)")
+
+    # 1) 对照手算：就是流程图最后一步 —— 取正确 token 的 logp，再对保留位置求均值
+    logp = F.log_softmax(logits[:, :-1], dim=-1).reshape(-1, V)
+    tgt = labels[:, 1:].reshape(-1)
+    manual = -logp[torch.arange(tgt.numel()), tgt].mean()
+    print(f"手算 {manual.item():.4f} / 误差 {(loss - manual).abs().item():.2e}")
+
+    # 2) shift 的方向：把每个位置的 logits 做成「只在 labels[t+1] 上有尖峰」。
+    #    对齐正确时 loss ≈ 0；若写成预测自己（labels[:, :-1]），尖峰不再指向目标，
+    #    loss 直接变成尖峰高度 50 —— 对齐写错既不报错也不 NaN，只会静默算成另一个数
+    peaked = F.one_hot(labels[:, 1:], V).float() * 50          # [B, S-1, V]
+    aligned = lm_loss(torch.cat([peaked, peaked[:, -1:]], dim=1), labels)
+    mis = F.cross_entropy(peaked.reshape(-1, V), labels[:, :-1].reshape(-1))
+    print(f"对齐正确 {aligned.item():.4f} / 错位一格 {mis.item():.4f}")
+
+    # 3) 「去尾」：最后一个位置的 logits 根本不进 loss，改它不该有任何影响
+    bumped = logits.clone()
+    bumped[:, -1] += 100.0
+    print(f"改最后一个位置后 loss 的变化 (should be 0): "
+          f"{(lm_loss(bumped, labels) - loss).abs().item():.2e}")
+
+    # 4) SFT：prompt 置 -100 后，参与平均的位置少了，分母也跟着变小
+    prompt_lengths = [2, 5]
+    sft = sft_loss(logits, labels, prompt_lengths)
+    masked = labels.clone()
+    for i, plen in enumerate(prompt_lengths):
+        masked[i, :plen] = -100
+    tgt_sft = masked[:, 1:].reshape(-1)      # shift 之后，每行 prompt 还少掉第一个位置
+    picked = -logp[torch.arange(tgt_sft.numel()), tgt_sft.clamp_min(0)]
+    keep = tgt_sft != -100
+    print(f"SFT loss {sft.item():.4f} / 只对保留的 {int(keep.sum())}/{tgt_sft.numel()} 个位置"
+          f"求均值 {picked[keep].mean().item():.4f} (整段是 {loss.item():.4f})")
+    print(f"  若分母错写成整段长度: {(picked[keep].sum() / tgt_sft.numel()).item():.4f}"
+          f" —— 少掉的 response token 会被稀释")
+    print(f"prompt 全空时应与整段一致: {(sft_loss(logits, labels, [0, 0]) - loss).abs().item():.2e}")
 ```
 
 ## 🎯 面试要点

@@ -97,15 +97,51 @@ def cosine_schedule_with_warmup(step, warmup_steps, total_steps,
 
 # 测试
 if __name__ == "__main__":
-    model = torch.nn.Linear(10, 10)
-    optimizer = AdamW(model.parameters(), lr=3e-4, weight_decay=0.1)
-    
-    x = torch.randn(4, 10)
-    y = model(x)
-    loss = y.sum()
-    loss.backward()
-    optimizer.step()
-    print("AdamW step completed")
+    torch.manual_seed(0)
+
+    # ---------- 1) 偏差修正：第一步的位移正好是 lr ----------
+    p = torch.tensor([1.0], requires_grad=True)
+    opt = AdamW([p], lr=3e-4, weight_decay=0.0)     # 先关掉衰减，只看自适应步
+    p.grad = torch.tensor([1.0])
+    before = p.item()
+    opt.step()
+    print(f"第一步 |Δθ| = {before - p.item():.2e}  (lr = 3e-4)")
+    # t=1 时 m̂ = m/(1−β₁) = g、v̂ = v/(1−β₂) = g²，比值 m̂/(√v̂+ε) 恒为 ±1，
+    # 所以位移与梯度大小无关；不做修正则只有 0.1/√0.05 ≈ 0.447 倍
+    print(f"不做偏差修正的话第一步只有 {0.1 / math.sqrt(0.05):.3f}·lr "
+          f"，差 {1 - 0.1 / math.sqrt(0.05):.1%}")
+
+    # ---------- 2) 解耦衰减：位移 = lr·wd·|θ| ----------
+    p2 = torch.tensor([1.0], requires_grad=True)
+    opt2 = AdamW([p2], lr=3e-4, weight_decay=0.1)
+    p2.grad = torch.zeros(1)                        # 梯度为 0：自适应步为 0，只剩衰减
+    opt2.step()
+    print(f"解耦：|Δθ| = {1.0 - p2.item():.2e}  (= lr·wd·|θ| = {3e-4 * 0.1:.2e})")
+
+    # 对照 Adam 的做法：把 λθ 混进梯度，再被 1/√v̂ 归一化。由上一步可知比值恒为 1，
+    # 位移直接变成 lr —— 衰减量与 wd、与 θ 多大都无关，这正是「耦合」失控的地方
+    def coupled_step(decay_grad):
+        q = torch.tensor([1.0], requires_grad=True)
+        o = AdamW([q], lr=3e-4, weight_decay=0.0)   # 衰减项下面手工混进梯度
+        q.grad = torch.tensor([decay_grad])
+        o.step()
+        return 1.0 - q.item()
+
+    print(f"耦合：λθ = 0.1 时 |Δθ| = {coupled_step(0.1):.2e} / λθ = 3.0 时 {coupled_step(3.0):.2e}"
+          f" —— 都是 lr，参数大 30 倍衰减量一点没变")
+
+    # ---------- 3) 学习率调度 ----------
+    W, T, MAX_LR, MIN_LR = 100, 1000, 3e-4, 3e-5
+    for s in (0, 50, 100, 550, 1000):
+        print(f"step {s:>4}: {cosine_schedule_with_warmup(s, W, T, MAX_LR, MIN_LR):.2e}")
+    # 跑过 total_steps 必须停住：不夹 progress 的话 cos 会继续往前走，学习率重新往上爬
+    over = cosine_schedule_with_warmup(2 * T, W, T, MAX_LR, MIN_LR)
+    unclamped = MIN_LR + (MAX_LR - MIN_LR) * 0.5 * (
+        1 + math.cos(math.pi * (2 * T - W) / (T - W)))
+    print(f"step {2 * T}（已超 total_steps）: 夹住 {over:.2e} / 不夹 {unclamped:.2e}"
+          f" = max_lr 的 {unclamped / MAX_LR:.0%}（注释里说的 0.97）")
+    print(f"峰值 {cosine_schedule_with_warmup(W, W, T, MAX_LR, MIN_LR):.2e} = max_lr，"
+          f"末尾退到 min_lr = max_lr 的 {MIN_LR / MAX_LR:.0%}")
 ```
 
 ## 🎯 面试要点
