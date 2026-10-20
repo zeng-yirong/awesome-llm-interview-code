@@ -54,16 +54,16 @@ import torch.nn.functional as F
 class SwiGLU(nn.Module):
     def __init__(self, d_model, d_ff=None):
         super().__init__()
-        d_ff = d_ff or int(8/3 * d_model)  # 保持参数量与标准FFN相当
+        d_ff = d_ff or int(8/3 * d_model)
         self.w_gate = nn.Linear(d_model, d_ff, bias=False)
         self.w_up = nn.Linear(d_model, d_ff, bias=False)
         self.w_down = nn.Linear(d_ff, d_model, bias=False)
 
     def forward(self, x):
         """x: [B, S, D]"""
-        gate = F.silu(self.w_gate(x))   # 门控分支
-        up = self.w_up(x)               # 值分支
-        return self.w_down(gate * up)    # 门控相乘 → 下投影
+        gate = F.silu(self.w_gate(x))
+        up = self.w_up(x)
+        return self.w_down(gate * up)
 
 # 测试
 if __name__ == "__main__":
@@ -72,12 +72,9 @@ if __name__ == "__main__":
     x = torch.randn(B, S, D)
     swiglu = SwiGLU(D)
     out = swiglu(x)
-    print(f"Input shape: {x.shape}")   # [2, 10, 512]
-    print(f"Output shape: {out.shape}") # [2, 10, 512]
+    print(f"Input shape: {x.shape}")
+    print(f"Output shape: {out.shape}")
     
-    # 注释里写了「d_ff = 8/3·d 是为了保持参数量与标准 FFN 相当」，
-    # 但这笔账从没算过：SwiGLU 有三个矩阵、标准 FFN 只有两个，
-    # 所以 d_ff 必须缩到 2/3 才能在参数上打平 —— 值得直接印出来对一遍
     ffn = FFN(D)                       # 见「FFN」一题
     count = lambda m: sum(p.numel() for p in m.parameters())
     print(f"参数量: SwiGLU {count(swiglu):,} vs FFN {count(ffn):,} "

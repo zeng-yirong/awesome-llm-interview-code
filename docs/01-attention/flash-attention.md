@@ -62,10 +62,7 @@ import torch
 import math
 
 def flash_attention(Q, K, V, block_size=64):
-    """
-    Flash Attention 简化实现 (核心思想)
-    Q, K, V: [B, H, N, D]
-    """
+    """Q, K, V: [B, H, N, D]"""
     B, H, N, D = Q.shape
     O = torch.zeros_like(Q)
 
@@ -80,7 +77,6 @@ def flash_attention(Q, K, V, block_size=64):
             Vj = V[:, :, j:j+block_size]
             Sij = torch.matmul(Qi, Kj.transpose(-2, -1)) / math.sqrt(D)
 
-            # Online Softmax 更新
             m_new = torch.maximum(mi, Sij.max(dim=-1, keepdim=True).values)
             exp_corr = torch.exp(mi - m_new)
             oi = oi * exp_corr
@@ -102,17 +98,13 @@ if __name__ == "__main__":
     V = torch.randn(B, H, N, D)
     
     output = flash_attention(Q, K, V, block_size=32)
-    print(f"Output shape: {output.shape}")  # [2, 8, 256, 64]
+    print(f"Output shape: {output.shape}")
     
-    # 分块 + Online Softmax 只改「怎么算」，不改「算出什么」：结果必须和朴素实现一致。
-    # 只打印形状是验不出这个的 —— 递推里少乘一次 exp 修正、或 li 忘了跟着缩放，
-    # 输出的形状照样是对的，只有数值对不上
     def naive_attention(Q, K, V):
         scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(D)
         return torch.matmul(torch.softmax(scores, dim=-1), V)
     
     ref = naive_attention(Q, K, V)
-    # 7 不是 N 的因数，最后一块只有 4 行 —— 顺带把零头块也过一遍
     for bs in (64, 7):
         out = flash_attention(Q, K, V, block_size=bs)
         print(f"block_size={bs}: 与朴素实现的最大绝对误差 "

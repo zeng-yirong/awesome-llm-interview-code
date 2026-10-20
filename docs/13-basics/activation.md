@@ -55,48 +55,36 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# ReLU
 def relu(x):
-    return torch.clamp(x, min=0)    # 或 F.relu(x)
+    return torch.clamp(x, min=0)
 
-# GELU (近似版本更快)
 def gelu(x):
     return 0.5 * x * (1 + torch.tanh(
         (2/3.14159)**0.5 * (x + 0.044715 * x**3)
-        # 常数这里写的是 3.14159 而不是 math.pi：相对差 4.2e-07，对输出的影响 ~1e-07，
-        # 可以忽略，不用手改
     ))
-    # 或直接用 F.gelu(x)。tanh 近似与精确版（erf）在常用区间上差 4.7e-04 量级
 
-# SiLU (Swish)
 def silu(x):
-    return x * torch.sigmoid(x)     # 或 F.silu(x)
+    return x * torch.sigmoid(x)
 
-# 梯度对比
 def check_gradients():
     x = torch.linspace(-3, 3, 100, requires_grad=True)
     
-    # ReLU
     y_relu = relu(x).sum()
     y_relu.backward()
-    print("ReLU grad:", x.grad[:5])     # 前 5 个点全为负，梯度应当是 0
+    print("ReLU grad:", x.grad[:5])
     relu_grad = x.grad.clone()
     x.grad.zero_()
     
-    # GELU
     y_gelu = gelu(x).sum()
     y_gelu.backward()
-    print("GELU grad:", x.grad[:5])     # 平滑过渡：负区间也有非零梯度
+    print("GELU grad:", x.grad[:5])
     x.grad.zero_()
     
-    # SiLU
     y_silu = silu(x).sum()
     y_silu.backward()
-    print("SiLU grad:", x.grad[:5])     # 平滑 + 门控
+    print("SiLU grad:", x.grad[:5])
     silu_grad = x.grad.clone()
     
-    # 公式块里的 ReLU′ = (x>0) 和 SiLU′ = SiLU + σ(1−SiLU) 一直只是写着，对一遍：
-    # 0 处 ReLU 本身就不可导，取哪一侧是框架的约定，把这个点跳过
     xd = x.detach()
     safe = xd != 0
     d_relu = (xd > 0).float()
@@ -106,7 +94,6 @@ def check_gradients():
     d_silu = silu(xd) + s * (1 - silu(xd))
     print(f"SiLU′ 公式 vs autograd 最大误差: {(d_silu - silu_grad).abs().max().item():.2e}")
 
-# 在 Transformer 中使用
 class FFN_ReLU(nn.Module):
     def __init__(self, d_model, d_ff):
         super().__init__()
@@ -141,13 +128,11 @@ class FFN_SwiGLU(nn.Module):
 if __name__ == "__main__":
     check_gradients()
     
-    # tanh 版 GELU 与精确版 x·Φ(x)（F.gelu 走 erf）差多少 —— 换实现时会关心这个量级
     for lim in (3, 10):
         xs = torch.linspace(-lim, lim, 2001)
         print(f"x∈[-{lim}, {lim}]：tanh 近似 vs F.gelu 最大误差 "
               f"{(gelu(xs) - F.gelu(xs)).abs().max().item():.2e}")
     
-    # 可视化
     import matplotlib.pyplot as plt
     
     x = torch.linspace(-3, 3, 100)

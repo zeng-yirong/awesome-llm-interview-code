@@ -51,27 +51,23 @@ import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
-# 方法1: 用 checkpoint 包裹任意前向函数 —— 中间激活不保存，反向时重算
 def custom_forward(x, weight1, weight2):
     return torch.relu(x @ weight1) @ weight2
 
-# 直接跑通的最小示例（真实训练里 weight1/weight2 是 nn.Parameter）
 x = torch.randn(4, 16, requires_grad=True)
 weight1 = torch.randn(16, 64, requires_grad=True)
 weight2 = torch.randn(64, 8, requires_grad=True)
 output = checkpoint(custom_forward, x, weight1, weight2, use_reentrant=False)
 output.sum().backward()
-print("方法1 梯度已回传:", weight1.grad is not None)   # True
+print("方法1 梯度已回传:", weight1.grad is not None)
 
-# 方法2: HuggingFace 模型直接开启（需要 pip install transformers）
 from transformers import AutoModel
 
 model = AutoModel.from_pretrained(
     "model_name",
-    gradient_checkpointing=True    # 一行开启
+    gradient_checkpointing=True
 )
 
-# 方法3: 在 Transformer 里逐层包裹
 class TransformerBlock(nn.Module):
     """attn / ffn / norm 的实现见「多头注意力」「FFN / SwiGLU」「RMSNorm」三题"""
 
@@ -85,8 +81,6 @@ class TransformerBlock(nn.Module):
 
     def forward(self, x, mask=None):
         if self.use_checkpoint:
-            # MHA 的签名是 forward(xq, xk=None, mask=None)，mask 是第三个参数：
-            # 中间必须留一个 None 占位，否则 mask 会被当成 xk 传进去
             x = x + checkpoint(self.attn, self.norm1(x), None, mask, use_reentrant=False)
             return x + checkpoint(self.ffn, self.norm2(x), use_reentrant=False)
         x = x + self.attn(self.norm1(x), None, mask)
@@ -94,14 +88,13 @@ class TransformerBlock(nn.Module):
 
 
 def build_model(use_checkpoint=False, d_model=512, n_layers=4):
-    """最小的 L 层模型，仅用于下面的显存对比"""
+    """最小的 L 层模型"""
     return nn.Sequential(*[TransformerBlock(d_model, 8, use_checkpoint)
                            for _ in range(n_layers)])
 
 
-# 测试显存节省（需要 CUDA）
 def measure_memory(use_checkpoint=False):
-    """测量峰值显存：checkpoint 省下的就是这里少存的那批激活"""
+    """测量峰值显存"""
     model = build_model(use_checkpoint=use_checkpoint).cuda()
     x = torch.randn(4, 2048, 512, device='cuda', requires_grad=True)
 
@@ -113,13 +106,11 @@ def measure_memory(use_checkpoint=False):
     print(f"use_checkpoint={use_checkpoint}: Peak memory {peak_memory:.2f} GB")
     return peak_memory
 
-# 对比
 if __name__ == "__main__":
     torch.manual_seed(0)
 
-    # 1) 检查点唯一的保证：梯度与不开检查点完全一致 —— 它省的是存储，不是计算
     def run(use_ckpt):
-        torch.manual_seed(0)                      # 两次跑必须拿到同一组张量
+        torch.manual_seed(0)
         x = torch.randn(4, 16, requires_grad=True)
         w1 = torch.randn(16, 64, requires_grad=True)
         w2 = torch.randn(64, 8, requires_grad=True)
@@ -133,7 +124,6 @@ if __name__ == "__main__":
           f"{max((a - b).abs().max().item() for a, b in zip(plain, ckpt)):.2e}")
     assert all(torch.allclose(a, b) for a, b in zip(plain, ckpt))
 
-    # 2) 「重新计算」不是修辞：反向时前向函数会被再调一次
     def count_calls(use_ckpt):
         calls = 0
 
@@ -153,7 +143,6 @@ if __name__ == "__main__":
     print(f"前向函数调用次数: 不开检查点 {n_plain} 次 / 开了 {n_ckpt} 次"
           f" —— 多出来的就是反向时的重算")
 
-    # 3) 显存对比需要 CUDA，没有 GPU 时直接跳过（原来这里会当场报错）
     if torch.cuda.is_available():
         mem1 = measure_memory(use_checkpoint=False)
         mem2 = measure_memory(use_checkpoint=True)

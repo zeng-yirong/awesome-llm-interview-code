@@ -63,48 +63,36 @@ class RMSNorm(nn.Module):
 
 
 class MTPModule(nn.Module):
-    """一个 MTP 模块: 拼接上一层隐状态与下一个 token 的 embedding，再过一个 Transformer 块"""
-
     def __init__(self, d_model, n_heads=8):
         super().__init__()
         self.norm_h = RMSNorm(d_model)
         self.norm_e = RMSNorm(d_model)
-        self.proj = nn.Linear(2 * d_model, d_model, bias=False)   # 2d → d
+        self.proj = nn.Linear(2 * d_model, d_model, bias=False)
         self.block = nn.TransformerEncoderLayer(
             d_model, n_heads, dim_feedforward=4 * d_model,
             batch_first=True, norm_first=True)
 
     def forward(self, h_prev, tok_emb):
-        # h_prev:  [B, T, D] 上一层 MTP 的隐状态
-        # tok_emb: [B, T, D] 第 i+k 个 token 的 embedding
         x = self.proj(torch.cat([self.norm_h(h_prev), self.norm_e(tok_emb)], dim=-1))
         T = x.size(1)
-        # 块内必须因果：位置 i 的目标是 x_{i+k+1}，而位置 i+1 的输入正好含 x_{i+k+1}，
-        # 双向注意力会让模型直接看到自己的标签（True = 屏蔽）
         causal = torch.triu(torch.ones(T, T, dtype=torch.bool, device=x.device),
                             diagonal=1)
-        return self.block(x, src_mask=causal)                     # [B, T, D]
+        return self.block(x, src_mask=causal)
 
 
 def mtp_loss(mtp_modules, h0, input_ids, embed, lm_head, num_heads=1, lam=0.3):
-    """
-    多 token 预测损失
-    h0:        [B, T, D] 主模型最后一层隐状态
-    input_ids: [B, T]    输入 token
-    返回: (MTP 部分损失, 各层预测的 logits 列表)
-    """
+    """多 token 预测损失，返回 (MTP 部分损失, 各层预测的 logits 列表)"""
     total, h_prev, logits_list = 0.0, h0, []
 
     for k in range(1, num_heads + 1):
         if input_ids.size(1) - k <= 1:
             break
-        target = input_ids[:, 1 + k:]             # 目标: x_{i+1+k}
-        tok_emb = embed(input_ids[:, k:-1])       # 输入: x_{i+k}
+        target = input_ids[:, 1 + k:]
+        tok_emb = embed(input_ids[:, k:-1])
         h_prev = mtp_modules[k - 1](h_prev[:, :tok_emb.size(1)], tok_emb)
 
-        logits = lm_head(h_prev)                  # [B, T-k-1, V]
+        logits = lm_head(h_prev)
         logits_list.append(logits)
-        # 用 sum 再统一除以 D，把 k 个预测的损失归一到同一量级
         total = total + F.cross_entropy(
             logits.reshape(-1, logits.size(-1)), target.reshape(-1), reduction="sum")
 

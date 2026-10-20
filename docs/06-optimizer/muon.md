@@ -67,20 +67,18 @@ import torch
 
 def zeropower_via_newtonschulz5(G, steps=5, eps=1e-7):
     """
-    用 Newton-Schulz 迭代近似 G 的极分解 UVᵀ（即「零次幂」）
     G: [m, n] 动量矩阵；返回同形状矩阵，奇异值趋近 1
     """
     assert G.ndim == 2, "Muon 只处理二维矩阵参数"
-    a, b, c = 3.4445, -4.7750, 2.0315        # 调好的五次多项式系数
+    a, b, c = 3.4445, -4.7750, 2.0315
 
     X = G.to(torch.bfloat16)
-    # 归一化: 保证谱范数 ≤ 1，否则迭代会发散
     X = X / (X.norm() + eps)
 
     for _ in range(steps):
-        A = X @ X.mT                          # [m, m]
-        B = b * A + c * (A @ A)               # 五次多项式
-        X = a * X + B @ X                     # [m, n]
+        A = X @ X.mT
+        B = b * A + c * (A @ A)
+        X = a * X + B @ X
 
     return X.to(G.dtype)
 
@@ -105,14 +103,9 @@ class Muon(torch.optim.Optimizer):
 
                 buf = state["momentum_buffer"]
                 buf.mul_(group["momentum"]).add_(g)
-                # Nesterov: 用 g + μ·buf 作为动量方向
                 update = g.add(buf, alpha=group["momentum"]) if group["nesterov"] else buf
 
-                # 先正交化，再更新
                 update = zeropower_via_newtonschulz5(update, group["ns_steps"])
-                # RMS 对齐：O 的奇异值都是 1，但每个元素分到的幅度随长宽比变化 ——
-                # 宽矩阵（m < n）一行元素多、单元素步长偏小。乘回 c = √max(1, m/n)
-                # 让不同形状的层更新尺度可比，Adam 的 lr 才能直接迁移过来
                 update = update * max(1.0, g.size(0) / g.size(1)) ** 0.5
                 p.add_(update, alpha=-group["lr"])
 
@@ -120,15 +113,14 @@ class Muon(torch.optim.Optimizer):
 @torch.no_grad()
 def qk_clip_(model, tau=100.0):
     """
-    MuonClip 的 QK-Clip: 从源头压住注意力 logit 的增长
     约定: 模块把本 batch 每 head 的最大 logit 存在 qk_max_logit 属性上
     """
     for module in model.modules():
         s_max = getattr(module, "qk_max_logit", None)
         if s_max is None or s_max <= tau:
             continue
-        gamma = tau / s_max                       # 缩放因子
-        scale = gamma ** 0.5                      # logit ∝ W_q·W_kᵀ，所以取 √γ
+        gamma = tau / s_max
+        scale = gamma ** 0.5
         module.q_proj.weight.mul_(scale)
         module.k_proj.weight.mul_(scale)
 
@@ -136,7 +128,6 @@ def qk_clip_(model, tau=100.0):
 if __name__ == "__main__":
     torch.manual_seed(0)
 
-    # 1. 正交化效果: 奇异值应该都趋近 1
     G = torch.randn(64, 32)
     O = zeropower_via_newtonschulz5(G)
     sv = torch.linalg.svdvals(O.float())
@@ -144,7 +135,6 @@ if __name__ == "__main__":
           "~", round(torch.linalg.svdvals(G).max().item(), 3))
     print("正交化后范围:", round(sv.min().item(), 3), "~", round(sv.max().item(), 3))
 
-    # 2. Muon 走一步
     w = torch.nn.Parameter(torch.randn(64, 32))
     opt = Muon([w], lr=0.02)
     w.grad = torch.randn(64, 32)

@@ -75,7 +75,7 @@ def compress_blocks(x, block_size):
     B, H, S, D = x.shape
     n_blocks = S // block_size
     x = x[:, :, :n_blocks * block_size].reshape(B, H, n_blocks, block_size, D)
-    return x.mean(dim=3)                                   # [B, H, n_blocks, D]
+    return x.mean(dim=3)
 
 
 def sdpa(q, k, v, scale):
@@ -84,63 +84,43 @@ def sdpa(q, k, v, scale):
 
 
 def causal_window_index(seq_len, window, device='cpu'):
-    """滑窗的 key 下标：query t 对应 k[t-w+1 … t]，返回 (下标 [S, w], 有效位 [S, w])
-
-    左侧越界的位置下标补成 0，再靠有效位掩掉 —— 补 0 是为了能一次性 gather 出
-    整张 [S, w] 的表，而不是退回逐 query 的循环。"""
-    offset = torch.arange(window, device=device) - (window - 1)      # [-(w-1), …, 0]
+    """滑窗的 key 下标：query t 对应 k[t-w+1 … t]，返回 (下标 [S, w], 有效位 [S, w])"""
+    offset = torch.arange(window, device=device) - (window - 1)
     key_idx = torch.arange(seq_len, device=device)[:, None] + offset[None, :]
     return key_idx.clamp_min(0), key_idx >= 0
 
 
 def nsa_attention(q, k, v, gate_w, block_size=8, top_n=2, window=16):
-    """
-    NSA 三分支稀疏注意力
-    q, k, v: [B, H, S, D]；返回 o: [B, H, S, D]
-    gate_w:  [H, D, 3] 可学习的门控向量（每个头、每个分支一个），模型里是 nn.Parameter
-    注意: 这里只补齐了窗口支的因果性；压缩、选择两支仍省略了块级因果掩码 ——
-    真实实现还要按块排除未来块、并对选中的块做 token 级掩码
-    """
+    """NSA 三分支稀疏注意力；q, k, v: [B, H, S, D]；gate_w: [H, D, 3]；返回 o: [B, H, S, D]"""
     B, H, S, D = q.shape
     scale = 1.0 / math.sqrt(D)
     n_blocks = S // block_size
 
-    # ---------- 分支 1: 压缩块注意力（粗粒度全局）----------
     o_cmp = sdpa(q, compress_blocks(k, block_size), compress_blocks(v, block_size), scale)
 
-    # ---------- 分支 2: top-n 块选择（中粒度重要区域）----------
-    k_cmp = compress_blocks(k, block_size)                 # 用压缩表示来粗选
-    scores = q @ k_cmp.transpose(-1, -2) * scale           # [B, H, S, n_blocks]
-    top_idx = scores.topk(min(top_n, n_blocks), dim=-1).indices        # [B,H,S,top_n]
+    k_cmp = compress_blocks(k, block_size)
+    scores = q @ k_cmp.transpose(-1, -2) * scale
+    top_idx = scores.topk(min(top_n, n_blocks), dim=-1).indices
 
-    # 把 K/V 重排成块，再按选中的块索引取回（块对齐，硬件友好）
     k_blk = k[:, :, :n_blocks * block_size].reshape(B, H, n_blocks, block_size, D)
     v_blk = v[:, :, :n_blocks * block_size].reshape(B, H, n_blocks, block_size, D)
     bidx = torch.arange(B, device=q.device).view(B, 1, 1, 1)
     hidx = torch.arange(H, device=q.device).view(1, H, 1, 1)
-    k_sel = k_blk[bidx, hidx, top_idx]                     # [B,H,S,top_n,l,D]
+    k_sel = k_blk[bidx, hidx, top_idx]
     v_sel = v_blk[bidx, hidx, top_idx]
-    k_sel = k_sel.reshape(B, H, S, -1, D)                  # [B,H,S,top_n*l,D]
+    k_sel = k_sel.reshape(B, H, S, -1, D)
     v_sel = v_sel.reshape(B, H, S, -1, D)
     o_slc = sdpa(q.unsqueeze(3), k_sel, v_sel, scale).squeeze(3)
 
-    # ---------- 分支 3: 滑动窗口（局部精确）----------
-    # 窗口是「每个 query 自己往前 w 个 token」：query t 只看 k[t-w+1 … t]。
-    # 注意别写成 k[:, :, -win:, :] —— 那是给所有 query 都切全局最后 w 个，
-    # 第 0 个 query 会看到第 16 个 token：既不是滑窗，也不再因果
     win = min(window, S)
     key_idx, win_valid = causal_window_index(S, win, q.device)
-    k_win, v_win = k[:, :, key_idx], v[:, :, key_idx]        # [B, H, S, win, D]
-    win_scores = (q.unsqueeze(3) @ k_win.transpose(-1, -2)) * scale   # [B,H,S,1,win]
+    k_win, v_win = k[:, :, key_idx], v[:, :, key_idx]
+    win_scores = (q.unsqueeze(3) @ k_win.transpose(-1, -2)) * scale
     win_scores = win_scores.masked_fill(~win_valid.view(1, 1, S, 1, win), float('-inf'))
     o_win = (F.softmax(win_scores, dim=-1) @ v_win.unsqueeze(3)).squeeze(3)
 
-    # ---------- 门控加权求和 ----------
-    # 门控必须学出来：三条分支的相对重要性随层数、位置、任务变化，硬相加不行。
-    # g = σ(qᵀw_c)，每个头、每条分支各有一个可学的 w_c，三个系数互相独立 ——
-    # 若三条分支拿到同一个系数，「加权」就退化成了对所有分支乘同一个数
-    g = torch.sigmoid(torch.einsum("bhsd,hdc->bhsc", q, gate_w))      # [B, H, S, 3]
-    w_cmp, w_slc, w_win = g[..., 0], g[..., 1], g[..., 2]             # 各 [B, H, S]
+    g = torch.sigmoid(torch.einsum("bhsd,hdc->bhsc", q, gate_w))
+    w_cmp, w_slc, w_win = g[..., 0], g[..., 1], g[..., 2]
     return (w_cmp.unsqueeze(-1) * o_cmp
             + w_slc.unsqueeze(-1) * o_slc
             + w_win.unsqueeze(-1) * o_win)
@@ -153,24 +133,22 @@ class LightningIndexer(nn.Module):
         super().__init__()
         self.wq = nn.Linear(d_model, n_heads * d_index, bias=False)
         self.wk = nn.Linear(d_model, d_index, bias=False)
-        self.w_scale = nn.Linear(d_model, n_heads, bias=False)    # 每个 head 的标量权重
+        self.w_scale = nn.Linear(d_model, n_heads, bias=False)
         self.n_heads, self.d_index = n_heads, d_index
 
     def forward(self, h, top_k=8):
         """h: [B, S, D] 隐状态；返回每个 query 选中的 token 索引 [B, S, top_k]"""
         B, S, _ = h.shape
-        q = self.wq(h).view(B, S, self.n_heads, self.d_index).transpose(1, 2)  # [B,H,S,d]
-        k = self.wk(h)                                                        # [B,S,d]
-        w = self.w_scale(h).transpose(1, 2)                                   # [B,H,S]
+        q = self.wq(h).view(B, S, self.n_heads, self.d_index).transpose(1, 2)
+        k = self.wk(h)
+        w = self.w_scale(h).transpose(1, 2)
 
-        # 每个 indexer head 打分后 ReLU（可跑 FP8），再用标量权重加权求和
-        dot = q @ k.transpose(-1, -2)                                         # [B,H,S,S]
-        score = (w.unsqueeze(-1) * torch.relu(dot)).sum(dim=1)                              # [B,S,S]
+        dot = q @ k.transpose(-1, -2)
+        score = (w.unsqueeze(-1) * torch.relu(dot)).sum(dim=1)
 
-        # 因果: 只看过去
         causal = torch.tril(torch.ones(S, S, dtype=torch.bool, device=h.device))
         score = score.masked_fill(~causal, float("-inf"))
-        return score.topk(min(top_k, S), dim=-1).indices                      # [B,S,top_k]
+        return score.topk(min(top_k, S), dim=-1).indices
 
 
 if __name__ == "__main__":
@@ -181,8 +159,6 @@ if __name__ == "__main__":
     o = nsa_attention(q, k, v, gate_w=torch.randn(H, D, 3), block_size=8, top_n=2, window=16)
     print("NSA 输出:", tuple(o.shape), "(与输入同形)")
 
-    # 窗口支验一眼语义：每个 query 的窗口右端必须正好落在自己身上（= 不看未来）。
-    # 原来那版是给所有 query 切全局最后 w 个 key，这条根本不成立
     key_idx, valid = causal_window_index(S, window=16)
     print("query 0 的窗口下标:", key_idx[0].tolist())
     print("窗口右端都等于自身位置:",

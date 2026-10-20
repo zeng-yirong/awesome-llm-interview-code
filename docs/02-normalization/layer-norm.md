@@ -51,18 +51,15 @@ class LayerNorm(nn.Module):
     def __init__(self, d_model, eps=1e-5):
         super().__init__()
         self.eps = eps
-        self.gamma = nn.Parameter(torch.ones(d_model))    # 缩放
-        self.beta = nn.Parameter(torch.zeros(d_model))    # 偏移
+        self.gamma = nn.Parameter(torch.ones(d_model))
+        self.beta = nn.Parameter(torch.zeros(d_model))
 
     def forward(self, x):
         """x: [B, S, D]"""
-        # 计算均值和方差（沿最后一维）
         mean = x.mean(-1, keepdim=True)
         
-        # 面试陷阱: unbiased=False (除以 N, 不是 N-1)
         var = x.var(-1, keepdim=True, unbiased=False)
         
-        # 归一化 + 仿射变换
         x_norm = (x - mean) / torch.sqrt(var + self.eps)
         return x_norm * self.gamma + self.beta
 
@@ -73,15 +70,12 @@ if __name__ == "__main__":
     x = torch.randn(B, S, D)
     ln = LayerNorm(D)
     out = ln(x)
-    print(f"Input shape: {x.shape}")   # [2, 10, 64]
-    print(f"Output shape: {out.shape}") # [2, 10, 64]
+    print(f"Input shape: {x.shape}")
+    print(f"Output shape: {out.shape}")
     
-    # 验证归一化效果
-    print(f"Mean: {out[0, 0].mean().item():.6f}")   # ≈ 0
-    print(f"Var: {out[0, 0].var().item():.6f}")     # ≈ 1
+    print(f"Mean: {out[0, 0].mean().item():.6f}")
+    print(f"Var: {out[0, 0].var().item():.6f}")
     
-    # 和官方实现对一下：eps 取同一个值、γ/β 拷过去，两边应该逐位相同。
-    # 归一化本身只有三行，能写歪的地方全在口径上 —— 差一点就说明口径没对上
     ref = torch.nn.LayerNorm(D, eps=1e-5)
     with torch.no_grad():
         ref.weight.copy_(ln.gamma)
@@ -89,7 +83,6 @@ if __name__ == "__main__":
     print("与 nn.LayerNorm 的最大误差 (应为 0):",
           (out - ref(x)).abs().max().item())
     
-    # 反例: 方差用 unbiased=True（除以 N-1）会偏多少 —— 这就是「面试陷阱」那条
     wrong = (x - x.mean(-1, keepdim=True)) / torch.sqrt(
         x.var(-1, keepdim=True, unbiased=True) + 1e-5)
     print("方差改成 unbiased=True 后的差异:",

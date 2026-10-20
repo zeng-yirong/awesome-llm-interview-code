@@ -65,22 +65,15 @@ FP8_DTYPE = {"e4m3": torch.float8_e4m3fn, "e5m2": torch.float8_e5m2}
 
 
 def per_block_quant(x, block_size=128, fmt="e4m3"):
-    """
-    按最后一维分块做 FP8 量化
-    x: [..., N]；block_size: 每块元素数
-    返回: (量化再反量化后的值, 每块的缩放因子)
-    注意: 需要 torch >= 2.1 才有 float8_e4m3fn
-    """
+    """x: [..., N]、block_size: 每块元素数 → (量化再反量化后的值, 每块的缩放因子)"""
     assert x.shape[-1] % block_size == 0, "最后一维要能被 block_size 整除"
     orig_shape = x.shape
     n_blocks = orig_shape[-1] // block_size
-    xb = x.reshape(-1, n_blocks, block_size)                     # [M, n_blocks, B]
+    xb = x.reshape(-1, n_blocks, block_size)
 
-    # 1. 每块一个 amax → 一个缩放因子（clamp_min 防止除零）
-    amax = xb.abs().amax(dim=-1, keepdim=True).clamp_min(1e-12)   # [M, n_blocks, 1]
+    amax = xb.abs().amax(dim=-1, keepdim=True).clamp_min(1e-12)
     scale = amax / FP8_MAX[fmt]
 
-    # 2. 量化到 FP8 再反量化（模拟「FP8 存、高精度用」）
     x_q = (xb / scale).clamp(-FP8_MAX[fmt], FP8_MAX[fmt]).to(FP8_DTYPE[fmt])
     x_hat = x_q.to(x.dtype) * scale
 
@@ -88,27 +81,18 @@ def per_block_quant(x, block_size=128, fmt="e4m3"):
 
 
 def fp8_gemm_sim(x, w, block_size=128):
-    """
-    模拟 FP8 块级矩阵乘法: FP8 乘 + 高精度累加
-    x: [M, K]   w: [K, N]
-    """
-    # 激活：沿 K 维每 128 个元素一块（per-token per-128-channel）
+    """x: [M, K]、w: [K, N] → FP8 乘 + 高精度累加"""
     x_hat, _ = per_block_quant(x, block_size, fmt="e4m3")
-    # 权重：转置成 [N, K] 后同样只沿最后一维每 128 个一块 ——
-    # DeepSeek-V3 的真实实现按 128×128 的 tile 取一个 amax（两个维度都切），
-    # 这里只切 K 维，粒度更细、精度只会更好，是同一套缩放思路的简化
     w_hat, _ = per_block_quant(w.t().contiguous(), block_size, fmt="e4m3")
 
-    # 真实实现是 FP8 张量核 + 高精度累加；这里用反量化后的值算等价的数学结果
     return x_hat @ w_hat.t().contiguous()
 
 
 if __name__ == "__main__":
     torch.manual_seed(0)
     x = torch.randn(256, 512)
-    x[0, 0] = 1200.0                       # 人为插一个离群值
+    x[0, 0] = 1200.0
 
-    # 对比: 整张量一个 scale  vs  分块 scale
     naive_scale = x.abs().amax() / FP8_MAX["e4m3"]
     x_naive = (x / naive_scale).clamp(-448, 448).to(torch.float8_e4m3fn)
     x_naive = x_naive.to(x.dtype) * naive_scale

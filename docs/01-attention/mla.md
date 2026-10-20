@@ -77,14 +77,10 @@ class MLA(nn.Module):
         super().__init__()
         self.h, self.dh, self.dr = n_heads, dh, rope_dim
         
-        # KV 压缩投影：低秩这条只恢复内容部分和 V
         self.kv_down = nn.Linear(d_model, latent_dim, bias=False)
         self.kv_up = nn.Linear(latent_dim, n_heads*2*dh, bias=False)
-        # 位置分量直接投自 x，不走低秩（挤进低秩空间会被压坏），而且所有头共用
-        # 一份 —— 宽度是 rope_dim 而不是 n_heads*rope_dim，cache 里也只占 Dr
         self.k_rope_proj = nn.Linear(d_model, rope_dim, bias=False)
         
-        # Q 压缩投影
         self.q_down = nn.Linear(d_model, latent_dim, bias=False)
         self.q_up = nn.Linear(latent_dim, n_heads*(dh+rope_dim), bias=False)
         
@@ -94,23 +90,17 @@ class MLA(nn.Module):
     def forward(self, x, mask=None):
         B, S, _ = x.shape
         
-        # 进 cache 的只有这两项：c_kv（C 维）+ k_rope（Dr 维），每 token 共 C+Dr
-        c_kv = self.kv_down(x)                                  # [B, S, C]
-        k_r = self.k_rope_proj(x).view(B, S, 1, self.dr)        # [B, S, 1, Dr]
+        c_kv = self.kv_down(x)
+        k_r = self.k_rope_proj(x).view(B, S, 1, self.dr)
         
-        # KV 内容路径：从 c_kv 上投影恢复 k_content 与 v
         k_c, v = self.kv_up(c_kv).view(B, S, self.h, -1).split([self.dh, self.dh], dim=-1)
         
-        # Q 路径：内容与位置分量都来自同一个低秩潜变量（不缓存）
         q = self.q_up(self.q_down(x)).view(B, S, self.h, -1)
         q_c, q_r = q.split([self.dh, self.dr], dim=-1)
         
-        # RoPE 只作用在 rope 分量上，content 分量不旋 —— 否则上投影就无法吸收进 Q 侧。
-        # k_r 是 [B, S, 1, Dr]（所有头共用一份），RoPE 逐位置施加、每个头角度相同，
-        # 所以先旋再广播到 H 个头，与逐头旋等价
         q_r, k_r = self.rope(q_r, k_r)
         
-        k_r = k_r.expand(B, S, self.h, self.dr)     # 独享一份 → 广播到 H 个头
+        k_r = k_r.expand(B, S, self.h, self.dr)
         q = torch.cat([q_c, q_r], dim=-1).transpose(1, 2)
         k = torch.cat([k_c, k_r], dim=-1).transpose(1, 2)
         v = v.transpose(1, 2)
@@ -128,9 +118,8 @@ if __name__ == "__main__":
     x = torch.randn(B, S, D)
     mla = MLA(D, n_heads=8, dh=64, latent_dim=128, rope_dim=32)
     out = mla(x)
-    print(f"Input shape: {x.shape}")   # [2, 10, 512]
-    print(f"Output shape: {out.shape}") # [2, 10, 512]
-    # 每 token 的 cache 宽度：C + Dr（对比 GQA 的 2·G·D_h，MHA 的 2·H·D_h）
+    print(f"Input shape: {x.shape}")
+    print(f"Output shape: {out.shape}")
     print(f"每 token cache: {mla.kv_down.out_features + mla.k_rope_proj.out_features} 维"
           f"  (GQA/G=2 要 {2*2*mla.dh} 维, MHA 要 {2*mla.h*mla.dh} 维)")
 ```

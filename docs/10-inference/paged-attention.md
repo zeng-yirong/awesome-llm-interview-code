@@ -57,19 +57,15 @@ flowchart TD
 ```python
 import torch
 
-# PagedAttention 核心思想
-# 真实的 kernel 是 CUDA/Triton，这里用块表映射 + gather 把语义写清楚
 class PagedKVCache:
     def __init__(self, block_size=16, num_blocks=1000, n_layers=32,
                  n_heads=32, head_dim=128, device='cuda'):
         self.block_size = block_size
-        # 物理块池 (预分配所有显存)
         self.physical_blocks = torch.zeros(
             num_blocks, n_layers, 2, block_size, n_heads, head_dim,
             dtype=torch.float16, device=device
         )
-        # 块表: 每个序列的逻辑块 → 物理块映射
-        self.block_tables = {}   # seq_id → [physical_block_ids]
+        self.block_tables = {}
         self.free_blocks = list(range(num_blocks))
 
     def allocate(self, seq_id, num_tokens):
@@ -83,8 +79,7 @@ class PagedKVCache:
         self.block_tables[seq_id] = allocated
 
     def write(self, seq_id, layer, position, key, value):
-        """把一个 token 在某层的 K/V 写进对应的物理块
-        key / value: [n_heads, head_dim]"""
+        """把一个 token 在某层的 K/V 写进对应的物理块；key/value: [n_heads, head_dim]"""
         block_idx = position // self.block_size
         block_offset = position % self.block_size
         phys_id = self.block_tables[seq_id][block_idx]
@@ -92,12 +87,9 @@ class PagedKVCache:
         self.physical_blocks[phys_id, layer, 1, block_offset] = value
 
     def attention(self, seq_id, layer, q, seq_len):
-        """使用块表进行注意力计算
-        layer: 当前算到第几层（每层的 KV 是独立的，别把不同层混进来）
-        seq_len: 这个序列实际写入了多少 token"""
+        """使用块表进行注意力计算"""
         phys_ids = self.block_tables[seq_id]
-        # 从非连续物理块中 gather K/V → 计算注意力
-        k = self.physical_blocks[phys_ids, layer, 0]   # [n_blocks, block_size, H, D]
+        k = self.physical_blocks[phys_ids, layer, 0]
         v = self.physical_blocks[phys_ids, layer, 1]
         return paged_attention_kernel(q, k, v, seq_len, self.block_size)
 
@@ -107,44 +99,31 @@ class PagedKVCache:
             self.free_blocks.extend(self.block_tables[seq_id])
             del self.block_tables[seq_id]
 
-# PagedAttention kernel (简化版)
 def paged_attention_kernel(q, k_blocks, v_blocks, seq_len, block_size=16):
-    """
-    q: [B, H, 1, D]
-    k_blocks / v_blocks: [n_blocks, block_size, H, D]  某个序列、某一层的物理块
-    seq_len: 已写入的 token 数，最后一个块可能没写满
-    """
-    # 实际实现需要 CUDA kernel
-    # 这里展示核心思想: 从非连续块中 gather K/V
+    """q: [B, H, 1, D]；k_blocks / v_blocks: [n_blocks, block_size, H, D]"""
     
     B, H, _, D = q.shape
     
-    # Flatten blocks：分页对计算本身是透明的，gather 出来就是普通 KV
-    k = k_blocks.reshape(-1, H, D)[:seq_len]   # [seq_len, H, D]
+    k = k_blocks.reshape(-1, H, D)[:seq_len]
     v = v_blocks.reshape(-1, H, D)[:seq_len]
-    # 转到 [H, seq_len, D]，和 q 的 batch 维对齐（q 是 [B, H, 1, D]）
     k, v = k.transpose(0, 1), v.transpose(0, 1)
     
-    # 标准注意力
-    scores = torch.matmul(q, k.transpose(-2, -1)) / (D ** 0.5)   # [B, H, 1, seq_len]
+    scores = torch.matmul(q, k.transpose(-2, -1)) / (D ** 0.5)
     attn = torch.softmax(scores, dim=-1)
-    output = torch.matmul(attn, v)                               # [B, H, 1, D]
+    output = torch.matmul(attn, v)
     
     return output
 
-# 使用示例
 if __name__ == "__main__":
     torch.manual_seed(0)
-    B, H, D, L = 1, 8, 64, 4      # 4 层足够演示
+    B, H, D, L = 1, 8, 64, 4
     cache = PagedKVCache(block_size=16, num_blocks=100, n_layers=L,
                          n_heads=H, head_dim=D, device='cpu')
     
-    # 序列 1: 20 tokens → 占 2 个物理块（第 2 个块只用 4 个槽位）
     seq_len = 20
     cache.allocate(seq_id=1, num_tokens=seq_len)
     print(f"Allocated blocks for seq 1: {cache.block_tables[1]}")
     
-    # 逐 token 写入第 0 层的 K/V，同时留一份普通（不分页）的 KV 作参考
     keys, values = [], []
     for pos in range(seq_len):
         key, value = torch.randn(H, D), torch.randn(H, D)
@@ -154,11 +133,10 @@ if __name__ == "__main__":
     
     q = torch.randn(B, H, 1, D)
     out = cache.attention(seq_id=1, layer=0, q=q, seq_len=seq_len)
-    print(f"Attention output: {out.shape}")   # [1, 8, 1, 64]
+    print(f"Attention output: {out.shape}")
     
-    # 1) 「分页对计算透明」：从非连续块里 gather 出来的就是普通 KV，输出必须完全一致
     def plain_attention(q, k, v):
-        k = torch.stack(k).transpose(0, 1)                 # [H, S, D]
+        k = torch.stack(k).transpose(0, 1)
         v = torch.stack(v).transpose(0, 1)
         scores = torch.matmul(q, k.transpose(-2, -1)) / (D ** 0.5)
         return torch.matmul(torch.softmax(scores, dim=-1), v)
@@ -166,8 +144,6 @@ if __name__ == "__main__":
     ref = plain_attention(q, keys, values)
     print(f"分页 vs 普通 KV 最大误差: {(out - ref).abs().max().item():.2e}")
     
-    # 2) 逻辑连续、物理离散：把同一批 token 挪到两块不相邻的物理块上（先搬数据再改块表），
-    #    计算应当一点不变 —— 块表只是个映射，物理 id 连不连续无所谓
     cache.allocate(seq_id=3, num_tokens=seq_len)
     for pos, (key, value) in enumerate(zip(keys, values)):
         cache.write(3, layer=0, position=pos, key=key, value=value)
@@ -175,29 +151,24 @@ if __name__ == "__main__":
     cache.physical_blocks[scattered] = cache.physical_blocks[cache.block_tables[3]].clone()
     cache.block_tables[3] = scattered
     for pid in scattered:
-        cache.free_blocks.remove(pid)          # 记账要跟上，别让池子把这两块再分给别人
+        cache.free_blocks.remove(pid)
     out_scattered = cache.attention(seq_id=3, layer=0, q=q, seq_len=seq_len)
     print(f"块表改成 {scattered}（不连续）后最大误差: "
           f"{(out_scattered - ref).abs().max().item():.2e}")
     
-    # 3) 第 2 个块只写了 4 个槽位，剩下 12 个是 0 —— 必须靠 seq_len 截掉，
-    #    否则模型会去注意一串全零的假 KV
     padded = cache.attention(seq_id=1, layer=0, q=q,
                              seq_len=len(cache.block_tables[1]) * cache.block_size)
     print(f"不截断（32 个位置）与正确输出差: {(padded - out).abs().max().item():.3f}"
           f"（输出量级 {out.abs().max().item():.3f}）")
     
-    # 4) 按需分配的账：这块序列实际占用 vs 按 max_len 预分配
     print(f"块内利用率 {seq_len / (len(cache.block_tables[1]) * cache.block_size):.1%}（20/32）"
           f"；若按 max_len=512 预分配只有 {seq_len / 512:.1%}")
     
-    # 5) free 把块还给池子（算法步骤最后一步）
     free_before = len(cache.free_blocks)
     cache.free(3)
     print(f"释放 seq 3 后空闲块 {free_before} → {len(cache.free_blocks)}（+2 = 它占的块数），"
           f"块表里还留着吗: {3 in cache.block_tables}")
     
-    # 序列 2: 20 tokens
     cache.allocate(seq_id=2, num_tokens=20)
     print(f"Allocated blocks for seq 2: {cache.block_tables[2]}")
     print(f"Free blocks: {len(cache.free_blocks)}")

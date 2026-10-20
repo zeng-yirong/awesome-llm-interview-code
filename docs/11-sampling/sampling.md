@@ -58,45 +58,37 @@ def top_k_top_p_sampling(logits, temperature=0.7, top_k=50, top_p=0.9):
     """组合采样策略：返回过滤后的 logits（-inf = 被截掉的候选），不负责采样"""
     logits = logits / temperature
 
-    # Top-k: 只保留最大的 k 个
     if top_k > 0:
         top_k_vals, _ = torch.topk(logits, top_k)
         threshold = top_k_vals[..., -1:]
         logits = logits.masked_fill(logits < threshold, float('-inf'))
 
-    # Top-p: 累积概率截断
     if top_p < 1.0:
         sorted_logits, sorted_idx = torch.sort(logits, descending=True)
         cum_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
         mask = cum_probs > top_p
-        mask[..., 1:] = mask[..., :-1].clone()   # 至少保留一个
+        mask[..., 1:] = mask[..., :-1].clone()
         mask[..., 0] = False
         sorted_logits[mask] = float('-inf')
         logits = sorted_logits.scatter(1, sorted_idx, sorted_logits)
 
-    # 只截断，不采样：softmax + multinomial 由调用方做（两步分开才不会漏掉归一化）
     return logits
 
-# 自回归生成
 @torch.no_grad()
 def generate(model, prompt_ids, max_new_tokens=100, temperature=0.7,
              top_k=50, top_p=0.9):
-    """使用采样策略生成文本"""
     input_ids = prompt_ids.clone()
     
     for _ in range(max_new_tokens):
         logits = model(input_ids).logits[:, -1, :]
         
-        # 应用采样策略
         logits = top_k_top_p_sampling(logits, temperature, top_k, top_p)
         
-        # 采样下一个 token
         probs = F.softmax(logits, dim=-1)
         next_token = torch.multinomial(probs, num_samples=1)
         
         input_ids = torch.cat([input_ids, next_token], dim=1)
         
-        # 遇到 EOS 停止
         if next_token.item() == model.config.eos_token_id:
             break
     
@@ -107,7 +99,6 @@ if __name__ == "__main__":
     V = 32000
     logits = torch.randn(1, V)
     
-    # 温度越低分布越尖，top-p 砍掉的候选越多（top-k=50 是候选数的上限）
     for temperature in (0.1, 1.0, 2.0):
         filtered = top_k_top_p_sampling(logits, temperature=temperature,
                                         top_k=50, top_p=0.9)
