@@ -232,7 +232,9 @@ npm run dev          # http://localhost:3000
 
 每道题在 GitHub 上有一个带 `vote` 标签的票箱 issue（👍 热度高 / 👎 热度低），票数会显示在站点卡片上。
 
-**新增题目时你什么都不用做** —— 合并到 `main` 后，[sync-votes.yml](.github/workflows/sync-votes.yml) 会自动给新题开票箱（最迟等下一次定时同步，6 小时内）。票箱由 [scripts/sync-votes.mjs](scripts/sync-votes.mjs) 按题目 id 认领，别手工建、也别删已有的。
+**新增题目时你什么都不用做** —— 合并到 `main` 后，[sync-votes.yml](.github/workflows/sync-votes.yml) 会自动给新题开票箱。票箱由 [scripts/sync-votes.mjs](scripts/sync-votes.mjs) 按题目 id 认领，别手工建、也别删已有的。
+
+票数同步没有定时任务，是维护者手动触发的（Actions → Sync Votes → Run workflow）。
 
 票数只作展示，**不会**改动 `problems.ts` 里的 `hot` 字段。
 

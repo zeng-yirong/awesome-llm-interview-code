@@ -10,8 +10,8 @@ interface VoteButtonProps {
 /**
  * 「Vote Now」：把用户送到该题的投票 issue 上点 👍 / 👎。
  *
- * 票数 = GitHub reaction 计数，由定时 workflow 同步，所以点完不会立刻变——
- * tooltip 里写清了节奏，别让用户以为按钮坏了。
+ * 票数 = GitHub reaction 计数，靠维护者手动跑 workflow 同步，所以点完不会立刻变——
+ * tooltip 里写清了，别让用户以为按钮坏了。
  */
 export default function VoteButton({ problemId, vote }: VoteButtonProps) {
   const [voted, setVoted] = useState(() => readLocalVote(problemId));
@@ -35,7 +35,7 @@ export default function VoteButton({ problemId, vote }: VoteButtonProps) {
         title={
           voted
             ? '本浏览器记录：你去投过票（GitHub 上可以随时取消）'
-            : '在 GitHub 上投票：👍 热度高（面试真会考）/ 👎 热度低（了解即可）。票数每 6 小时同步一次。'
+            : '在 GitHub 上投票：👍 热度高（面试真会考）/ 👎 热度低（了解即可）。票数由维护者手动同步，不是实时的。'
         }
         className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full font-medium transition-all hover:scale-105"
         style={{

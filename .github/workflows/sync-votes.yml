@@ -2,11 +2,13 @@ name: Sync Votes
 
 # 把票箱 issue 上的 👍/👎 同步成 votes-data 分支的 votes.json，站点直接读那个文件。
 # 这里不负责部署：票数更新不经过 Pages 构建，所以也不必重新部署。
+#
+# 不跑定时任务：票数不自动刷新，想看新数字自己触一次
+# （Actions 页面选本 workflow → Run workflow，或本地 npm run votes）。
 on:
-  schedule:
-    # 每 6 小时一次。挑 :17 避开整点——GitHub 的调度器整点最挤，常排队延迟
-    - cron: '17 */6 * * *'
   push:
+    # 这条 push 只为补建票箱：新题合并进 main 时顺手开一个，免得漏。
+    # 刷新票数不靠它 —— 那要手动跑。
     # 必须限定 main：脚本自己会往 votes-data 分支写数据，
     # 这里若不限定分支，那次写入会反过来再触发一遍本 workflow，滚成死循环
     branches: [main]

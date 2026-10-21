@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
  *
  * 数据流：
  *   issue reaction  →  .github/workflows/sync-votes.yml  →  votes-data 分支的 votes.json  →  站点
+ * 那个 workflow 不跑定时任务，只手动触发，所以票数是上次同步的快照、不是实时的。
  *
  * 站点优先读 votes-data 分支的 raw 文件：那个分支不进 Pages 构建，所以票数更新
  * 不需要重新部署。拿不到就退回构建时打包进来的 ./votes.json（本地 dev / 离线 / CDN 抽风）。

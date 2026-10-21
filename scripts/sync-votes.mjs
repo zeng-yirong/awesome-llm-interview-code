@@ -139,7 +139,7 @@ function issueBody(problem) {
     '- 👍 **热度高** —— 面试真会考，值得花时间手撕',
     '- 👎 **热度低** —— 偏冷门 / 了解原理即可',
     '',
-    '票数会同步到站点（每 6 小时一次）：<https://zeng-yirong.github.io/awesome-llm-interview-code/>',
+    '票数由维护者手动同步到站点：<https://zeng-yirong.github.io/awesome-llm-interview-code/>',
     '',
     '<sub>本 issue 由 `scripts/sync-votes.mjs` 自动创建，**请勿删除**（删了票数就没了）。题目内容有问题请另开「题目纠错」issue。</sub>',
   ].join('\n');
