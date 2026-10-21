@@ -81,7 +81,6 @@ class GQA(nn.Module):
         k = self.wk(x).view(B, S, self.g, self.dh).transpose(1, 2)
         v = self.wv(x).view(B, S, self.g, self.dh).transpose(1, 2)
         
-        # 核心：复制 KV 以匹配 Q 的头数
         k = self.repeat_kv(k, self.n_rep)
         v = self.repeat_kv(v, self.n_rep)
         
@@ -96,22 +95,17 @@ class GQA(nn.Module):
 if __name__ == "__main__":
     B, S, D = 2, 10, 512
     x = torch.randn(B, S, D)
-    gqa = GQA(D, n_heads=32, n_kv_heads=8)  # 4 个 Q 头共享 1 个 KV 头
+    gqa = GQA(D, n_heads=32, n_kv_heads=8)
     out = gqa(x)
-    print(f"Input shape: {x.shape}")   # [2, 10, 512]
-    print(f"Output shape: {out.shape}") # [2, 10, 512]
+    print(f"Input shape: {x.shape}")
+    print(f"Output shape: {out.shape}")
     
-    # 「4 个 Q 头共享 1 个 KV 头」具体是怎么分的？repeat_kv 走的是
-    # [G, n_rep] → reshape 成 H，所以第 h 个 Q 头拿到的是 KV 头 h // (H/G)，
-    # 即相邻的 n_rep 个 Q 头共享一个 KV 头。映射写成 h % G 也不会报错，
-    # 形状照样对、注意力照样算得出来，只是每个 Q 头看错了 KV —— 值得单独验一次
     k = torch.randint(0, 100, (1, gqa.g, S, gqa.dh)).float()
-    rep = gqa.repeat_kv(k, gqa.n_rep)                     # [1, H, S, Dh]
+    rep = gqa.repeat_kv(k, gqa.n_rep)
     print("Q 头 → KV 头:", [h // gqa.n_rep for h in range(gqa.h)])
     print("映射正确:", all(torch.equal(rep[0, h], k[0, h // gqa.n_rep])
                           for h in range(gqa.h)))
     
-    # KV Cache 的体积对比（每层、每 token 的 K+V 宽度）
     print(f"每层每 token 的 KV: GQA {2 * gqa.g * gqa.dh} 维 = "
           f"MHA {2 * gqa.h * gqa.dh} 维 的 {gqa.g / gqa.h:.0%}")
 ```

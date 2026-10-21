@@ -65,29 +65,25 @@ flowchart TD
 import torch
 
 def grpo_advantages(rewards):
-    """组内归一化优势 (不需要 Critic)"""
-    # rewards: [batch, group_size]
+    """组内归一化优势"""
     mean = rewards.mean(dim=-1, keepdim=True)
     std = rewards.std(dim=-1, keepdim=True)
     return (rewards - mean) / (std + 1e-8)
 
 def grpo_loss(old_logp, new_logp, advantages, eps=0.2, beta=0.01, ref_kl=None):
-    """
-    GRPO 损失 = PPO clip loss + β * KL penalty
-    """
+    """GRPO 损失 = PPO clip loss + β * KL penalty"""
     ratio = torch.exp(new_logp - old_logp)
     clipped = torch.clamp(ratio, 1-eps, 1+eps)
     loss = -torch.min(ratio * advantages, clipped * advantages)
     if ref_kl is not None:
-        loss = loss + beta * ref_kl       # 显式 KL 惩罚
+        loss = loss + beta * ref_kl
     return loss.mean()
 
 def kl_penalty(logp, ref_logp):
-    """Schulman KL 估计器 (低方差)"""
+    """Schulman KL 估计器"""
     ratio = torch.exp(ref_logp - logp)
     return (ratio - (ref_logp - logp) - 1).mean()
 
-# 完整 GRPO 训练流程
 class GRPOTrainer:
     def __init__(self, policy_model, ref_model, reward_model, optimizer,
                  group_size=8):
@@ -98,50 +94,38 @@ class GRPOTrainer:
         self.group_size = group_size
     
     def train_step(self, prompts):
-        # 1. 对每个 prompt 生成 group_size 个回答（采样不需要梯度）
         with torch.no_grad():
             responses = [self.policy.generate(prompts)
                          for _ in range(self.group_size)]
         
-        # 2. 计算每个回答的 reward（奖励模型是冻结的，奖励也只当常量用）
-        # 不套 no_grad 的话，advantages 会一路带着奖励模型的计算图，
-        # 循环里第 2 次 backward 就会撞上「图已释放」的报错
         with torch.no_grad():
             rewards = torch.stack([
                 self.reward(prompts, resp) for resp in responses
-            ], dim=1)  # [batch, group_size]
+            ], dim=1)
         
-        # 3. 组内归一化优势
         advantages = grpo_advantages(rewards)
         
-        # 4. GRPO 更新
-        # old_logp 必须是「更新前、采样时的策略」算出来的，而且要 detach：
-        # 它只是比值的基准常量；若和 new_logp 一样由当前策略现算，ratio 恒等于 1、梯度就没了
         with torch.no_grad():
             old_logps = [self.policy.get_logprobs(prompts, resp) for resp in responses]
 
-        self.optimizer.zero_grad()          # 少了它，上一步的梯度会累加进来
+        self.optimizer.zero_grad()
         for i in range(self.group_size):
             new_logp = self.policy.get_logprobs(prompts, responses[i])
-            # 参考模型永远是冻结的，也走 no_grad：否则梯度会一路累积到它身上
             with torch.no_grad():
                 ref_logp = self.ref.get_logprobs(prompts, responses[i])
             
             kl = kl_penalty(new_logp, ref_logp)
             loss = grpo_loss(old_logps[i], new_logp, advantages[:, i],
                            ref_kl=kl)
-            # 逐条累加梯度，除以 group_size 后等价于对整个 group 取平均
             (loss / self.group_size).backward()
-        self.optimizer.step()               # 少了它，参数根本没更新
+        self.optimizer.step()
 
 # 测试
 if __name__ == "__main__":
-    # 组内归一化
     rewards = torch.tensor([[1.0, 2.0, 3.0, 0.5],
                             [2.0, 2.5, 1.5, 3.0]])
     advantages = grpo_advantages(rewards)
     print("Advantages:", advantages)
-    # 每行均值为 0，标准差为 1
 ```
 
 ## 🎯 面试要点

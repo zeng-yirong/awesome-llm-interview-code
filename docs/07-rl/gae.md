@@ -58,24 +58,17 @@ flowchart TD
 import torch
 
 def compute_gae(rewards, values, gamma=0.99, lam=0.95):
-    """
-    计算 GAE 优势
-    
-    rewards: [T]  每步奖励
-    values:  [T+1] 价值估计 (含最后一步)
-    
-    返回: advantages [T], returns [T]
-    """
+    """rewards: [T]、values: [T+1] → advantages [T], returns [T]"""
     T = len(rewards)
     advantages = torch.zeros(T)
     gae = 0.0
 
     for t in reversed(range(T)):
         delta = rewards[t] + gamma * values[t+1] - values[t]
-        gae = delta + gamma * lam * gae       # 递推!
+        gae = delta + gamma * lam * gae
         advantages[t] = gae
 
-    returns = advantages + values[:-1]         # returns = A + V
+    returns = advantages + values[:-1]
     return advantages, returns
 
 # 测试
@@ -86,64 +79,50 @@ if __name__ == "__main__":
     values = torch.randn(T + 1)
 
     advantages, returns = compute_gae(rewards, values, gamma=0.99, lam=0.95)
-    print(f"Advantages shape: {advantages.shape}")  # [10]
-    print(f"Returns shape: {returns.shape}")        # [10]
-    assert torch.allclose(returns, advantages + values[:-1])   # returns = A + V
+    print(f"Advantages shape: {advantages.shape}")
+    print(f"Returns shape: {returns.shape}")
+    assert torch.allclose(returns, advantages + values[:-1])
 
     gamma, lam = 0.99, 0.95
-    delta = rewards + gamma * values[1:] - values[:-1]         # δ_t
+    delta = rewards + gamma * values[1:] - values[:-1]
 
-    # 1) 递推 vs 闭式 A_t = Σ_l (γλ)^l·δ_{t+l}（双重循环，慢但直白）
     coef = torch.tensor([(gamma * lam) ** l for l in range(T)])
     brute = torch.stack([(delta[t:] * coef[:T - t]).sum() for t in range(T)])
     print(f"递推 vs 闭式最大误差: {(advantages - brute).abs().max().item():.2e}")
 
-    # 2) λ=1：望远镜相消，退化成「折扣回报 − V(s_t)」—— 这就是「λ=1 等价 MC」的确切含义
     adv_mc, _ = compute_gae(rewards, values, gamma, 1.0)
     disc = torch.stack([(rewards[t:] * gamma ** torch.arange(T - t)).sum()
                         + gamma ** (T - t) * values[T] for t in range(T)])
     print(f"λ=1 vs 折扣回报−V(s_t) 最大误差: "
           f"{(adv_mc - (disc - values[:-1])).abs().max().item():.2e}")
 
-    # 3) λ=0：只剩 δ_t，退化成 TD(0)
     adv_td, _ = compute_gae(rewards, values, gamma, 0.0)
     print(f"λ=0 vs δ_t 最大误差: {(adv_td - delta).abs().max().item():.2e}")
 
-    # 4) γ=λ=1 时 returns 就是「从 t 起的累积奖励」，但别漏掉末步的 bootstrap V(s_T)：
-    #    它一直挂在最后一个 δ 上，只有 s_T 是终止状态（V=0）时才是纯 MC 回报
     _, ret_mc = compute_gae(rewards, values, gamma=1.0, lam=1.0)
     cum = rewards.flip(0).cumsum(0).flip(0)
     print(f"γ=λ=1: returns vs 累积奖励+V(s_T) 最大误差 "
           f"{(ret_mc - cum - values[T]).abs().max().item():.2e}"
           f"（漏掉 V(s_T) 就差 {values[T]:.4f}）")
 
-    # 5) λ 是旋钮：λ→1 靠向 MC，λ→0 靠向 TD(0)
     for l in (0.0, 0.5, 0.95, 1.0):
         a, _ = compute_gae(rewards, values, gamma, l)
         print(f"λ={l:<4} 与 λ=1 的差 {float((a - adv_mc).std()):.4f} / "
               f"与 λ=0 的差 {float((a - adv_td).std()):.4f}")
 
-# PPO 中使用
 def ppo_step(model, optimizer, data, gamma=0.99, lam=0.95):
-    # advantages / old_logp 都是「比值的基准常量」，必须在 no_grad 下算：
-    # 它们在循环外只算一次，却会被 4 个 epoch 各反向一次，
-    # 第二次反向要去访问第一次已经释放的图 → RuntimeError
     with torch.no_grad():
         rewards = data['rewards']
         values = model.compute_values(data['states'])
         advantages, returns = compute_gae(rewards, values, gamma, lam)
-        # 归一化优势
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         old_logp = model.get_logprobs(data['states'], data['actions'])
-    # returns 用来算 critic 的 value loss，这里省略
-
-    # PPO 更新
-    for _ in range(4):  # PPO epochs
+    for _ in range(4):
         new_logp = model.get_logprobs(data['states'], data['actions'])
         loss = ppo_loss(old_logp, new_logp, advantages)
-        optimizer.zero_grad()      # 少了它梯度会跨 epoch 累加
+        optimizer.zero_grad()
         loss.backward()
-        optimizer.step()           # 少了它参数根本没更新
+        optimizer.step()
 ```
 
 ## 🎯 面试要点

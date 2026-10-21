@@ -62,20 +62,15 @@ import torch.nn as nn
 class RotaryEmbedding(nn.Module):
     def __init__(self, head_dim, max_seq_len=2048, theta=10000.0):
         super().__init__()
-        # 预计算 cos/sin
         inv_freq = 1.0 / (theta ** (torch.arange(0, head_dim, 2).float() / head_dim))
         t = torch.arange(max_seq_len).float()
-        angles = torch.outer(t, inv_freq)           # [S, D/2]
-        angles = torch.cat([angles, angles], dim=-1) # [S, D]
+        angles = torch.outer(t, inv_freq)
+        angles = torch.cat([angles, angles], dim=-1)
         self.register_buffer('cos', angles.cos())
         self.register_buffer('sin', angles.sin())
 
     def forward(self, q, k, start_pos=0):
-        """q,k: [B, S, H, D]
-        S 只是「这一步新算了几个 token」。增量解码（带 KV cache）时每步 S=1，
-        但位置必须从 start_pos（= 已缓存的长度）往后数 —— 写死 self.cos[:S]
-        会让每一步的新 token 都套上位置 0 的旋转角，和 cache 里按真实位置转过
-        的 K 对不上，注意力分数直接错掉。"""
+        """q,k: [B, S, H, D]"""
         S = q.size(1)
         cos = self.cos[start_pos:start_pos + S].view(1, S, 1, -1)
         sin = self.sin[start_pos:start_pos + S].view(1, S, 1, -1)
@@ -98,27 +93,22 @@ if __name__ == "__main__":
     rope = RotaryEmbedding(D)
     q_rot, k_rot = rope(q, k)
     
-    print(f"Input q shape: {q.shape}")     # [2, 10, 8, 64]
-    print(f"Output q shape: {q_rot.shape}") # [2, 10, 8, 64]
+    print(f"Input q shape: {q.shape}")
+    print(f"Output q shape: {q_rot.shape}")
     
-    # 增量解码要和一次性前向一致：单独算第 5 个位置，位置得从 start_pos=5 数起
     q5, k5 = rope(q[:, 5:6], k[:, 5:6], start_pos=5)
     print(f"增量解码位置对齐误差 (should be 0): {(q_rot[:, 5:6] - q5).abs().max().item():.6f}")
     
-    # 核心结论：q_m·k_n 只依赖 m-n。注意底下的 q、k 必须是同一对向量 ——
-    # 同一个 token 在不同位置上的表示本来就不同，这里验的是编码本身的平移不变性
-    base_q, base_k = q[0, 0], k[0, 0]                 # [H, D]
+    base_q, base_k = q[0, 0], k[0, 0]
     qs, ks = rope(base_q[None].expand(1, S, -1, -1),
-                  base_k[None].expand(1, S, -1, -1))  # qs[0, m] = R_m·q，ks[0, n] = R_n·k
-    norm = (base_q * base_k).sum().item()             # 未旋转时的点积，作为量级参照
+                  base_k[None].expand(1, S, -1, -1))
+    norm = (base_q * base_k).sum().item()
     print(f"未旋转的 q·k: {norm:.6f}")
     for diff in (0, 3, -2):
         dots = [float((qs[0, m] * ks[0, m + diff]).sum())
                 for m in range(S) if 0 <= m + diff < S]
         print(f"n-m={diff:+d}: {len(dots)} 组点积极差 {max(dots) - min(dots):.2e} "
               f"(值 {dots[0]:.6f})")
-    # n-m=0 那一行应当正好等于上面未旋转的 q·k（R_mᵀR_m = I）；其余各行只由 n-m 决定，
-    # 极差只来自浮点误差
 ```
 
 ## 🎯 面试要点

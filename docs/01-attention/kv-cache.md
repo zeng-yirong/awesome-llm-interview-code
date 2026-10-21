@@ -81,22 +81,17 @@ class KVCacheAttention(nn.Module):
         k = self.wk(x).view(B, S, self.h, self.dh).transpose(1, 2)
         v = self.wv(x).view(B, S, self.h, self.dh).transpose(1, 2)
 
-        # 核心：拼接历史 KV
         if kv_cache is not None:
             k = torch.cat([kv_cache[0], k], dim=2)
             v = torch.cat([kv_cache[1], v], dim=2)
         new_cache = (k, v)
 
-        # 注意力计算（Prefill 一次算多个位置，未来必须屏蔽；Decode 时 S=1，此时唯一
-        # 的 query 可以看全部历史，不屏蔽即正确）
         scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.dh)
         if S > 1:
-            # 掩码宽度必须等于完整的 key 长度，不能写 S×S：带缓存时 key 里有 past_len
-            # 个历史位置，S×S 的掩码对不上 [B, H, S, past_len+S] 的 scores，会直接报错
             past_len = k.size(2) - S
             causal = torch.tril(
                 torch.ones(S, k.size(2), dtype=torch.bool, device=x.device),
-                diagonal=past_len)      # 允许 j ≤ i + past_len：历史全可见，新 token 保持下三角
+                diagonal=past_len)
             scores = scores.masked_fill(~causal, float('-inf'))
         out = torch.matmul(F.softmax(scores, dim=-1), v)
         out = out.transpose(1, 2).contiguous().view(B, S, -1)
@@ -108,8 +103,8 @@ if __name__ == "__main__":
     torch.manual_seed(0)
     attn = KVCacheAttention(D, H)
     
-    tokens = torch.randn(B, 15, D)      # 一条 15 个 token 的序列
-    ref, _ = attn(tokens)               # 一次性前向：分步计算的参照
+    tokens = torch.randn(B, 15, D)
+    ref, _ = attn(tokens)
     
     def check(name, outs, start):
         """分步算出来的那几段，必须和一次性前向逐位对上"""
@@ -117,27 +112,22 @@ if __name__ == "__main__":
         err = (got - ref[:, start:start + got.size(1)]).abs().max().item()
         print(f"{name}: 与前向参照的最大误差 {err:.1e}")
     
-    # 1) Prefill: 一次处理整个 prompt（10 个 token）
     out, cache = attn(tokens[:, :10])
-    print(f"Prefill output: {out.shape}")     # [1, 10, 512]
-    print(f"Cache K shape: {cache[0].shape}") # [1, 8, 10, 64]
+    print(f"Prefill output: {out.shape}")
+    print(f"Cache K shape: {cache[0].shape}")
     check("Prefill", [out], 0)
     
-    # 2) Decode: 逐个生成 token，cache 每步 +1
     outs = []
     for t in range(10, 13):
         out, cache = attn(tokens[:, t:t+1], kv_cache=cache)
         outs.append(out)
-    print(f"Decode output: {outs[0].shape}")  # [1, 1, 512]
-    print(f"Cache K shape: {cache[0].shape}") # [1, 8, 13, 64]
+    print(f"Decode output: {outs[0].shape}")
+    print(f"Cache K shape: {cache[0].shape}")
     check("Decode", outs, 10)
     
-    # 3) Chunked prefill: 带缓存一次喂多个新 token（past_len=13, S=2）
-    #    S > 1 且有缓存，掩码必须覆盖 15 个 key —— 写成 S×S 会对不上 scores 的形状，
-    #    这里才是最容易被漏掉的分支
     out, cache = attn(tokens[:, 13:15], kv_cache=cache)
-    print(f"Chunked prefill output: {out.shape}")  # [1, 2, 512]
-    print(f"Cache K shape: {cache[0].shape}")      # [1, 8, 15, 64]
+    print(f"Chunked prefill output: {out.shape}")
+    print(f"Cache K shape: {cache[0].shape}")
     check("Chunked prefill", [out], 13)
 ```
 

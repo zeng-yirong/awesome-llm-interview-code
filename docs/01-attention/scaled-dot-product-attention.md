@@ -50,30 +50,16 @@ import torch.nn.functional as F
 import math
 
 def scaled_dot_product_attention(q, k, v, mask=None):
-    """
-    缩放点积注意力
-    
-    Args:
-        q, k, v: [batch, num_heads, seq_len, head_dim]
-        mask: [batch, 1, seq_len_q, seq_len_k] (0=屏蔽)
-    
-    Returns:
-        output: [batch, num_heads, seq_len_q, head_dim]
-        attn_weights: [batch, num_heads, seq_len_q, seq_len_k]
-    """
+    """缩放点积注意力；q, k, v: [batch, num_heads, seq_len, head_dim]；mask: [batch, 1, seq_len_q, seq_len_k] (0=屏蔽)"""
     d_k = q.size(-1)
     
-    # 步骤1: 计算注意力得分（缩放点积）
     scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(d_k)
     
-    # 步骤2: 应用注意力掩码
     if mask is not None:
         scores = scores.masked_fill(mask == 0, -1e9)
     
-    # 步骤3: Softmax 归一化
     attn_weights = F.softmax(scores, dim=-1)
     
-    # 步骤4: 加权求和
     output = torch.matmul(attn_weights, v)
     
     return output, attn_weights
@@ -85,12 +71,11 @@ if __name__ == "__main__":
     k = torch.randn(B, H, S, D)
     v = torch.randn(B, H, S, D)
     
-    # 因果掩码（下三角）
     causal_mask = torch.tril(torch.ones(S, S)).view(1, 1, S, S)
     
     output, weights = scaled_dot_product_attention(q, k, v, mask=causal_mask)
-    print(f"Output shape: {output.shape}")      # [2, 4, 8, 64]
-    print(f"Weights shape: {weights.shape}")    # [2, 4, 8, 8]
+    print(f"Output shape: {output.shape}")
+    print(f"Weights shape: {weights.shape}")
 ```
 
 ## 🎯 面试要点

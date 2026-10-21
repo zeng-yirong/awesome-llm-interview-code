@@ -61,17 +61,9 @@ import torch.nn.functional as F
 @torch.no_grad()
 def speculative_decode(draft_model, target_model, prompt_ids,
                        gamma=5, temperature=1.0, max_len=100):
-    """
-    投机解码
-    
-    draft_model: 小模型 (快速生成候选)
-    target_model: 大模型 (验证候选)
-    gamma: 每轮草稿长度
-    """
     generated = prompt_ids.tolist()
 
     while len(generated) < max_len:
-        # Step 1: Draft model 生成 γ 个候选
         draft_tokens = []
         draft_probs = []
         input_ids = torch.tensor([generated])
@@ -84,13 +76,11 @@ def speculative_decode(draft_model, target_model, prompt_ids,
             draft_probs.append(probs)
             input_ids = torch.cat([input_ids, next_token], dim=1)
 
-        # Step 2: Target model 并行验证所有候选
         full_ids = torch.tensor([generated + draft_tokens])
         target_logits = target_model(full_ids).logits
         target_probs = F.softmax(
             target_logits[0, len(generated)-1:-1] / temperature, dim=-1)
 
-        # Step 3: 逐 token 接受/拒绝
         accepted = 0
         for i, token in enumerate(draft_tokens):
             p_target = target_probs[i, token].item()
@@ -98,17 +88,14 @@ def speculative_decode(draft_model, target_model, prompt_ids,
             r = torch.rand(1).item()
             
             if r < p_target / p_draft:
-                # 接受
                 accepted += 1
                 generated.append(token)
             else:
-                # 拒绝: 从修正分布重新采样
                 corrected = torch.clamp(target_probs[i] - draft_probs[i][0], min=0)
                 corrected /= corrected.sum()
                 generated.append(torch.multinomial(corrected, 1).item())
                 break
         else:
-            # 全部接受: 再采样一个 bonus token
             bonus = torch.multinomial(target_probs[-1], 1).item()
             generated.append(bonus)
 
@@ -116,7 +103,6 @@ def speculative_decode(draft_model, target_model, prompt_ids,
 
 # 测试
 if __name__ == "__main__":
-    # 模拟 draft 和 target 模型
     class SimpleModel(torch.nn.Module):
         def __init__(self, vocab_size=1000, d_model=256):
             super().__init__()

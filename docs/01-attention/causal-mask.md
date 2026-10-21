@@ -43,11 +43,9 @@ flowchart LR
 import torch
 
 def create_causal_mask(seq_len, device='cpu'):
-    """创建因果掩码 (下三角)"""
     mask = torch.tril(torch.ones(seq_len, seq_len, device=device))
-    return mask.unsqueeze(0).unsqueeze(0)  # [1, 1, S, S]
+    return mask.unsqueeze(0).unsqueeze(0)
 
-# 在 attention 中使用
 def attention_with_causal_mask(q, k, v):
     B, H, S, D = q.shape
     mask = create_causal_mask(S, device=q.device)
@@ -61,13 +59,7 @@ def attention_with_causal_mask(q, k, v):
 if __name__ == "__main__":
     mask = create_causal_mask(4)
     print(mask)
-    # tensor([[[[1., 0., 0., 0.],
-    #          [1., 1., 0., 0.],
-    #          [1., 1., 1., 0.],
-    #          [1., 1., 1., 1.]]]])
 
-    # 打印掩码只是看形状；真正要验的是「因果」这条不变量：
-    # 改掉位置 t 之后的 token，位置 ≤ t 的输出必须一个字节都不变
     torch.manual_seed(0)
     B, H, S, D = 1, 2, 5, 8
     q = torch.randn(B, H, S, D)
@@ -76,12 +68,11 @@ if __name__ == "__main__":
 
     out = attention_with_causal_mask(q, k, v)
     v_future = v.clone()
-    v_future[:, :, 3:] += 100.0          # 只动位置 3 及之后的 V
+    v_future[:, :, 3:] += 100.0
     out_future = attention_with_causal_mask(q, k, v_future)
     print("改未来 V 后前 3 个位置的输出变化 (应为 0):",
           (out[:, :, :3] - out_future[:, :, :3]).abs().max().item())
 
-    # 对照: 不加掩码，未来的 V 会一路影响前面所有位置
     def attn_no_mask(q, k, v):
         scores = torch.matmul(q, k.transpose(-2, -1)) / (D ** 0.5)
         return torch.matmul(torch.softmax(scores, dim=-1), v)
@@ -89,7 +80,6 @@ if __name__ == "__main__":
     print("无掩码时同样的变化量 (非 0):",
           (attn_no_mask(q, k, v)[:, :, :3]
            - attn_no_mask(q, k, v_future)[:, :, :3]).abs().max().item())
-    # 之所以成立，是因为 A_ij 在 j > i 处置成了 0：第 0 行的注意力全给了第 0 个 token
 ```
 
 ## 🎯 面试要点

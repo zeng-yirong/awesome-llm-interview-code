@@ -54,15 +54,9 @@ import torch
 import torch.nn.functional as F
 
 def lm_loss(logits, labels, ignore_index=-100):
-    """
-    语言模型损失（下一个 token 预测）
-    
-    logits: [B, S, vocab_size]
-    labels: [B, S]
-    """
-    # Shift: 用前面的 token 预测下一个
-    shift_logits = logits[:, :-1, :].contiguous()   # [B, S-1, V]
-    shift_labels = labels[:, 1:].contiguous()        # [B, S-1]
+    """语言模型损失（下一个 token 预测）；logits: [B, S, vocab_size]，labels: [B, S]"""
+    shift_logits = logits[:, :-1, :].contiguous()
+    shift_labels = labels[:, 1:].contiguous()
     
     return F.cross_entropy(
         shift_logits.view(-1, shift_logits.size(-1)),
@@ -71,11 +65,7 @@ def lm_loss(logits, labels, ignore_index=-100):
     )
 
 def sft_loss(logits, labels, prompt_lengths):
-    """
-    SFT 损失：prompt 部分设为 -100
-
-    注意 -100 同时改了分子和分母：这些位置既不算 loss，也不算进均值。
-    """
+    """SFT 损失：prompt 部分设为 -100"""
     masked_labels = labels.clone()
     for i, plen in enumerate(prompt_lengths):
         masked_labels[i, :plen] = -100
@@ -93,33 +83,27 @@ if __name__ == "__main__":
     print(f"Loss: {loss.item():.4f}  (随机 logits 会略高于 ln(V) = {math.log(V):.2f}，"
           f"多出来的是 logits 偏离均匀的 KL)")
 
-    # 1) 对照手算：就是流程图最后一步 —— 取正确 token 的 logp，再对保留位置求均值
     logp = F.log_softmax(logits[:, :-1], dim=-1).reshape(-1, V)
     tgt = labels[:, 1:].reshape(-1)
     manual = -logp[torch.arange(tgt.numel()), tgt].mean()
     print(f"手算 {manual.item():.4f} / 误差 {(loss - manual).abs().item():.2e}")
 
-    # 2) shift 的方向：把每个位置的 logits 做成「只在 labels[t+1] 上有尖峰」。
-    #    对齐正确时 loss ≈ 0；若写成预测自己（labels[:, :-1]），尖峰不再指向目标，
-    #    loss 直接变成尖峰高度 50 —— 对齐写错既不报错也不 NaN，只会静默算成另一个数
-    peaked = F.one_hot(labels[:, 1:], V).float() * 50          # [B, S-1, V]
+    peaked = F.one_hot(labels[:, 1:], V).float() * 50
     aligned = lm_loss(torch.cat([peaked, peaked[:, -1:]], dim=1), labels)
     mis = F.cross_entropy(peaked.reshape(-1, V), labels[:, :-1].reshape(-1))
     print(f"对齐正确 {aligned.item():.4f} / 错位一格 {mis.item():.4f}")
 
-    # 3) 「去尾」：最后一个位置的 logits 根本不进 loss，改它不该有任何影响
     bumped = logits.clone()
     bumped[:, -1] += 100.0
     print(f"改最后一个位置后 loss 的变化 (should be 0): "
           f"{(lm_loss(bumped, labels) - loss).abs().item():.2e}")
 
-    # 4) SFT：prompt 置 -100 后，参与平均的位置少了，分母也跟着变小
     prompt_lengths = [2, 5]
     sft = sft_loss(logits, labels, prompt_lengths)
     masked = labels.clone()
     for i, plen in enumerate(prompt_lengths):
         masked[i, :plen] = -100
-    tgt_sft = masked[:, 1:].reshape(-1)      # shift 之后，每行 prompt 还少掉第一个位置
+    tgt_sft = masked[:, 1:].reshape(-1)
     picked = -logp[torch.arange(tgt_sft.numel()), tgt_sft.clamp_min(0)]
     keep = tgt_sft != -100
     print(f"SFT loss {sft.item():.4f} / 只对保留的 {int(keep.sum())}/{tgt_sft.numel()} 个位置"

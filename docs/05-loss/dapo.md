@@ -68,11 +68,7 @@ def overlong_reward_shaping(rewards, lengths, max_len, alpha=1.0):
 
 
 def dynamic_sampling_filter(rewards, group_size=8):
-    """
-    动态采样: 丢掉组内奖励全相同的组（Â ≡ 0，没有梯度信号）
-    rewards: [num_groups * group_size]  扁平化的组内奖励
-    返回: 保留下来的组的索引
-    """
+    """动态采样: 丢掉组内奖励全相同的组；rewards: [num_groups * group_size]，返回保留下来的组的索引"""
     groups = rewards.view(-1, group_size)
     keep = groups.max(dim=-1).values != groups.min(dim=-1).values
     return keep.nonzero(as_tuple=True)[0]
@@ -80,34 +76,25 @@ def dynamic_sampling_filter(rewards, group_size=8):
 
 def dapo_loss(per_token_logp_new, per_token_logp_old, completion_mask,
               advantages, eps_low=0.2, eps_high=0.28):
-    """
-    DAPO 损失: clip-higher + token 级归一化
-    per_token_logp_*: [B, G, T]    advantages: [B, G]
-    """
-    # 1. token 级重要性比率
-    ratio = (per_token_logp_new - per_token_logp_old).exp()      # [B, G, T]
-    adv = advantages.unsqueeze(-1)                               # [B, G, 1]
+    """DAPO 损失: clip-higher + token 级归一化；per_token_logp_*: [B, G, T]，advantages: [B, G]"""
+    ratio = (per_token_logp_new - per_token_logp_old).exp()
+    adv = advantages.unsqueeze(-1)
 
-    # 2. 解耦的上下界: 上界放松 → 低概率 token 有更大的上升空间
     clipped = torch.clamp(ratio, 1 - eps_low, 1 + eps_high)
-    per_token = torch.min(ratio * adv, clipped * adv)            # [B, G, T]
+    per_token = torch.min(ratio * adv, clipped * adv)
 
-    # 3. token 级归一化: 除以整个 batch 的总 token 数
     mask = completion_mask.float()
     return -(per_token * mask).sum() / mask.sum().clamp_min(1.0)
 
 
 if __name__ == "__main__":
-    # 动态采样: 前两组奖励全相同 → 丢弃
     rewards = torch.tensor([1., 1., 1., 1.,   0., 0., 0., 0.,   1., 0., 1., 0.,   1., 0., 0., 1.])
     print("保留的组:", dynamic_sampling_filter(rewards, group_size=4).tolist())
 
-    # 超长塑形
     shaped = overlong_reward_shaping(
         torch.tensor([1.0, 1.0]), torch.tensor([100., 600.]), max_len=512, alpha=0.5)
     print("超长塑形后奖励:", shaped.tolist())
 
-    # 主损失
     torch.manual_seed(0)
     B, G, T = 2, 4, 5
     old_logp = torch.randn(B, G, T) - 2.0

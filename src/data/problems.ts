@@ -104,11 +104,11 @@ def scaled_dot_product_attention(q, k, v, mask=None):
     mask:    [batch, 1, seq_len_q, seq_len_k]  (0=屏蔽)
     """
     d_k = q.size(-1)
-    scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(d_k)   # [B,H,Sq,Sk]
+    scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(d_k)
     if mask is not None:
         scores = scores.masked_fill(mask == 0, -1e9)
     attn = F.softmax(scores, dim=-1)
-    return torch.matmul(attn, v), attn   # output: [B,H,Sq,D]`,
+    return torch.matmul(attn, v), attn`,
     keyPoints: [
       '缩放 1/√d_k: 当 d_k 大时点积方差大，softmax 进入饱和区梯度消失',
       'mask=0 位置填 -1e9 → softmax 后≈0，实现因果/填充屏蔽',
@@ -176,7 +176,7 @@ class MultiHeadAttention(nn.Module):
 
     def forward(self, xq, xk=None, mask=None):
         B = xq.size(0)
-        xk = xk if xk is not None else xq          # self-attention
+        xk = xk if xk is not None else xq
         q = self.wq(xq).view(B, -1, self.h, self.dh).transpose(1, 2)
         k = self.wk(xk).view(B, -1, self.h, self.dh).transpose(1, 2)
         v = self.wv(xk).view(B, -1, self.h, self.dh).transpose(1, 2)
@@ -184,7 +184,7 @@ class MultiHeadAttention(nn.Module):
         if mask is not None:
             scores = scores.masked_fill(mask == 0, -1e9)
         attn = F.softmax(scores, dim=-1)
-        out = torch.matmul(attn, v)                              # [B,H,S,Dh]
+        out = torch.matmul(attn, v)
         out = out.transpose(1, 2).contiguous().view(B, -1, self.h * self.dh)
         return self.wo(out)`,
     keyPoints: [
@@ -238,13 +238,9 @@ $$`,
     code: `import torch
 
 def create_causal_mask(seq_len, device='cpu'):
-    """创建因果掩码 (下三角)"""
     mask = torch.tril(torch.ones(seq_len, seq_len, device=device))
-    return mask.unsqueeze(0).unsqueeze(0)   # [1, 1, S, S]
-
-# 在 attention 中使用
-# scores = scores.masked_fill(mask == 0, float('-inf'))
-# attn = softmax(scores, dim=-1)`,
+    return mask.unsqueeze(0).unsqueeze(0)
+`,
     keyPoints: [
       'torch.tril 生成下三角矩阵',
       '被屏蔽位置填 -inf → softmax 后为 0',
@@ -329,7 +325,7 @@ class GQA(nn.Module):
         q = self.wq(x).view(B, S, self.h, self.dh).transpose(1, 2)
         k = self.wk(x).view(B, S, self.g, self.dh).transpose(1, 2)
         v = self.wv(x).view(B, S, self.g, self.dh).transpose(1, 2)
-        k = self.repeat_kv(k, self.n_rep)   # 核心！
+        k = self.repeat_kv(k, self.n_rep)
         v = self.repeat_kv(v, self.n_rep)
         scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.dh)
         if mask is not None:
@@ -405,7 +401,6 @@ $$`,
     code: `import torch, math
 
 def flash_attention(Q, K, V, block_size=64):
-    """Flash Attention 简化实现 (核心思想)"""
     B, H, N, D = Q.shape
     O = torch.zeros_like(Q)
 
@@ -420,7 +415,6 @@ def flash_attention(Q, K, V, block_size=64):
             Vj = V[:, :, j:j+block_size]
             Sij = torch.matmul(Qi, Kj.transpose(-2, -1)) / math.sqrt(D)
 
-            # Online Softmax 更新
             m_new = torch.maximum(mi, Sij.max(dim=-1, keepdim=True).values)
             exp_corr = torch.exp(mi - m_new)
             oi = oi * exp_corr
@@ -515,16 +509,16 @@ class KVCacheAttention(nn.Module):
         v = self.wv(x).view(B, S, self.h, self.dh).transpose(1, 2)
 
         if kv_cache is not None:
-            k = torch.cat([kv_cache[0], k], dim=2)   # 拼接历史 K
-            v = torch.cat([kv_cache[1], v], dim=2)   # 拼接历史 V
+            k = torch.cat([kv_cache[0], k], dim=2)
+            v = torch.cat([kv_cache[1], v], dim=2)
         new_cache = (k, v)
 
         scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.dh)
-        if S > 1:     # Prefill：一次算多个位置，未来必须屏蔽；Decode 时 S=1，唯一的 query 看全部历史即是正确的
-            past_len = k.size(2) - S             # 掩码宽度必须等于完整 key 长度，不能写 S×S
+        if S > 1:
+            past_len = k.size(2) - S
             causal = torch.tril(
                 torch.ones(S, k.size(2), dtype=torch.bool, device=x.device),
-                diagonal=past_len)               # 允许 j ≤ i + past_len
+                diagonal=past_len)
             scores = scores.masked_fill(~causal, float('-inf'))
         out = torch.matmul(F.softmax(scores, dim=-1), v)
         out = out.transpose(1, 2).contiguous().view(B, S, -1)
@@ -612,13 +606,9 @@ class MLA(nn.Module):
     def __init__(self, d_model, n_heads, dh, latent_dim, rope_dim, max_len=2048):
         super().__init__()
         self.h, self.dh, self.dr = n_heads, dh, rope_dim
-        # KV 压缩投影：低秩这条只恢复内容部分和 V
         self.kv_down = nn.Linear(d_model, latent_dim, bias=False)
         self.kv_up = nn.Linear(latent_dim, n_heads*2*dh, bias=False)
-        # 位置分量直接投自 x，不走低秩（挤进低秩空间会被压坏），而且所有头共用
-        # 一份 —— 宽度是 rope_dim 而不是 n_heads*rope_dim，cache 里也只占 Dr
         self.k_rope_proj = nn.Linear(d_model, rope_dim, bias=False)
-        # Q 压缩投影
         self.q_down = nn.Linear(d_model, latent_dim, bias=False)
         self.q_up = nn.Linear(latent_dim, n_heads*(dh+rope_dim), bias=False)
         self.wo = nn.Linear(n_heads*dh, d_model, bias=False)
@@ -626,19 +616,13 @@ class MLA(nn.Module):
 
     def forward(self, x, mask=None):
         B, S, _ = x.shape
-        # 进 cache 的只有这两项：c_kv（C 维）+ k_rope（Dr 维），每 token 共 C+Dr
-        c_kv = self.kv_down(x)                                  # [B, S, C]
-        k_r = self.k_rope_proj(x).view(B, S, 1, self.dr)        # [B, S, 1, Dr]
-        # KV 内容路径：从 c_kv 上投影恢复 k_content 与 v
+        c_kv = self.kv_down(x)
+        k_r = self.k_rope_proj(x).view(B, S, 1, self.dr)
         k_c, v = self.kv_up(c_kv).view(B, S, self.h, -1).split([self.dh, self.dh], dim=-1)
-        # Q 路径：内容与位置分量都来自同一个低秩潜变量（不缓存）
         q = self.q_up(self.q_down(x)).view(B, S, self.h, -1)
         q_c, q_r = q.split([self.dh, self.dr], dim=-1)
-        # RoPE 只作用在 rope 分量上，content 分量不旋 —— 否则上投影就无法吸收进 Q 侧。
-        # k_r 是 [B, S, 1, Dr]（所有头共用一份），RoPE 逐位置施加、每个头角度相同，
-        # 所以先旋再广播到 H 个头，与逐头旋等价
         q_r, k_r = self.rope(q_r, k_r)
-        k_r = k_r.expand(B, S, self.h, self.dr)     # 独享一份 → 广播到 H 个头
+        k_r = k_r.expand(B, S, self.h, self.dr)
         q = torch.cat([q_c, q_r], dim=-1).transpose(1, 2)
         k = torch.cat([k_c, k_r], dim=-1).transpose(1, 2)
         v = v.transpose(1, 2)
@@ -730,74 +714,66 @@ def compress_blocks(x, block_size):
     return x.mean(dim=3)
 
 def sdpa(q, k, v, scale):
-    """标准缩放点积注意力（q 可多一个 query 维度）"""
     return F.softmax(q @ k.transpose(-1, -2) * scale, dim=-1) @ v
 
 def causal_window_index(seq_len, window, device='cpu'):
     """滑窗的 key 下标: query t 对应 k[t-w+1 … t]，返回 (下标 [S,w], 有效位 [S,w])"""
-    offset = torch.arange(window, device=device) - (window - 1)     # [-(w-1), …, 0]
+    offset = torch.arange(window, device=device) - (window - 1)
     key_idx = torch.arange(seq_len, device=device)[:, None] + offset[None, :]
-    return key_idx.clamp_min(0), key_idx >= 0                       # 越界补 0 再掩掉
+    return key_idx.clamp_min(0), key_idx >= 0
 
 def nsa_attention(q, k, v, gate_w, block_size=8, top_n=2, window=16):
     """NSA 三分支稀疏注意力; q,k,v: [B,H,S,D]
-    gate_w: [H,D,3] 可学习的门控向量（每个头、每条分支一个），模型里是 nn.Parameter
-    只补齐了窗口支的因果性；压缩、选择两支仍省略块级因果掩码"""
+        gate_w: [H,D,3] 可学习的门控向量（每个头、每条分支一个）"""
     B, H, S, D = q.shape
     scale = 1.0 / math.sqrt(D)
     n_blocks = S // block_size
 
-    # 分支 1: 压缩块注意力（粗粒度全局）
     o_cmp = sdpa(q, compress_blocks(k, block_size), compress_blocks(v, block_size), scale)
 
-    # 分支 2: top-n 块选择（中粒度重要区域）
     k_cmp = compress_blocks(k, block_size)
-    scores = q @ k_cmp.transpose(-1, -2) * scale                                  # [B,H,S,n_blocks]
-    top_idx = scores.topk(min(top_n, n_blocks), dim=-1).indices                   # [B,H,S,top_n]
+    scores = q @ k_cmp.transpose(-1, -2) * scale
+    top_idx = scores.topk(min(top_n, n_blocks), dim=-1).indices
     k_blk = k[:, :, :n_blocks * block_size].reshape(B, H, n_blocks, block_size, D)
     v_blk = v[:, :, :n_blocks * block_size].reshape(B, H, n_blocks, block_size, D)
     bidx = torch.arange(B, device=q.device).view(B, 1, 1, 1)
     hidx = torch.arange(H, device=q.device).view(1, H, 1, 1)
-    k_sel = k_blk[bidx, hidx, top_idx].reshape(B, H, S, -1, D)     # [B,H,S,top_n*l,D]
+    k_sel = k_blk[bidx, hidx, top_idx].reshape(B, H, S, -1, D)
     v_sel = v_blk[bidx, hidx, top_idx].reshape(B, H, S, -1, D)
     o_slc = sdpa(q.unsqueeze(3), k_sel, v_sel, scale).squeeze(3)
 
-    # 分支 3: 滑动窗口（局部精确）—— 每个 query 自己往前 w 个，不是全局最后 w 个
     win = min(window, S)
     key_idx, win_valid = causal_window_index(S, win, q.device)
-    k_win, v_win = k[:, :, key_idx], v[:, :, key_idx]              # [B,H,S,win,D]
-    win_scores = (q.unsqueeze(3) @ k_win.transpose(-1, -2)) * scale    # [B,H,S,1,win]
+    k_win, v_win = k[:, :, key_idx], v[:, :, key_idx]
+    win_scores = (q.unsqueeze(3) @ k_win.transpose(-1, -2)) * scale
     win_scores = win_scores.masked_fill(~win_valid.view(1, 1, S, 1, win), float('-inf'))
     o_win = (F.softmax(win_scores, dim=-1) @ v_win.unsqueeze(3)).squeeze(3)
 
-    # 门控加权求和: g = σ(qᵀw_c)，每头每条分支各一个可学的 w_c
-    # 三个系数必须互相独立，否则「加权」退化成对所有分支乘同一个数
-    g = torch.sigmoid(torch.einsum("bhsd,hdc->bhsc", q, gate_w))            # [B,H,S,3]
+    g = torch.sigmoid(torch.einsum("bhsd,hdc->bhsc", q, gate_w))
     return (g[..., 0].unsqueeze(-1) * o_cmp
             + g[..., 1].unsqueeze(-1) * o_slc
             + g[..., 2].unsqueeze(-1) * o_win)
 
 class LightningIndexer(nn.Module):
-    """DSA 的 lightning indexer: 轻量投影 + ReLU 打分 + top-k"""
 
     def __init__(self, n_heads, d_model, d_index=16):
         super().__init__()
         self.wq = nn.Linear(d_model, n_heads * d_index, bias=False)
         self.wk = nn.Linear(d_model, d_index, bias=False)
-        self.w_scale = nn.Linear(d_model, n_heads, bias=False)     # 每个 head 的标量权重
+        self.w_scale = nn.Linear(d_model, n_heads, bias=False)
         self.n_heads, self.d_index = n_heads, d_index
 
     def forward(self, h, top_k=8):
         """h: [B,S,D] → 每个 query 选中的 token 索引 [B,S,top_k]"""
         B, S, _ = h.shape
-        q = self.wq(h).view(B, S, self.n_heads, self.d_index).transpose(1, 2)   # [B,H,S,d]
-        k = self.wk(h)                                                          # [B,S,d]
-        w = self.w_scale(h).transpose(1, 2)                                     # [B,H,S]
-        dot = q @ k.transpose(-1, -2)                                           # [B,H,S,S]
-        score = (w.unsqueeze(-1) * torch.relu(dot)).sum(dim=1)                                # [B,S,S]
+        q = self.wq(h).view(B, S, self.n_heads, self.d_index).transpose(1, 2)
+        k = self.wk(h)
+        w = self.w_scale(h).transpose(1, 2)
+        dot = q @ k.transpose(-1, -2)
+        score = (w.unsqueeze(-1) * torch.relu(dot)).sum(dim=1)
         causal = torch.tril(torch.ones(S, S, dtype=torch.bool, device=h.device))
-        score = score.masked_fill(~causal, -1e9)                                # 只看过去
-        return score.topk(min(top_k, S), dim=-1).indices                        # [B,S,top_k]`,
+        score = score.masked_fill(~causal, -1e9)
+        return score.topk(min(top_k, S), dim=-1).indices`,
     keyPoints: [
       '一句话: 长上下文的注意力必须稀疏 —— NSA 靠三分支 + 门控，DSA 靠极轻的 indexer 选 top-k',
       '三分支各解决什么: 压缩块给粗粒度全局视野，top-n 选择聚焦重要中程区域，滑窗保证局部精确 —— 缺一个就有明显退化',
@@ -861,13 +837,12 @@ class LayerNorm(nn.Module):
     def __init__(self, d_model, eps=1e-5):
         super().__init__()
         self.eps = eps
-        self.gamma = nn.Parameter(torch.ones(d_model))    # 缩放
-        self.beta = nn.Parameter(torch.zeros(d_model))    # 偏移
+        self.gamma = nn.Parameter(torch.ones(d_model))
+        self.beta = nn.Parameter(torch.zeros(d_model))
 
     def forward(self, x):
         """x: [B, S, D]"""
         mean = x.mean(-1, keepdim=True)
-        # 面试陷阱: unbiased=False (除以 N, 不是 N-1)
         var = x.var(-1, keepdim=True, unbiased=False)
         x_norm = (x - mean) / torch.sqrt(var + self.eps)
         return x_norm * self.gamma + self.beta`,
@@ -931,10 +906,9 @@ class RMSNorm(nn.Module):
     def __init__(self, d_model, eps=1e-5):
         super().__init__()
         self.eps = eps
-        self.gamma = nn.Parameter(torch.ones(d_model))  # 只有缩放
+        self.gamma = nn.Parameter(torch.ones(d_model))
 
     def _norm(self, x):
-        # 计算均方根倒数 (rsqrt 比 1/sqrt 快)
         ms = x.float().pow(2).mean(-1, keepdim=True)
         return x.float() * torch.rsqrt(ms + self.eps)
 
@@ -1011,20 +985,15 @@ $$`,
 class RotaryEmbedding(nn.Module):
     def __init__(self, head_dim, max_seq_len=2048, theta=10000.0):
         super().__init__()
-        # 预计算 cos/sin
         inv_freq = 1.0 / (theta ** (torch.arange(0, head_dim, 2).float() / head_dim))
         t = torch.arange(max_seq_len).float()
-        angles = torch.outer(t, inv_freq)           # [S, D/2]
-        angles = torch.cat([angles, angles], dim=-1) # [S, D]
+        angles = torch.outer(t, inv_freq)
+        angles = torch.cat([angles, angles], dim=-1)
         self.register_buffer('cos', angles.cos())
         self.register_buffer('sin', angles.sin())
 
     def forward(self, q, k, start_pos=0):
-        """q,k: [B, S, H, D]
-        S 只是「这一步新算了几个 token」。增量解码（带 KV cache）时每步 S=1，
-        但位置必须从 start_pos（= 已缓存的长度）往后数 —— 写死 self.cos[:S]
-        会让每一步的新 token 都套上位置 0 的旋转角，和 cache 里按真实位置转过
-        的 K 对不上，注意力分数直接错掉。"""
+        """q,k: [B, S, H, D]"""
         S = q.size(1)
         cos = self.cos[start_pos:start_pos + S].view(1, S, 1, -1)
         sin = self.sin[start_pos:start_pos + S].view(1, S, 1, -1)
@@ -1160,16 +1129,16 @@ $$`,
 class SwiGLU(nn.Module):
     def __init__(self, d_model, d_ff=None):
         super().__init__()
-        d_ff = d_ff or int(8/3 * d_model)  # 保持参数量与标准FFN相当
+        d_ff = d_ff or int(8/3 * d_model)
         self.w_gate = nn.Linear(d_model, d_ff, bias=False)
         self.w_up = nn.Linear(d_model, d_ff, bias=False)
         self.w_down = nn.Linear(d_ff, d_model, bias=False)
 
     def forward(self, x):
         """x: [B, S, D]"""
-        gate = F.silu(self.w_gate(x))   # 门控分支
-        up = self.w_up(x)               # 值分支
-        return self.w_down(gate * up)    # 门控相乘 → 下投影`,
+        gate = F.silu(self.w_gate(x))
+        up = self.w_up(x)
+        return self.w_down(gate * up)`,
     keyPoints: [
       '三个权重矩阵 (Gate/Up/Down)，标准 FFN 只有两个',
       'SiLU(x) = x × sigmoid(x)，也称 Swish',
@@ -1249,14 +1218,14 @@ class MoE(nn.Module):
 
     def forward(self, x):
         B, S, D = x.shape
-        x_flat = x.view(-1, D)                        # [B*S, D]
-        logits = self.router(x_flat)                   # [B*S, N]
+        x_flat = x.view(-1, D)
+        logits = self.router(x_flat)
         weights, indices = torch.topk(logits, self.top_k, dim=-1)
-        weights = F.softmax(weights, dim=-1)           # 归一化
+        weights = F.softmax(weights, dim=-1)
 
         output = torch.zeros_like(x_flat)
         for i, expert in enumerate(self.experts):
-            mask = (indices == i)                       # 哪些 token 选了 expert i
+            mask = (indices == i)
             token_idx, topk_pos = torch.where(mask)
             if token_idx.numel() > 0:
                 out = expert(x_flat[token_idx])
@@ -1264,13 +1233,13 @@ class MoE(nn.Module):
         return output.view(B, S, D)
 
     def aux_loss(self, x, coeff=0.01):
-        """负载均衡辅助损失 N·Σ f_i·P_i（Switch Transformer），训练时加到总损失里"""
+        """负载均衡辅助损失 N·Σ f_i·P_i（Switch Transformer）"""
         B, S, D = x.shape
-        probs = F.softmax(self.router(x.view(-1, D)), dim=-1)          # [B*S, N]
+        probs = F.softmax(self.router(x.view(-1, D)), dim=-1)
         indices = torch.topk(probs, self.top_k, dim=-1).indices
-        one_hot = F.one_hot(indices, self.n_experts).sum(dim=1).float()  # [B*S, N]
-        f = one_hot.mean(dim=0) / self.top_k                           # [N]
-        p = probs.mean(dim=0)                                          # [N]
+        one_hot = F.one_hot(indices, self.n_experts).sum(dim=1).float()
+        f = one_hot.mean(dim=0) / self.top_k
+        p = probs.mean(dim=0)
         return coeff * self.n_experts * torch.sum(f * p)`,
     keyPoints: [
       'Router 决定每个 token 由哪些专家处理',
@@ -1334,26 +1303,18 @@ $$`,
     code: `import torch, torch.nn.functional as F
 
 def lm_loss(logits, labels, ignore_index=-100):
-    """
-    语言模型损失（下一个 token 预测）
-
-    logits: [B, S, vocab_size]
-    labels: [B, S]
-    """
-    # Shift: 用前面的 token 预测下一个
-    shift_logits = logits[:, :-1, :].contiguous()   # [B, S-1, V]
-    shift_labels = labels[:, 1:].contiguous()        # [B, S-1]
+    """logits: [B, S, vocab_size]
+        labels: [B, S]"""
+    shift_logits = logits[:, :-1, :].contiguous()
+    shift_labels = labels[:, 1:].contiguous()
     return F.cross_entropy(
         shift_logits.view(-1, shift_logits.size(-1)),
         shift_labels.view(-1),
         ignore_index=ignore_index
     )
 
-
 def sft_loss(logits, labels, prompt_lengths):
-    """
-    SFT 损失：prompt 部分设为 -100（既不算 loss，也不算进均值）
-    """
+    """SFT 损失：prompt 部分设为 -100（既不算 loss，也不算进均值）"""
     masked_labels = labels.clone()
     for i, plen in enumerate(prompt_lengths):
         masked_labels[i, :plen] = -100
@@ -1421,14 +1382,11 @@ def dpo_loss(policy_chosen_logps, policy_rejected_logps,
     """
     *_logps: [batch_size] 每个样本的对数概率之和
     """
-    # 隐式奖励 = log(π_θ / π_ref)
     chosen_ratio = policy_chosen_logps - ref_chosen_logps
     rejected_ratio = policy_rejected_logps - ref_rejected_logps
 
-    # 奖励差
     logits = chosen_ratio - rejected_ratio
 
-    # DPO 损失
     return -F.logsigmoid(beta * logits).mean()`,
     keyPoints: [
       '核心: 奖励 = log(π_θ / π_ref)，无需显式奖励模型',
@@ -1499,13 +1457,13 @@ def ppo_loss(old_logp, new_logp, advantages, eps=0.2):
     old_logp, new_logp: [B]  对数概率
     advantages: [B]  优势估计 (GAE)
     """
-    ratio = torch.exp(new_logp - old_logp)           # r_t
-    clipped = torch.clamp(ratio, 1-eps, 1+eps)       # clip(r_t)
+    ratio = torch.exp(new_logp - old_logp)
+    clipped = torch.clamp(ratio, 1-eps, 1+eps)
 
-    surr1 = ratio * advantages                        # 未截断
-    surr2 = clipped * advantages                      # 截断
+    surr1 = ratio * advantages
+    surr2 = clipped * advantages
 
-    return -torch.min(surr1, surr2).mean()            # 保守更新`,
+    return -torch.min(surr1, surr2).mean()`,
     keyPoints: [
       'ratio = exp(new_logp - old_logp) 重要性采样比率',
       'clip 到 [1-ε, 1+ε] 限制更新幅度',
@@ -1581,8 +1539,6 @@ $$`,
     code: `import torch
 
 def grpo_advantages(rewards):
-    """组内归一化优势 (不需要 Critic)"""
-    # rewards: [batch, group_size]
     mean = rewards.mean(dim=-1, keepdim=True)
     std = rewards.std(dim=-1, keepdim=True)
     return (rewards - mean) / (std + 1e-8)
@@ -1592,11 +1548,11 @@ def grpo_loss(old_logp, new_logp, advantages, eps=0.2, beta=0.01, ref_kl=None):
     clipped = torch.clamp(ratio, 1-eps, 1+eps)
     loss = -torch.min(ratio * advantages, clipped * advantages)
     if ref_kl is not None:
-        loss = loss + beta * ref_kl       # 显式 KL 惩罚
+        loss = loss + beta * ref_kl
     return loss.mean()
 
 def kl_penalty(logp, ref_logp):
-    """Schulman KL 估计器 (低方差)"""
+    """Schulman KL 估计器"""
     ratio = torch.exp(ref_logp - logp)
     return (ratio - (ref_logp - logp) - 1).mean()`,
     keyPoints: [
@@ -1653,16 +1609,16 @@ $$`,
     code: `import torch
 
 def sequence_ratio(per_token_logp_new, per_token_logp_old, completion_mask):
-    """序列级重要性比率（长度归一化）; 输入 [B, G, T] → 返回 [B, G]"""
-    log_ratio = per_token_logp_new - per_token_logp_old        # [B, G, T]
+    """输入 [B, G, T] → 返回 [B, G]"""
+    log_ratio = per_token_logp_new - per_token_logp_old
     mask = completion_mask.float()
-    length = mask.sum(dim=-1).clamp_min(1.0)                   # [B, G]
-    avg_log_ratio = (log_ratio * mask).sum(dim=-1) / length    # [B, G]
-    return avg_log_ratio.exp()                                 # 整条序列共享一个标量
+    length = mask.sum(dim=-1).clamp_min(1.0)
+    avg_log_ratio = (log_ratio * mask).sum(dim=-1) / length
+    return avg_log_ratio.exp()
 
 def gspo_loss(per_token_logp_new, per_token_logp_old, completion_mask,
               advantages, eps=3e-4):
-    """GSPO: 整条序列只 clip 一次; advantages: [B, G] 组内归一化优势"""
+    """advantages: [B, G] 组内归一化优势"""
     s = sequence_ratio(per_token_logp_new, per_token_logp_old, completion_mask)
     clipped = torch.clamp(s, 1 - eps, 1 + eps)
     obj = torch.min(s * advantages, clipped * advantages)
@@ -1737,28 +1693,24 @@ $$`,
     code: `import torch
 
 def overlong_reward_shaping(rewards, lengths, max_len, alpha=1.0):
-    """超长奖励塑形: 超出 max_len 的部分线性扣分"""
     over = (lengths - max_len).clamp_min(0).float()
     return rewards - alpha * over
 
 def dynamic_sampling_filter(rewards, group_size=8):
-    """动态采样: 丢掉组内奖励全相同的组（Â ≡ 0，没有梯度信号）
-    rewards: [num_groups * group_size] 扁平化的组内奖励 → 返回保留的组索引"""
+    """rewards: [num_groups * group_size] 扁平化的组内奖励 → 返回保留的组索引"""
     groups = rewards.view(-1, group_size)
     keep = groups.max(dim=-1).values != groups.min(dim=-1).values
     return keep.nonzero(as_tuple=True)[0]
 
 def dapo_loss(per_token_logp_new, per_token_logp_old, completion_mask,
               advantages, eps_low=0.2, eps_high=0.28):
-    """DAPO 损失: clip-higher + token 级归一化; [B, G, T] 与 [B, G]"""
-    ratio = (per_token_logp_new - per_token_logp_old).exp()      # [B, G, T]
-    adv = advantages.unsqueeze(-1)                               # [B, G, 1]
+    """[B, G, T] 与 [B, G]"""
+    ratio = (per_token_logp_new - per_token_logp_old).exp()
+    adv = advantages.unsqueeze(-1)
 
-    # 解耦的上下界: 上界放松 → 低概率 token 有更大的上升空间
     clipped = torch.clamp(ratio, 1 - eps_low, 1 + eps_high)
-    per_token = torch.min(ratio * adv, clipped * adv)            # [B, G, T]
+    per_token = torch.min(ratio * adv, clipped * adv)
 
-    # token 级归一化: 除以整个 batch 的总 token 数（不是每条序列各自的长度）
     mask = completion_mask.float()
     return -(per_token * mask).sum() / mask.sum().clamp_min(1.0)`,
     keyPoints: [
@@ -1834,22 +1786,19 @@ def generalized_jsd(student_logits, teacher_logits, beta=1.0, temperature=1.0):
     t_logp = F.log_softmax(teacher_logits / temperature, dim=-1)
     s_p, t_p = s_logp.exp(), t_logp.exp()
 
-    # 混合分布 M = beta * p_T + (1 - beta) * p_S（clamp_min 只防 log(0)）
     m_logp = (beta * t_p + (1 - beta) * s_p).clamp_min(1e-8).log()
 
-    kl_t = (t_p * (t_logp - m_logp)).sum(dim=-1)     # KL(p_T ‖ M)  [B, T]
-    kl_s = (s_p * (s_logp - m_logp)).sum(dim=-1)     # KL(p_S ‖ M)  [B, T]
+    kl_t = (t_p * (t_logp - m_logp)).sum(dim=-1)
+    kl_s = (s_p * (s_logp - m_logp)).sum(dim=-1)
     return (1 - beta) * kl_t + beta * kl_s
 
 def opd_loss(student_logits, teacher_logits, loss_mask=None,
              beta=1.0, temperature=1.0, top_k=0):
     """在线策略蒸馏损失; loss_mask: [B, T] 1 = 学生在该位置真实采样出的 token
-    top_k > 0 时只保留教师概率最高的 k 个 token（黑盒教师只吐 top-k logits 时用）"""
-    # 教师永远不参与反传，否则「固定靶」会被同一步更新带跑
+        top_k > 0 时只保留教师概率最高的 k 个 token"""
     teacher_logits = teacher_logits.detach()
 
     if top_k > 0:
-        # 用 -1e9 而不是 -inf，避免 0 * inf 产生 nan
         kth = teacher_logits.topk(top_k, dim=-1).values[..., -1:]
         teacher_logits = teacher_logits.masked_fill(teacher_logits < kth, -1e9)
 
@@ -1930,34 +1879,23 @@ $$`,
 
 @torch.no_grad()
 def teacher_forward(model, input_ids, privileged_ids):
-    """教师 = 同一模型 + 特权上下文，只做一次前向，不需要梯度
-    特权上下文拼在最前面：因果 LM 只能看前面的内容，要让 c 影响答案 token 的预测
-    就只能排在答案之前（代价是教师侧答案 token 的绝对位置比学生侧多 P 个）"""
     full = torch.cat([privileged_ids, input_ids], dim=1)
     logits = model(full).logits
-    # 只取答案段（去掉特权上下文那一段）
     return logits[:, privileged_ids.size(1):]
 
 def self_opd_loss(model, input_ids, privileged_ids, answer_mask):
-    """在线自蒸馏损失
-    input_ids:      [B, T] 学生看到的 prompt + 学生自己采样的回答
-    privileged_ids: [B, P] 特权上下文（如参考答案），只拼给教师
-    answer_mask:    [B, T] 1 = 学生在该位置真实生成的 token"""
-    # 1. 学生前向（需要梯度）—— 与 rollout 时是同一批 token
-    student_logits = model(input_ids).logits                      # [B, T, V]
+    """input_ids:      [B, T] 学生看到的 prompt + 学生自己采样的回答
+        privileged_ids: [B, P] 特权上下文（如参考答案），只拼给教师
+        answer_mask:    [B, T] 1 = 学生在该位置真实生成的 token"""
+    student_logits = model(input_ids).logits
 
-    # 2. 教师前向：同一权重 + 特权上下文，no_grad
-    t_logits = teacher_forward(model, input_ids, privileged_ids)   # [B, T, V]
+    t_logits = teacher_forward(model, input_ids, privileged_ids)
 
-    # 3. 逐 token 反向 KL: KL(p_S ‖ p_T)
-    #    对齐：因果 LM 里 logits[t] 预测的是 t+1 的 token，mask 标的是学生生成的
-    #    token 位置，所以要评 y_t 就得取 logits[t-1]：logits 切最后一列、mask 切第一列
-    s_logp = F.log_softmax(student_logits[:, :-1], dim=-1)         # [B, T-1, V]
+    s_logp = F.log_softmax(student_logits[:, :-1], dim=-1)
     t_logp = F.log_softmax(t_logits[:, :-1], dim=-1)
-    kl = (s_logp.exp() * (s_logp - t_logp)).sum(dim=-1)            # [B, T-1]
+    kl = (s_logp.exp() * (s_logp - t_logp)).sum(dim=-1)
 
-    # 4. 只在学生自己生成的 token 上回传
-    mask = answer_mask[:, 1:].float()                              # [B, T-1]
+    mask = answer_mask[:, 1:].float()
     return (kl * mask).sum() / mask.sum().clamp_min(1.0)`,
     keyPoints: [
       '与 OPD 的核心区别: OPD 的教师是另一个更强的模型；self-OPD 的教师是同一份权重 + 特权上下文',
@@ -2021,7 +1959,6 @@ $$`,
     code: `import torch
 
 class AdamW:
-    # β₂=0.95（LLM 经验标配，非 PyTorch 默认的 0.999），与上方公式一致
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.95),
                  eps=1e-8, weight_decay=0.01):
         self.params = list(params)
@@ -2037,13 +1974,10 @@ class AdamW:
         for i, p in enumerate(self.params):
             if p.grad is None: continue
             g = p.grad.data
-            # 解耦权重衰减 (AdamW vs Adam 的关键区别)
             if self.wd != 0:
                 p.data.mul_(1 - self.lr * self.wd)
-            # 更新矩
             self.m[i] = self.b1 * self.m[i] + (1-self.b1) * g
             self.v[i] = self.b2 * self.v[i] + (1-self.b2) * g**2
-            # 偏差修正 + 更新
             m_hat = self.m[i] / (1 - self.b1**self.t)
             v_hat = self.v[i] / (1 - self.b2**self.t)
             p.data.add_(-self.lr * m_hat / (v_hat.sqrt() + self.eps))`,
@@ -2121,23 +2055,21 @@ $$`,
     code: `import torch
 
 def zeropower_via_newtonschulz5(G, steps=5, eps=1e-7):
-    """用 Newton-Schulz 迭代近似 G 的极分解 UVᵀ（即「零次幂」）
-    G: [m, n] 动量矩阵 → 同形状矩阵，奇异值趋近 1"""
+    """G: [m, n] 动量矩阵 → 同形状矩阵，奇异值趋近 1"""
     assert G.ndim == 2, "Muon 只处理二维矩阵参数"
-    a, b, c = 3.4445, -4.7750, 2.0315        # 调好的五次多项式系数
+    a, b, c = 3.4445, -4.7750, 2.0315
 
     X = G.to(torch.bfloat16)
-    X = X / (X.norm() + eps)                 # 归一化，否则迭代会发散
+    X = X / (X.norm() + eps)
 
     for _ in range(steps):
-        A = X @ X.mT                         # [m, m]
-        B = b * A + c * (A @ A)              # 五次多项式
-        X = a * X + B @ X                    # [m, n]
+        A = X @ X.mT
+        B = b * A + c * (A @ A)
+        X = a * X + B @ X
 
     return X.to(G.dtype)
 
 class Muon(torch.optim.Optimizer):
-    """只用于 2D 隐藏层权重的 Muon 优化器"""
 
     def __init__(self, params, lr=0.02, momentum=0.95, nesterov=True, ns_steps=5):
         defaults = dict(lr=lr, momentum=momentum, nesterov=nesterov, ns_steps=ns_steps)
@@ -2156,25 +2088,21 @@ class Muon(torch.optim.Optimizer):
 
                 buf = state["momentum_buffer"]
                 buf.mul_(group["momentum"]).add_(g)
-                # Nesterov: 用 g + μ·buf 作为动量方向
                 update = g.add(buf, alpha=group["momentum"]) if group["nesterov"] else buf
 
-                # 先正交化；再乘 RMS 对齐系数 c = √max(1, m/n)：
-                # 宽矩阵一行元素多、单元素步长偏小，乘回来才能让 Adam 的 lr 直接迁移
                 update = zeropower_via_newtonschulz5(update, group["ns_steps"])
                 update = update * max(1.0, g.size(0) / g.size(1)) ** 0.5
                 p.add_(update, alpha=-group["lr"])
 
 @torch.no_grad()
 def qk_clip_(model, tau=100.0):
-    """MuonClip 的 QK-Clip: 从源头压住注意力 logit 的增长
-    约定: 模块把本 batch 每 head 的最大 logit 存在 qk_max_logit 属性上"""
+    """约定: 模块把本 batch 每 head 的最大 logit 存在 qk_max_logit 属性上"""
     for module in model.modules():
         s_max = getattr(module, "qk_max_logit", None)
         if s_max is None or s_max <= tau:
             continue
-        gamma = tau / s_max                      # 缩放因子
-        scale = gamma ** 0.5                     # logit ∝ W_q·W_kᵀ，所以取 √γ
+        gamma = tau / s_max
+        scale = gamma ** 0.5
         module.q_proj.weight.mul_(scale)
         module.k_proj.weight.mul_(scale)`,
     keyPoints: [
@@ -2250,31 +2178,25 @@ class LoRALinear(nn.Module):
     def __init__(self, in_f, out_f, rank=8, alpha=16.0, dropout=0.0, bias=False):
         super().__init__()
         self.scaling = alpha / rank
-        # 冻结原始权重（bias 由调用方决定，见 apply_lora）
         self.linear = nn.Linear(in_f, out_f, bias=bias)
         self.linear.requires_grad_(False)
-        # LoRA 低秩矩阵
         self.lora_A = nn.Parameter(torch.zeros(rank, in_f))
         self.lora_B = nn.Parameter(torch.zeros(out_f, rank))
         nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
-        nn.init.zeros_(self.lora_B)          # B=0 → 初始 ΔW=0
+        nn.init.zeros_(self.lora_B)
         self.dropout = nn.Dropout(dropout)
         self.merged = False
 
     def forward(self, x):
         """x: [B, S, in_f]"""
-        base = self.linear(x)                         # 冻结路径
-        if self.merged:                               # ΔW 已经在权重里，别再叠加一次
+        base = self.linear(x)
+        if self.merged:
             return base
         lora = self.dropout(x) @ self.lora_A.T @ self.lora_B.T * self.scaling
         return base + lora
 
     def merge(self):
-        """推理时合并权重 (无额外开销)
-
-        合并后必须让 LoRA 分支停下，否则同一份 ΔW 会被算两遍：再调一次 forward，
-        输出会多出整整一倍的 LoRA 贡献，而且不报任何错。
-        """
+        """推理时合并权重；合并后再 forward 不能再叠加 LoRA"""
         if self.merged:
             return
         self.linear.weight.data += (self.lora_B @ self.lora_A) * self.scaling
@@ -2346,23 +2268,20 @@ def top_k_top_p_sampling(logits, temperature=0.7, top_k=50, top_p=0.9):
     """组合采样策略：返回过滤后的 logits（-inf = 被截掉的候选），不负责采样"""
     logits = logits / temperature
 
-    # Top-k: 只保留最大的 k 个
     if top_k > 0:
         top_k_vals, _ = torch.topk(logits, top_k)
         threshold = top_k_vals[..., -1:]
         logits = logits.masked_fill(logits < threshold, float('-inf'))
 
-    # Top-p: 累积概率截断
     if top_p < 1.0:
         sorted_logits, sorted_idx = torch.sort(logits, descending=True)
         cum_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
         mask = cum_probs > top_p
-        mask[..., 1:] = mask[..., :-1].clone()   # 至少保留一个
+        mask[..., 1:] = mask[..., :-1].clone()
         mask[..., 0] = False
         sorted_logits[mask] = float('-inf')
         logits = sorted_logits.scatter(1, sorted_idx, sorted_logits)
 
-    # 只截断，不采样：softmax + multinomial 由调用方做
     return logits`,
     keyPoints: [
       'T<1: 更确定 (适合翻译/代码); T>1: 更随机 (适合创作)',
@@ -2435,25 +2354,22 @@ $$`,
   upd --> w32`,
     code: `import torch
 
-# PyTorch 原生 AMP (Automatic Mixed Precision)
+# 方法1: PyTorch 原生 AMP
 scaler = torch.amp.GradScaler('cuda')
 
-# 下面这段要贴进训练循环里，model / optimizer / dataloader 由调用方提供
 # lint:allow model optimizer dataloader
 for batch in dataloader:
     optimizer.zero_grad()
-    # 自动将操作转为 FP16
     with torch.amp.autocast('cuda'):
         loss = model(batch)
-    # Loss scaling 防止梯度下溢
     scaler.scale(loss).backward()
     scaler.step(optimizer)
     scaler.update()
 
-# BF16 更简单 (不需要 loss scaling)
+# 方法2: BF16（不需要 loss scaling）
 with torch.amp.autocast('cuda', dtype=torch.bfloat16):
     loss = model(batch)
-loss.backward()   # 直接反向，不需要 scaler
+loss.backward()
 optimizer.step()`,
     keyPoints: [
       'FP16: 1+5+10 bits, 需要 loss scaling 防梯度下溢',
@@ -2515,25 +2431,21 @@ import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 from transformers import AutoModel
 
-# 方法1: 用 checkpoint 包裹任意前向函数 —— 中间激活不保存，反向时重算
 def custom_forward(x, weight1, weight2):
     return torch.relu(x @ weight1) @ weight2
 
-# 直接跑通的最小示例（真实训练里 weight1/weight2 是 nn.Parameter）
 x = torch.randn(4, 16, requires_grad=True)
 weight1 = torch.randn(16, 64, requires_grad=True)
 weight2 = torch.randn(64, 8, requires_grad=True)
 output = checkpoint(custom_forward, x, weight1, weight2, use_reentrant=False)
 output.sum().backward()
-print("方法1 梯度已回传:", weight1.grad is not None)   # True
+print("方法1 梯度已回传:", weight1.grad is not None)
 
-# 方法2: HuggingFace 模型直接开启（需要 pip install transformers）
 model = AutoModel.from_pretrained(
     "model_name",
-    gradient_checkpointing=True    # 一行开启
+    gradient_checkpointing=True
 )
 
-# 方法3: 在 Transformer 里逐层包裹
 class TransformerBlock(nn.Module):
     """attn / ffn / norm 的实现见「多头注意力」「FFN / SwiGLU」「RMSNorm」三题"""
     def __init__(self, d_model, n_heads, use_checkpoint=False):
@@ -2544,8 +2456,6 @@ class TransformerBlock(nn.Module):
         self.norm2 = RMSNorm(d_model)
         self.use_checkpoint = use_checkpoint
     def forward(self, x, mask=None):
-        # MHA 的签名是 forward(xq, xk=None, mask=None)，mask 是第三个参数：
-        # 中间必须留一个 None 占位，否则 mask 会被当成 xk 传进去
         if self.use_checkpoint:
             x = x + checkpoint(self.attn, self.norm1(x), None, mask, use_reentrant=False)
             return x + checkpoint(self.ffn, self.norm2(x), use_reentrant=False)
@@ -2625,31 +2535,24 @@ FP8_DTYPE = {"e4m3": torch.float8_e4m3fn, "e5m2": torch.float8_e5m2}
 
 def per_block_quant(x, block_size=128, fmt="e4m3"):
     """按最后一维分块做 FP8 量化; x: [..., N] → (反量化后的值, 每块的缩放因子)
-    注意: 需要 torch >= 2.1 才有 float8_e4m3fn"""
+        注意: 需要 torch >= 2.1 才有 float8_e4m3fn"""
     assert x.shape[-1] % block_size == 0, "最后一维要能被 block_size 整除"
     orig_shape = x.shape
     n_blocks = orig_shape[-1] // block_size
-    xb = x.reshape(-1, n_blocks, block_size)                     # [M, n_blocks, B]
+    xb = x.reshape(-1, n_blocks, block_size)
 
-    # 1. 每块一个 amax → 一个缩放因子（clamp_min 防止除零）
-    amax = xb.abs().amax(dim=-1, keepdim=True).clamp_min(1e-12)   # [M, n_blocks, 1]
+    amax = xb.abs().amax(dim=-1, keepdim=True).clamp_min(1e-12)
     scale = amax / FP8_MAX[fmt]
 
-    # 2. 量化到 FP8 再反量化（模拟「FP8 存、高精度用」）
     x_q = (xb / scale).clamp(-FP8_MAX[fmt], FP8_MAX[fmt]).to(FP8_DTYPE[fmt])
     x_hat = x_q.to(x.dtype) * scale
 
     return x_hat.reshape(orig_shape), scale.reshape(-1, n_blocks)
 
 def fp8_gemm_sim(x, w, block_size=128):
-    """模拟 FP8 块级矩阵乘法: FP8 乘 + 高精度累加; x: [M, K]  w: [K, N]"""
-    # 激活：沿 K 维每 128 个元素一块（per-token per-128-channel）
+    """x: [M, K]  w: [K, N]"""
     x_hat, _ = per_block_quant(x, block_size, fmt="e4m3")
-    # 权重：转置成 [N, K] 后同样只沿最后一维每 128 个一块 ——
-    # DeepSeek-V3 的真实实现按 128×128 的 tile 取一个 amax（两个维度都切），
-    # 这里只切 K 维，粒度更细、精度只会更好，是同一套缩放思路的简化
     w_hat, _ = per_block_quant(w.t().contiguous(), block_size, fmt="e4m3")
-    # 真实实现是 FP8 张量核 + 高精度累加；这里用反量化后的值算等价的数学结果
     return x_hat @ w_hat.t().contiguous()`,
     keyPoints: [
       '核心一句话: FP8 训练的成败在缩放粒度，块级缩放把离群值的影响关在块内',
@@ -2720,24 +2623,18 @@ $$`,
   end`,
     code: `import torch
 
-# PagedAttention 核心思想
-# 真实的 kernel 是 CUDA/Triton，这里用块表映射 + gather 把语义写清楚
-
 class PagedKVCache:
     def __init__(self, block_size=16, num_blocks=1000, n_layers=32,
                  n_heads=32, head_dim=128, device='cuda'):
         self.block_size = block_size
-        # 物理块池 (预分配所有显存)
         self.physical_blocks = torch.zeros(
             num_blocks, n_layers, 2, block_size, n_heads, head_dim,
             dtype=torch.float16, device=device
         )
-        # 块表: 每个序列的逻辑块 → 物理块映射
-        self.block_tables = {}   # seq_id → [physical_block_ids]
+        self.block_tables = {}
         self.free_blocks = list(range(num_blocks))
 
     def allocate(self, seq_id, num_tokens):
-        """为序列分配物理块"""
         num_blocks = (num_tokens + self.block_size - 1) // self.block_size
         if num_blocks > len(self.free_blocks):
             raise RuntimeError("Out of memory")
@@ -2756,12 +2653,10 @@ class PagedKVCache:
         self.physical_blocks[phys_id, layer, 1, block_offset] = value
 
     def attention(self, seq_id, layer, q, seq_len):
-        """使用块表进行注意力计算
-        layer: 当前算到第几层（每层的 KV 是独立的，别把不同层混进来）
-        seq_len: 这个序列实际写入了多少 token"""
+        """layer: 当前算到第几层（每层 KV 独立）
+                seq_len: 这个序列实际写入了多少 token"""
         phys_ids = self.block_tables[seq_id]
-        # 从非连续物理块中 gather K/V → 计算注意力
-        k = self.physical_blocks[phys_ids, layer, 0]   # [n_blocks, block_size, H, D]
+        k = self.physical_blocks[phys_ids, layer, 0]
         v = self.physical_blocks[phys_ids, layer, 1]
         return paged_attention_kernel(q, k, v, seq_len, self.block_size)`,
     keyPoints: [
@@ -2833,15 +2728,12 @@ $$`,
 @torch.no_grad()
 def speculative_decode(draft_model, target_model, prompt_ids,
                        gamma=5, temperature=1.0, max_len=100):
-    """
-    draft_model: 小模型 (快速生成候选)
-    target_model: 大模型 (验证候选)
-    gamma: 每轮草稿长度
-    """
+    """draft_model: 小模型 (快速生成候选)
+        target_model: 大模型 (验证候选)
+        gamma: 每轮草稿长度"""
     generated = prompt_ids.tolist()
 
     while len(generated) < max_len:
-        # Step 1: Draft model 生成 γ 个候选
         draft_tokens = []
         draft_probs = []
         input_ids = torch.tensor([generated])
@@ -2850,17 +2742,14 @@ def speculative_decode(draft_model, target_model, prompt_ids,
             probs = F.softmax(logits/temperature, dim=-1)
             next_token = torch.multinomial(probs, 1)
             draft_tokens.append(next_token.item())
-            draft_probs.append(probs)              # 拒绝采样要用它算 p_draft
+            draft_probs.append(probs)
             input_ids = torch.cat([input_ids, next_token], dim=1)
 
-        # Step 2: Target model 并行验证所有候选
         full_ids = torch.tensor([generated + draft_tokens])
         target_logits = target_model(full_ids).logits
-        # 取 draft 位置的 logits
         target_probs = F.softmax(
             target_logits[0, len(generated)-1:-1] / temperature, dim=-1)
 
-        # Step 3: 逐 token 接受/拒绝
         accepted = 0
         for i, token in enumerate(draft_tokens):
             p_target = target_probs[i, token].item()
@@ -2870,13 +2759,11 @@ def speculative_decode(draft_model, target_model, prompt_ids,
                 accepted += 1
                 generated.append(token)
             else:
-                # 拒绝: 从修正分布重新采样
                 corrected = torch.clamp(target_probs[i] - draft_probs[i][0], min=0)
                 corrected /= corrected.sum()
                 generated.append(torch.multinomial(corrected, 1).item())
                 break
         else:
-            # 全部接受: 再采样一个 bonus token
             bonus = torch.multinomial(target_probs[-1], 1).item()
             generated.append(bonus)
 
@@ -2952,14 +2839,13 @@ class DecoderBlock(nn.Module):
         self.ffn = SwiGLU(d_model, d_ff)                # 见「SwiGLU」一题
 
     def forward(self, x, mask):
-        h = self.attn_norm(x)          # Pre-Norm: 先归一化再进子层
+        h = self.attn_norm(x)
         B, S, _ = h.shape
 
-        # RoPE 旋的是每个头的 Q/K，所以先分头：RotaryEmbedding 吃 [B, S, H, Dh]
         q = self.wq(h).view(B, S, self.n_heads, self.dh)
         k = self.wk(h).view(B, S, self.n_heads, self.dh)
-        q, k = self.rope(q, k)                          # 只旋 Q、K，V 不动
-        q, k = q.transpose(1, 2), k.transpose(1, 2)     # [B, H, S, Dh]
+        q, k = self.rope(q, k)
+        q, k = q.transpose(1, 2), k.transpose(1, 2)
         v = self.wv(h).view(B, S, self.n_heads, self.dh).transpose(1, 2)
 
         scores = q @ k.transpose(-2, -1) / math.sqrt(self.dh)
@@ -2981,22 +2867,20 @@ class GPTModel(nn.Module):
 
     def forward(self, tokens):
         B, S = tokens.shape
-        x = self.tok_emb(tokens)   # 位置信息由每层 RoPE 注入，不需要位置编码表
+        x = self.tok_emb(tokens)
         mask = torch.tril(torch.ones(S, S, device=tokens.device))
         for block in self.blocks:
             x = block(x, mask)
         return self.lm_head(self.norm(x))
 
-# 自回归生成：推理那半边
 @torch.no_grad()
 def generate(model, prompt_ids, max_new_tokens=100, temperature=0.7, eos_token_id=None):
     input_ids = prompt_ids.clone()
     for _ in range(max_new_tokens):
-        logits = model(input_ids)[:, -1, :] / temperature   # 只要末位（因果注意力下它看得到全部）
+        logits = model(input_ids)[:, -1, :] / temperature
         probs = torch.softmax(logits, dim=-1)
         next_token = torch.multinomial(probs, num_samples=1)
         input_ids = torch.cat([input_ids, next_token], dim=1)
-        # GPTModel 不是 HuggingFace 模型，没有 model.config，EOS id 由调用方传入
         if eos_token_id is not None and next_token.item() == eos_token_id:
             break
     return input_ids`,
@@ -3068,43 +2952,37 @@ class RMSNorm(nn.Module):
         return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps) * self.weight
 
 class MTPModule(nn.Module):
-    """一个 MTP 模块: 拼接上一层隐状态与下一个 token 的 embedding，再过一个 Transformer 块"""
 
     def __init__(self, d_model, n_heads=8):
         super().__init__()
         self.norm_h = RMSNorm(d_model)
         self.norm_e = RMSNorm(d_model)
-        self.proj = nn.Linear(2 * d_model, d_model, bias=False)   # 2d → d
+        self.proj = nn.Linear(2 * d_model, d_model, bias=False)
         self.block = nn.TransformerEncoderLayer(
             d_model, n_heads, dim_feedforward=4 * d_model,
             batch_first=True, norm_first=True)
 
     def forward(self, h_prev, tok_emb):
-        # h_prev:  [B, T, D] 上一层 MTP 的隐状态
-        # tok_emb: [B, T, D] 第 i+k 个 token 的 embedding
         x = self.proj(torch.cat([self.norm_h(h_prev), self.norm_e(tok_emb)], dim=-1))
         T = x.size(1)
-        # 块内必须因果：位置 i 的目标是 x_{i+k+1}，而位置 i+1 的输入正好含 x_{i+k+1}，
-        # 双向注意力会让模型直接看到自己的标签（True = 屏蔽）
         causal = torch.triu(torch.ones(T, T, dtype=torch.bool, device=x.device),
                             diagonal=1)
-        return self.block(x, src_mask=causal)                     # [B, T, D]
+        return self.block(x, src_mask=causal)
 
 def mtp_loss(mtp_modules, h0, input_ids, embed, lm_head, num_heads=1, lam=0.3):
     """多 token 预测损失; h0: [B, T, D] 主模型最后一层隐状态
-    返回: (MTP 部分损失, 各层预测的 logits 列表)"""
+        返回: (MTP 部分损失, 各层预测的 logits 列表)"""
     total, h_prev, logits_list = 0.0, h0, []
 
     for k in range(1, num_heads + 1):
         if input_ids.size(1) - k <= 1:
             break
-        target = input_ids[:, 1 + k:]             # 目标: x_{i+1+k}
-        tok_emb = embed(input_ids[:, k:-1])       # 输入: x_{i+k}
+        target = input_ids[:, 1 + k:]
+        tok_emb = embed(input_ids[:, k:-1])
         h_prev = mtp_modules[k - 1](h_prev[:, :tok_emb.size(1)], tok_emb)
 
-        logits = lm_head(h_prev)                  # [B, T-k-1, V]
+        logits = lm_head(h_prev)
         logits_list.append(logits)
-        # 用 sum 再统一除以 D，把 k 个预测的损失归一到同一量级
         total = total + F.cross_entropy(
             logits.reshape(-1, logits.size(-1)), target.reshape(-1), reduction="sum")
 
@@ -3190,15 +3068,12 @@ def compute_gae(rewards, values, gamma=0.99, lam=0.95):
 
     for t in reversed(range(T)):
         delta = rewards[t] + gamma * values[t+1] - values[t]
-        gae = delta + gamma * lam * gae       # 递推!
+        gae = delta + gamma * lam * gae
         advantages[t] = gae
 
-    returns = advantages + values[:-1]         # returns = A + V
+    returns = advantages + values[:-1]
     return advantages, returns
-
-# PPO 中使用:
-# advantages, returns = compute_gae(rewards, values)
-# loss = ppo_loss(old_logp, new_logp, advantages)`,
+`,
     keyPoints: [
       'λ 控制偏差-方差折衷: λ=1 无偏差高方差, λ=0 高偏差低方差',
       '递推实现 O(T): A_t = δ_t + γλ·A_{t+1}',
@@ -3260,7 +3135,6 @@ $$`,
   end`,
     code: `import torch
 
-# 手动实现简单两层网络的反向传播
 class TwoLayerNet:
     def __init__(self, d_in, d_hidden, d_out):
         self.W1 = torch.randn(d_in, d_hidden) * 0.01
@@ -3268,30 +3142,24 @@ class TwoLayerNet:
 
     def forward(self, x):
         self.x = x
-        self.h = x @ self.W1              # 线性
-        self.a = torch.relu(self.h)        # 激活
-        self.y = self.a @ self.W2          # 输出
+        self.h = x @ self.W1
+        self.a = torch.relu(self.h)
+        self.y = self.a @ self.W2
         return self.y
 
     def backward(self, y_true, lr=0.01):
-        # Loss = MSE = mean((y - y_true)²)
-        dy = 2 * (self.y - y_true) / y_true.numel()  # ∂L/∂y
+        dy = 2 * (self.y - y_true) / y_true.numel()
 
-        # ∂L/∂W2 = aᵀ · dy
         dW2 = self.a.T @ dy
         da = dy @ self.W2.T
 
-        # ReLU 梯度
         dh = da * (self.h > 0).float()
 
-        # ∂L/∂W1 = xᵀ · dh
         dW1 = self.x.T @ dh
 
-        # 更新
         self.W1 -= lr * dW1
         self.W2 -= lr * dW2
 
-        # 把手算的梯度交出去，方便与 autograd 对照
         return dW1, dW2`,
     keyPoints: [
       '链式法则是反向传播的数学基础',
@@ -3356,36 +3224,28 @@ $$`,
     code: `import torch
 import torch.nn.functional as F
 
-# ReLU
 def relu(x):
-    return torch.clamp(x, min=0)    # 或 F.relu(x)
+    return torch.clamp(x, min=0)
 
-# GELU (近似版本更快)
 def gelu(x):
     return 0.5 * x * (1 + torch.tanh(
         (2/3.14159)**0.5 * (x + 0.044715 * x**3)
-        # 常数写的是 3.14159 而非 math.pi：相对差 4.2e-07，影响 ~1e-07，可以忽略
     ))
-    # 或直接用 F.gelu(x)；tanh 近似与精确版（erf）相差 4.7e-04 量级
 
-# SiLU (Swish)
 def silu(x):
-    return x * torch.sigmoid(x)     # 或 F.silu(x)
+    return x * torch.sigmoid(x)
 
-# 梯度对比
 x = torch.linspace(-3, 3, 100, requires_grad=True)
 y_relu = relu(x).sum(); y_relu.backward()
-print("ReLU grad:", x.grad[:5])     # 前 5 个点全为负，梯度应当是 0
+print("ReLU grad:", x.grad[:5])
 relu_grad = x.grad.clone(); x.grad.zero_()
 y_gelu = gelu(x).sum(); y_gelu.backward()
-print("GELU grad:", x.grad[:5])     # 平滑过渡：负区间也有非零梯度
+print("GELU grad:", x.grad[:5])
 x.grad.zero_()
 y_silu = silu(x).sum(); y_silu.backward()
-print("SiLU grad:", x.grad[:5])     # 平滑 + 门控
+print("SiLU grad:", x.grad[:5])
 silu_grad = x.grad.clone()
 
-# 公式块里的 ReLU′ = (x>0)、SiLU′ = SiLU + σ(1−SiLU) 对一遍 autograd
-# （0 处 ReLU 不可导，取哪一侧是框架约定，跳过那个点）
 xd = x.detach(); safe = xd != 0
 print("ReLU′ 误差:", ((xd > 0).float()[safe] - relu_grad[safe]).abs().max().item())
 s = torch.sigmoid(xd)

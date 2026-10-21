@@ -75,14 +75,14 @@ class MoE(nn.Module):
 
     def forward(self, x):
         B, S, D = x.shape
-        x_flat = x.view(-1, D)                        # [B*S, D]
-        logits = self.router(x_flat)                   # [B*S, N]
+        x_flat = x.view(-1, D)
+        logits = self.router(x_flat)
         weights, indices = torch.topk(logits, self.top_k, dim=-1)
-        weights = F.softmax(weights, dim=-1)           # 归一化
+        weights = F.softmax(weights, dim=-1)
 
         output = torch.zeros_like(x_flat)
         for i, expert in enumerate(self.experts):
-            mask = (indices == i)                       # 哪些 token 选了 expert i
+            mask = (indices == i)
             token_idx, topk_pos = torch.where(mask)
             if token_idx.numel() > 0:
                 out = expert(x_flat[token_idx])
@@ -90,23 +90,13 @@ class MoE(nn.Module):
         return output.view(B, S, D)
 
     def aux_loss(self, x, coeff=0.01):
-        """负载均衡辅助损失 N·Σ f_i·P_i（Switch Transformer），训练时加到总损失里
-
-        不加这一项，Router 会很快塌到少数几个专家上：被选中的专家训得更好 →
-        打分更高 → 更常被选中，最后大部分专家根本收不到 token。两项都在均匀时
-        取最小值 1/N，乘起来再乘 N 正好是 1。
-
-        f_i: 分给专家 i 的 token 占比（top-k 会把一个 token 记到 k 个专家上，
-             所以除以 top_k，否则 f 之和是 k 而不是 1）
-        P_i: Router 给专家 i 的平均概率 —— 注意要用「全部专家」的 softmax，
-             forward 里那份是按 top-k 重新归一化过的，算 P 会用错分母
-        """
+        """负载均衡辅助损失 N·Σ f_i·P_i（Switch Transformer），训练时加到总损失里"""
         B, S, D = x.shape
-        probs = F.softmax(self.router(x.view(-1, D)), dim=-1)          # [B*S, N]
+        probs = F.softmax(self.router(x.view(-1, D)), dim=-1)
         indices = torch.topk(probs, self.top_k, dim=-1).indices
-        one_hot = F.one_hot(indices, self.n_experts).sum(dim=1).float()  # [B*S, N]
-        f = one_hot.mean(dim=0) / self.top_k                           # [N]
-        p = probs.mean(dim=0)                                          # [N]
+        one_hot = F.one_hot(indices, self.n_experts).sum(dim=1).float()
+        f = one_hot.mean(dim=0) / self.top_k
+        p = probs.mean(dim=0)
         return coeff * self.n_experts * torch.sum(f * p)
 
 # 测试
@@ -116,18 +106,15 @@ if __name__ == "__main__":
     x = torch.randn(B, S, D)
     moe = MoE(D, n_experts=8, top_k=2)
     out = moe(x)
-    print(f"Input shape: {x.shape}")   # [2, 16, 512]
-    print(f"Output shape: {out.shape}") # [2, 16, 512]
+    print(f"Input shape: {x.shape}")
+    print(f"Output shape: {out.shape}")
     
-    # 刚初始化的 Router 基本是均匀路由，这一项应取到最小值（coeff × 1）
     print(f"随机 Router 的 aux loss: {moe.aux_loss(x).item():.4f}  (均匀时 0.01)")
     
-    # 极限情况：全正输入 + 只给专家 0 权重 → 专家 0 恒占优，所有 token 堆到一处，
-    # 这一项应该涨到接近 N 倍 —— 这就是它「防塌缩」的作用
     skewed = MoE(D, n_experts=8, top_k=1)
     with torch.no_grad():
         skewed.router.weight.zero_()
-        skewed.router.weight[0].fill_(1.0)          # logit_0 = Σx，全正输入下恒为最大
+        skewed.router.weight[0].fill_(1.0)
     x_pos = torch.randn(B, S, D).abs()
     bad = skewed.aux_loss(x_pos).item()
     print(f"全塌到专家 0 的 aux loss: {bad:.4f}  ({bad / 0.01:.1f} 倍)")

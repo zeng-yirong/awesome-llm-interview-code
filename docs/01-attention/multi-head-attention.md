@@ -70,23 +70,19 @@ class MultiHeadAttention(nn.Module):
         mask: [batch, 1, seq_len_q, seq_len_k]
         """
         B = xq.size(0)
-        xk = xk if xk is not None else xq  # self-attention
+        xk = xk if xk is not None else xq
         
-        # 线性投影
         q = self.wq(xq).view(B, -1, self.h, self.dh).transpose(1, 2)
         k = self.wk(xk).view(B, -1, self.h, self.dh).transpose(1, 2)
         v = self.wv(xk).view(B, -1, self.h, self.dh).transpose(1, 2)
         
-        # 缩放点积注意力
         scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.dh)
         if mask is not None:
             scores = scores.masked_fill(mask == 0, -1e9)
         attn = F.softmax(scores, dim=-1)
         
-        # 加权求和
-        out = torch.matmul(attn, v)  # [B, H, S, Dh]
+        out = torch.matmul(attn, v)
         
-        # 合并多头
         out = out.transpose(1, 2).contiguous().view(B, -1, self.h * self.dh)
         return self.wo(out)
 
@@ -96,20 +92,14 @@ if __name__ == "__main__":
     x = torch.randn(B, S, D)
     mha = MultiHeadAttention(D, H)
     
-    # self-attention 写成 mha(x) 就够了：xk 省略时 forward 会兜底成 xq。
-    # 传 mha(x, x) 是把同一份输入传两遍，走的是交叉注意力那条分支，
-    # 「xk 为 None」这个兜底反而没被覆盖到 —— 两条分支等价，顺手比一下
     out = mha(x)
-    print(f"Input shape: {x.shape}")   # [2, 10, 64]
-    print(f"Output shape: {out.shape}") # [2, 10, 64]
+    print(f"Input shape: {x.shape}")
+    print(f"Output shape: {out.shape}")
     print("xk=None 与 xk=x 等价:", torch.allclose(out, mha(x, x)))
     
-    # xk 存在的意义是交叉注意力（解码器的 Q 看编码器的 K/V），两条序列长度可以不同
     enc = torch.randn(B, 6, D)
-    print(f"交叉注意力输出 (S_q=10, S_k=6): {mha(x, enc).shape}")  # [2, 10, 64]
+    print(f"交叉注意力输出 (S_q=10, S_k=6): {mha(x, enc).shape}")
     
-    # mask 的形状是 [B, 1, S_q, S_k]，不是 [S, S]：位置 0 在因果掩码下只剩自己一个
-    # 可看的位置，输出应当正好等于对 V_0 做输出投影
     causal = torch.tril(torch.ones(S, S)).view(1, 1, S, S)
     masked = mha(x, mask=causal)
     print("掩码后位置 0 = W_o·V_0:",

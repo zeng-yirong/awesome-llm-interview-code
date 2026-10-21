@@ -46,28 +46,18 @@ flowchart LR
 import torch
 
 def sequence_ratio(per_token_logp_new, per_token_logp_old, completion_mask):
-    """
-    序列级重要性比率（长度归一化）
-    per_token_logp_*: [B, G, T]  每个 token 的 log π
-    completion_mask:  [B, G, T]  1 = 该 token 属于回答
-    返回: [B, G]
-    """
-    # 1. 逐 token 对数比
-    log_ratio = per_token_logp_new - per_token_logp_old        # [B, G, T]
+    """序列级重要性比率（长度归一化）；per_token_logp_*: [B, G, T]，completion_mask: [B, G, T]，返回 [B, G]"""
+    log_ratio = per_token_logp_new - per_token_logp_old
 
-    # 2. 长度归一化后求和，再取 exp
     mask = completion_mask.float()
-    length = mask.sum(dim=-1).clamp_min(1.0)                   # [B, G]
-    avg_log_ratio = (log_ratio * mask).sum(dim=-1) / length    # [B, G]
+    length = mask.sum(dim=-1).clamp_min(1.0)
+    avg_log_ratio = (log_ratio * mask).sum(dim=-1) / length
     return avg_log_ratio.exp()
 
 
 def gspo_loss(per_token_logp_new, per_token_logp_old, completion_mask,
               advantages, eps=3e-4):
-    """
-    GSPO: 整条序列共享一个比率，只 clip 一次
-    advantages: [B, G]  组内归一化优势（同 GRPO）
-    """
+    """GSPO: 整条序列共享一个比率，只 clip 一次；advantages: [B, G] 组内归一化优势（同 GRPO）"""
     s = sequence_ratio(per_token_logp_new, per_token_logp_old, completion_mask)
     clipped = torch.clamp(s, 1 - eps, 1 + eps)
     obj = torch.min(s * advantages, clipped * advantages)
@@ -79,10 +69,10 @@ if __name__ == "__main__":
     B, G, T = 2, 4, 6
 
     old_logp = torch.randn(B, G, T) - 2.0
-    new_logp = old_logp + 0.01 * torch.randn(B, G, T)    # 一次轻微更新
+    new_logp = old_logp + 0.01 * torch.randn(B, G, T)
 
     mask = torch.ones(B, G, T)
-    mask[:, :, -2:] = 0                                  # 后 2 个是 padding
+    mask[:, :, -2:] = 0
 
     advantages = torch.randn(B, G)
     advantages = (advantages - advantages.mean(-1, keepdim=True)) / \

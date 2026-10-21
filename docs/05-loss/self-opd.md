@@ -66,53 +66,39 @@ LMOutput = namedtuple("LMOutput", ["logits"])
 
 @torch.no_grad()
 def teacher_forward(model, input_ids, privileged_ids):
-    """教师 = 同一模型 + 特权上下文，只做一次前向，不需要梯度
-    特权上下文拼在最前面：因果 LM 只能看见前面的内容，要让 c 影响答案 token 的
-    预测就只能排在答案之前。（代价是教师侧答案 token 的绝对位置比学生侧多 P 个，
-    RoPE 下位置编码因此不同 —— 这是这类做法的固有取舍。）"""
+    """教师 = 同一模型 + 特权上下文，只做一次前向，不需要梯度"""
     full = torch.cat([privileged_ids, input_ids], dim=1)
     logits = model(full).logits
-    # 只取答案段（去掉特权上下文那一段）
     return logits[:, privileged_ids.size(1):]
 
 
 def self_opd_loss(model, input_ids, privileged_ids, answer_mask):
     """
-    在线自蒸馏损失
     input_ids:      [B, T] 学生看到的 prompt + 学生自己采样的回答
     privileged_ids: [B, P] 特权上下文（如参考答案），只拼给教师
     answer_mask:    [B, T] 1 = 学生在该位置真实生成的 token
     """
-    # 1. 学生前向（需要梯度）—— 与 rollout 时是同一批 token
-    student_logits = model(input_ids).logits                      # [B, T, V]
+    student_logits = model(input_ids).logits
 
-    # 2. 教师前向：同一权重 + 特权上下文，no_grad
-    t_logits = teacher_forward(model, input_ids, privileged_ids)   # [B, T, V]
+    t_logits = teacher_forward(model, input_ids, privileged_ids)
 
-    # 3. 逐 token 反向 KL: KL(p_S ‖ p_T)
-    #    注意对齐：因果 LM 里 logits[t] 预测的是 t+1 位置的 token，而 mask 标的是
-    #    「哪些位置是学生生成的 token」。要评 token y_t 就得取 logits[t-1]，所以
-    #    logits 切掉最后一列、mask 切掉第一列，整体往前错一位 —— 两处都按同一位置
-    #    取的话，会漏掉第一个答案 token 的分布、还多算一个越界位置
-    s_logp = F.log_softmax(student_logits[:, :-1], dim=-1)         # [B, T-1, V]
+    s_logp = F.log_softmax(student_logits[:, :-1], dim=-1)
     t_logp = F.log_softmax(t_logits[:, :-1], dim=-1)
-    kl = (s_logp.exp() * (s_logp - t_logp)).sum(dim=-1)            # [B, T-1]
+    kl = (s_logp.exp() * (s_logp - t_logp)).sum(dim=-1)
 
-    # 4. 只在学生自己生成的 token 上回传
-    mask = answer_mask[:, 1:].float()                              # [B, T-1]
+    mask = answer_mask[:, 1:].float()
     return (kl * mask).sum() / mask.sum().clamp_min(1.0)
 
 
 if __name__ == "__main__":
     class ToyLM(torch.nn.Module):
-        """玩具模型: 真实场景是 HuggingFace 的 CausalLM，这里只验证流程"""
         def __init__(self, vocab=16, dim=8):
             super().__init__()
             self.emb = torch.nn.Embedding(vocab, dim)
             self.head = torch.nn.Linear(dim, vocab)
 
         def forward(self, ids):
-            return LMOutput(self.head(self.emb(ids)))   # [B, T, V]
+            return LMOutput(self.head(self.emb(ids)))
 
     torch.manual_seed(0)
     model = ToyLM()
@@ -120,7 +106,7 @@ if __name__ == "__main__":
     privileged = torch.randint(0, 16, (2, 3))
 
     answer_mask = torch.zeros(2, 6)
-    answer_mask[:, 3:] = 1.0          # 后 3 个 token 是学生自己生成的
+    answer_mask[:, 3:] = 1.0
 
     loss = self_opd_loss(model, input_ids, privileged, answer_mask)
     print("self-opd loss:", loss.item())

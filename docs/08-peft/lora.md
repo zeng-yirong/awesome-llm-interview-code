@@ -62,62 +62,48 @@ class LoRALinear(nn.Module):
         super().__init__()
         self.scaling = alpha / rank
         
-        # 冻结原始权重（bias 由调用方决定，见 apply_lora）
         self.linear = nn.Linear(in_f, out_f, bias=bias)
         self.linear.requires_grad_(False)
         
-        # LoRA 低秩矩阵
         self.lora_A = nn.Parameter(torch.zeros(rank, in_f))
         self.lora_B = nn.Parameter(torch.zeros(out_f, rank))
         nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
-        nn.init.zeros_(self.lora_B)          # B=0 → 初始 ΔW=0
+        nn.init.zeros_(self.lora_B)
         
         self.dropout = nn.Dropout(dropout)
         self.merged = False
 
     def forward(self, x):
         """x: [B, S, in_f]"""
-        base = self.linear(x)                         # 冻结路径
-        if self.merged:                               # ΔW 已经在权重里，别再叠加一次
+        base = self.linear(x)
+        if self.merged:
             return base
         lora = self.dropout(x) @ self.lora_A.T @ self.lora_B.T * self.scaling
         return base + lora
 
     def merge(self):
-        """推理时合并权重 (无额外开销)
-
-        合并后必须让 LoRA 分支停下，否则同一份 ΔW 会被算两遍：再调一次 forward，
-        输出会比预期多出整整一倍的 LoRA 贡献，而且不报任何错。
-        """
+        """推理时合并权重"""
         if self.merged:
             return
         self.linear.weight.data += (self.lora_B @ self.lora_A) * self.scaling
         self.merged = True
 
-# 在 Transformer 中应用 LoRA
 def apply_lora(model, rank=8, alpha=16.0):
     """对模型中的 Q/V 投影应用 LoRA"""
     for name, module in model.named_modules():
         if isinstance(module, nn.Linear):
             if 'q_proj' in name or 'v_proj' in name:
-                # 替换为 LoRA 版本
                 lora_layer = LoRALinear(
                     module.in_features,
                     module.out_features,
                     rank=rank,
                     alpha=alpha,
-                    # 原投影带 bias（Qwen 的 q_proj/v_proj 就带）时必须跟着带上：
-                    # 只 copy 权重会把 bias 悄悄丢掉，替换完模型输出当场就变了，
-                    # 「B=0 所以初始输出不变」这条保证跟着一起失效
                     bias=module.bias is not None,
                 )
-                # 新模块默认建在 CPU / float32 上，而原模块可能已经在 GPU 或 bf16 上。
-                # copy_ 要求两侧同 device 同 dtype，所以先搬过去再复制，否则直接报错
                 lora_layer.to(module.weight.device, module.weight.dtype)
                 lora_layer.linear.weight.data.copy_(module.weight.data)
                 if module.bias is not None:
                     lora_layer.linear.bias.data.copy_(module.bias.data)
-                # 替换原模块
                 parts = name.rsplit('.', 1)
                 parent = model.get_submodule(parts[0]) if len(parts) > 1 else model
                 setattr(parent, parts[-1], lora_layer)
@@ -129,21 +115,18 @@ if __name__ == "__main__":
     
     lora = LoRALinear(D, D, rank=8, alpha=16.0)
     out = lora(x)
-    print(f"Input shape: {x.shape}")   # [2, 10, 512]
-    print(f"Output shape: {out.shape}") # [2, 10, 512]
+    print(f"Input shape: {x.shape}")
+    print(f"Output shape: {out.shape}")
     
-    # 验证初始输出等于原始权重输出
     base_out = lora.linear(x)
     diff = (out - base_out).abs().sum()
     print(f"Diff at init (should be 0): {diff.item():.6f}")
     
-    # 参数量：算法步骤第 1 步「冻结原始权重」可以逐个数出来，公式里那个占比也能对
     n_train = sum(p.numel() for p in lora.parameters() if p.requires_grad)
     n_frozen = sum(p.numel() for p in lora.parameters() if not p.requires_grad)
     print(f"可训练 {n_train:,}（= r(d+k) = {8 * 2 * D:,}）/ 冻结 {n_frozen:,}（= D² ）"
           f"；r=8, d=k=4096 时公式给的占比 {8 * 2 * 4096 / 4096 ** 2:.2%}（文档写 ≈ 0.4%）")
     
-    # 模拟训练后 B 不再为零：scaling、转置顺序写错都会静默变值，先把手搓公式钉住
     with torch.no_grad():
         lora.lora_A.normal_(0, 0.01)
         lora.lora_B.normal_(0, 0.01)
@@ -151,22 +134,17 @@ if __name__ == "__main__":
     manual = lora.linear(x) + (lora.dropout(x) @ lora.lora_A.T @ lora.lora_B.T) * lora.scaling
     print(f"前向 vs 手搓公式 (should be 0): {(out_lora - manual).abs().max().item():.2e}")
     
-    # merge 前后输出必须一致。注意这是浮点意义上的等值：合并把 (W@x) 和 ((BA)·s@x)
-    # 两次求和并成一次，最后一位必然不同，1e-6 量级就是对的
     lora.merge()
     print(f"merge 后误差 (1e-6 量级): {(lora(x) - out_lora).abs().max().item():.2e}")
     
-    # 这就是 merged 标志的作用：不关掉分支，同一份 ΔW 会被算两遍，
-    # 偏差正好等于 LoRA 贡献本身，且不报错
     twice = lora.linear(x) + (lora.dropout(x) @ lora.lora_A.T @ lora.lora_B.T) * lora.scaling
     print(f"不关分支的偏差 {twice.sub(lora(x)).abs().max().item():.2e}"
           f" = LoRA 贡献本身 {(twice - lora.linear(x)).abs().max().item():.2e}")
     
-    # apply_lora 的等价性：原投影带 bias 时，替换后初始输出也必须完全一致
     class ToyBlock(nn.Module):
         def __init__(self, d=8):
             super().__init__()
-            self.q_proj = nn.Linear(d, d, bias=True)   # 故意带 bias
+            self.q_proj = nn.Linear(d, d, bias=True)
             self.v_proj = nn.Linear(d, d, bias=True)
     
     torch.manual_seed(0)

@@ -63,50 +63,41 @@ flowchart TD
 ```python
 import torch
 
-# 方法1: PyTorch 原生 AMP (Automatic Mixed Precision)
+# 方法1: PyTorch 原生 AMP
 scaler = torch.amp.GradScaler('cuda')
 
-# 下面这段要贴进训练循环里，model / optimizer / dataloader 由调用方提供
 # lint:allow model optimizer dataloader
 for batch in dataloader:
     optimizer.zero_grad()
     
-    # 自动将操作转为 FP16
     with torch.amp.autocast('cuda'):
         loss = model(batch)
     
-    # Loss scaling 防止梯度下溢
     scaler.scale(loss).backward()
     scaler.step(optimizer)
     scaler.update()
 
-# 方法2: BF16 更简单 (不需要 loss scaling)
+# 方法2: BF16（不需要 loss scaling）
 with torch.amp.autocast('cuda', dtype=torch.bfloat16):
     loss = model(batch)
-loss.backward()   # 直接反向，不需要 scaler
+loss.backward()
 optimizer.step()
 
-# 方法3: HuggingFace Trainer 自动处理
+# 方法3: HuggingFace Trainer
 from transformers import Trainer, TrainingArguments
 
 args = TrainingArguments(
     output_dir='./output',
-    fp16=True,           # 使用 FP16
-    # bf16=True,         # 或使用 BF16 (A100/H100 推荐)
-    fp16_full_eval=True, # 评估也用 FP16
+    fp16=True,
+    fp16_full_eval=True,
 )
 trainer = Trainer(model=model, args=args)
 trainer.train()
 
-# 验证混合精度
 def check_mixed_precision(model):
-    """看参数精度：AMP 不转权重，转的是算子 —— autocast 只在每个算子内部把输入
-    临时降到 fp16/bf16，主权重始终是 fp32，所以这里打出来全是 torch.float32。
-    （autocast 里真正被留在 fp32 的是少数算子，如 softmax / layernorm / loss。）
-    真把权重变成 fp16/bf16 的是 model.half() / model.to(torch.bfloat16)，
-    那是另一条路线 —— 没有 fp32 主权重兜底，更容易掉点。"""
+    """看参数精度：打印每个参数的 dtype"""
     for name, param in model.named_parameters():
-        print(f"{name}: {param.dtype}")      # torch.float32，不是 fp16
+        print(f"{name}: {param.dtype}")
 ```
 
 ## 🎯 面试要点

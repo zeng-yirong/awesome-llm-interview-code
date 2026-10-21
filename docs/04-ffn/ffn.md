@@ -63,13 +63,11 @@ if __name__ == "__main__":
     x = torch.randn(B, S, D)
     ffn = FFN(D)
     out = ffn(x)
-    print(f"Input shape: {x.shape}")   # [2, 10, 512]
-    print(f"Output shape: {out.shape}") # [2, 10, 512]
+    print(f"Input shape: {x.shape}")
+    print(f"Output shape: {out.shape}")
     
-    # 统计参数量
     total_params = sum(p.numel() for p in ffn.parameters())
-    # 两个矩阵共 2·D·d_ff = 2×512×2048 ≈ 2.1M（再加偏置 2048+512）
-    print(f"FFN params: {total_params:,}")  # 2,099,712 ≈ 2.1M
+    print(f"FFN params: {total_params:,}")
 ```
 
 ## 🎯 面试要点

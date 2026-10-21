@@ -51,7 +51,6 @@ flowchart TD
 ```python
 import torch
 
-# 手动实现简单两层网络的反向传播
 class TwoLayerNet:
     def __init__(self, d_in, d_hidden, d_out):
         self.W1 = torch.randn(d_in, d_hidden) * 0.01
@@ -59,33 +58,26 @@ class TwoLayerNet:
 
     def forward(self, x):
         self.x = x
-        self.h = x @ self.W1              # 线性
-        self.a = torch.relu(self.h)        # 激活
-        self.y = self.a @ self.W2          # 输出
+        self.h = x @ self.W1
+        self.a = torch.relu(self.h)
+        self.y = self.a @ self.W2
         return self.y
 
     def backward(self, y_true, lr=0.01):
-        # Loss = MSE = mean((y - y_true)²)
-        dy = 2 * (self.y - y_true) / y_true.numel()  # ∂L/∂y
+        dy = 2 * (self.y - y_true) / y_true.numel()
 
-        # ∂L/∂W2 = aᵀ · dy
         dW2 = self.a.T @ dy
         da = dy @ self.W2.T
 
-        # ReLU 梯度
         dh = da * (self.h > 0).float()
 
-        # ∂L/∂W1 = xᵀ · dh
         dW1 = self.x.T @ dh
 
-        # 更新
         self.W1 -= lr * dW1
         self.W2 -= lr * dW2
 
-        # 把手算的梯度交出去：它有没有复现 autograd，是这一题唯一值得验的东西
         return dW1, dW2
 
-# 使用 PyTorch 自动求导
 class TwoLayerNetAuto:
     def __init__(self, d_in, d_hidden, d_out):
         self.W1 = torch.randn(d_in, d_hidden, requires_grad=True) * 0.01
@@ -100,7 +92,6 @@ class TwoLayerNetAuto:
 # 测试
 if __name__ == "__main__":
     torch.manual_seed(0)
-    # 手动反向传播
     net = TwoLayerNet(10, 20, 5)
     x = torch.randn(4, 10)
     y_true = torch.randn(4, 5)
@@ -116,9 +107,6 @@ if __name__ == "__main__":
     loss = ((y_pred - y_true) ** 2).mean()
     print(f"Loss after: {loss.item():.4f}  (lr=0.01 时一步只挪一点点)")
     
-    # 手写反向的意义就是复现 autograd：必须把两份梯度对一遍
-    # 注意要让两边是同一个函数 —— 手动那份已经被更新过了，所以 autograd 这侧
-    # 要装回更新前的权重，否则比的是两个不同的网络
     net_auto = TwoLayerNetAuto(10, 20, 5)
     with torch.no_grad():
         net_auto.W1.copy_(W1_before)

@@ -58,44 +58,30 @@ import torch.nn.functional as F
 
 def generalized_jsd(student_logits, teacher_logits, beta=1.0, temperature=1.0):
     """
-    广义 JSD 插值
-    beta = 0   → 前向 KL  KL(p_T ‖ p_S)   (mode-covering)
-    beta = 1   → 反向 KL  KL(p_S ‖ p_T)   (mode-seeking)
-    beta = 0.5 → 标准 JSD
     student_logits, teacher_logits: [B, T, V]，未归一化的 logits
     返回逐 token 散度 [B, T]
     """
-    # 1. 温度缩放 + log_softmax（数值稳定）
     s_logp = F.log_softmax(student_logits / temperature, dim=-1)
     t_logp = F.log_softmax(teacher_logits / temperature, dim=-1)
     s_p = s_logp.exp()
     t_p = t_logp.exp()
 
-    # 2. 混合分布 M = beta * p_T + (1 - beta) * p_S
-    #    clamp_min 只是防止 log(0)，V 个 token 上概率不会真的到 0
     m_logp = (beta * t_p + (1 - beta) * s_p).clamp_min(1e-8).log()
 
-    # 3. KL(p_T ‖ M) 与 KL(p_S ‖ M)，在词表维度求和
-    kl_t = (t_p * (t_logp - m_logp)).sum(dim=-1)     # [B, T]
-    kl_s = (s_p * (s_logp - m_logp)).sum(dim=-1)     # [B, T]
+    kl_t = (t_p * (t_logp - m_logp)).sum(dim=-1)
+    kl_s = (s_p * (s_logp - m_logp)).sum(dim=-1)
 
-    return (1 - beta) * kl_t + beta * kl_s           # [B, T]
+    return (1 - beta) * kl_t + beta * kl_s
 
 
 def opd_loss(student_logits, teacher_logits, loss_mask=None,
              beta=1.0, temperature=1.0, top_k=0):
     """
-    在线策略蒸馏损失
     loss_mask: [B, T]，1 = 学生在该位置真实采样出的 token
-    top_k:     >0 时只保留教师概率最高的 k 个 token
-               （黑盒教师只吐 top-k logits 时用，其余位置截断）
     """
-    # 教师永远不参与反传，否则「教师」会被同一步更新带跑
     teacher_logits = teacher_logits.detach()
 
     if top_k > 0:
-        # 教师只给 top-k: 其余位置截断到一个很大的负数
-        # 用 -1e9 而不是 -inf，避免 0 * inf 产生 nan
         kth = teacher_logits.topk(top_k, dim=-1).values[..., -1:]
         teacher_logits = teacher_logits.masked_fill(teacher_logits < kth, -1e9)
 
@@ -113,10 +99,8 @@ if __name__ == "__main__":
     student = torch.randn(B, T, V)
     teacher = torch.randn(B, T, V)
 
-    # 端点自检: beta=0 应等于前向 KL, beta=1 应等于反向 KL
     s_logp = F.log_softmax(student, dim=-1)
     t_logp = F.log_softmax(teacher, dim=-1)
-    # F.kl_div(input, target, log_target=True) = KL(target ‖ input)
     fwd = F.kl_div(s_logp, t_logp, log_target=True, reduction='none').sum(-1)
     rev = F.kl_div(t_logp, s_logp, log_target=True, reduction='none').sum(-1)
 
@@ -126,7 +110,6 @@ if __name__ == "__main__":
     print("  反向KL:", rev.mean().item())
     print("beta=0.5:", generalized_jsd(student, teacher, beta=0.5).mean().item(), "(标准 JSD)")
 
-    # top-k 教师 + mask
     mask = torch.ones(B, T)
     mask[:, -1] = 0
     print("top_k=3:", opd_loss(student, teacher, mask, beta=1.0, top_k=3).item())

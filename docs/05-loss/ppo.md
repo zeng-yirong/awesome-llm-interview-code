@@ -57,25 +57,22 @@ import torch
 
 def ppo_loss(old_logp, new_logp, advantages, eps=0.2):
     """
-    PPO 截断损失
-    
     old_logp, new_logp: [B]  对数概率
     advantages: [B]  优势估计 (GAE)
     """
-    ratio = torch.exp(new_logp - old_logp)           # r_t
-    clipped = torch.clamp(ratio, 1-eps, 1+eps)       # clip(r_t)
+    ratio = torch.exp(new_logp - old_logp)
+    clipped = torch.clamp(ratio, 1-eps, 1+eps)
 
-    surr1 = ratio * advantages                        # 未截断
-    surr2 = clipped * advantages                      # 截断
+    surr1 = ratio * advantages
+    surr2 = clipped * advantages
 
-    return -torch.min(surr1, surr2).mean()            # 保守更新
+    return -torch.min(surr1, surr2).mean()
 
 def kl_penalty(logp, ref_logp):
-    """KL(π_θ‖π_ref) 的 Schulman 估计器（与 GRPO 一题用的是同一个，恒非负、方差低）"""
+    """KL(π_θ‖π_ref) 的 Schulman 估计器（与 GRPO 一题用的是同一个）"""
     ratio = torch.exp(ref_logp - logp)
     return (ratio - (ref_logp - logp) - 1).mean()
 
-# 完整 PPO 训练流程
 class PPOTrainer:
     def __init__(self, policy_model, ref_model, reward_model, critic_model,
                  optimizer, ppo_epochs=4, kl_coef=0.02):
@@ -88,37 +85,21 @@ class PPOTrainer:
         self.kl_coef = kl_coef
     
     def train_step(self, prompts, responses):
-        # 1~3 步算出来的都是「只当基准的常量」：reward / value / advantage / old_logp
-        # 在下面 4 个 epoch 里会被反复用到，必须在 no_grad 下算 —— 否则第二次
-        # backward 要去访问第一次已经释放的图，直接报错；梯度还会往冻结的模型上累
         with torch.no_grad():
-            # 1. 计算 reward（奖励模型是冻结的，输出只当常量用）
             rewards = self.reward(prompts, responses)
 
-            # 2. 计算 value 和 advantage：用更新前的 critic，算完就是常量
-            #    （critic 自己的 value loss 要另走一次带梯度的前向，不能复用这里）
-            #    compute_gae 返回的是 (advantages, returns) 二元组，必须解包 ——
-            #    只接一个变量的话 advantages 拿到的是整个 tuple，后面 ratio * advantages 会报类型错
             values = self.critic(prompts, responses)
-            advantages, returns = compute_gae(rewards, values)   # returns 用来算 critic 的 value loss，这里省略
+            advantages, returns = compute_gae(rewards, values)
 
-            # 3. 计算 old log probs：更新前算，它是比值的基准常量，
-            #    若和 new_logp 一样由当前策略现算，ratio 恒等于 1、梯度就没了
             old_logp = self.policy.get_logprobs(prompts, responses)
 
-            # 参考模型的 logp 与策略无关、全程不变：算一次就够，
-            # 更不能带梯度 —— 每个 epoch 重建一遍图纯属浪费
             ref_logp = self.ref.get_logprobs(prompts, responses)
 
-        # 4. PPO 更新
         for _ in range(self.ppo_epochs):
             new_logp = self.policy.get_logprobs(prompts, responses)
             loss = ppo_loss(old_logp, new_logp, advantages)
 
-            # KL penalty (防止偏离参考模型太远)
-            # 用上面那个 k3 估计器，与 GRPO 一题保持一致。
-            # 原来直接写的 (new_logp - ref_logp).mean() 是 k1：期望上也是 KL，
-            # 但能取到负值、方差大；k3 恒非负、低方差，代价是多一次 exp
+            # 与 GRPO 一题保持一致
             kl = kl_penalty(new_logp, ref_logp)
             loss += self.kl_coef * kl
 
