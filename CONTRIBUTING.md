@@ -197,7 +197,7 @@ npm run dev          # http://localhost:3000
 
 ### Python 片段体检
 
-`npm run check:code` 用 Python 标准库的 `ast` 扫题库 36 段 + 文档 36 段，查三类问题：
+`npm run check:code` 用 Python 标准库的 `ast` 扫题库 37 段 + 文档 37 段，查三类问题：
 
 | 问题 | 例子 |
 |---|---|

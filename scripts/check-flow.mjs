@@ -81,6 +81,7 @@ const DOC_OF = {
   'loss-dapo': 'docs/05-loss/dapo.md',
   'loss-opd': 'docs/05-loss/opd.md',
   'loss-self-opd': 'docs/05-loss/self-opd.md',
+  'loss-mopd': 'docs/05-loss/mopd.md',
   'opt-adamw': 'docs/06-optimizer/adamw.md',
   'opt-muon': 'docs/06-optimizer/muon.md',
   'peft-lora': 'docs/08-peft/lora.md',

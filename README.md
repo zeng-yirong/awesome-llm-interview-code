@@ -1,13 +1,13 @@
 # 🧠 Hand-torn Code for LLM Interviews
 
-> **大模型面试手撕代码大全** — 36 道高频题目 · 13 个核心分类 · 双主题支持
+> **大模型面试手撕代码大全** — 37 道高频题目 · 13 个核心分类 · 双主题支持
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Stars](https://img.shields.io/github/stars/zeng-yirong/awesome-llm-interview-code?style=social)](https://github.com/zeng-yirong/awesome-llm-interview-code)
 
 ## ✨ 特性亮点
 
-- 📚 **36 道高频题** — 覆盖 Attention、Normalization、FFN、Loss、PEFT 等核心主题
+- 📚 **37 道高频题** — 覆盖 Attention、Normalization、FFN、Loss、PEFT 等核心主题
 - 🎨 **双主题** — 白天/黑夜模式一键切换，自动跟随系统偏好
 - 🔍 **智能搜索** — 支持搜索题目、原理、公式、要点
 - 🏷️ **多维筛选** — 按分类、热度、难度筛选，快速定位
@@ -116,7 +116,7 @@
       <td align="center">⭐⭐⭐⭐</td>
     </tr>
     <tr>
-      <td rowspan="8" align="left">📉 Loss</td>
+      <td rowspan="9" align="left">📉 Loss</td>
       <td align="center">14</td>
       <td align="left"><a href="./docs/05-loss/cross-entropy.md">交叉熵 / LM Loss</a></td>
       <td align="center">🔥🔥🔥🔥</td>
@@ -165,99 +165,105 @@
       <td align="center">⭐⭐⭐⭐</td>
     </tr>
     <tr>
-      <td rowspan="2" align="left">⚙️ Optimizer</td>
       <td align="center">22</td>
+      <td align="left"><a href="./docs/05-loss/mopd.md">多教师在线策略蒸馏 MOPD</a></td>
+      <td align="center">🔥🔥🔥</td>
+      <td align="center">⭐⭐⭐⭐</td>
+    </tr>
+    <tr>
+      <td rowspan="2" align="left">⚙️ Optimizer</td>
+      <td align="center">23</td>
       <td align="left"><a href="./docs/06-optimizer/adamw.md">AdamW 优化器</a></td>
       <td align="center">🔥🔥</td>
       <td align="center">⭐⭐⭐</td>
     </tr>
     <tr>
-      <td align="center">23</td>
+      <td align="center">24</td>
       <td align="left"><a href="./docs/06-optimizer/muon.md">Muon 优化器</a></td>
       <td align="center">🔥🔥</td>
       <td align="center">⭐⭐⭐⭐</td>
     </tr>
     <tr>
       <td rowspan="1" align="left">🎮 RL</td>
-      <td align="center">24</td>
+      <td align="center">25</td>
       <td align="left"><a href="./docs/07-rl/gae.md">广义优势估计 GAE</a></td>
       <td align="center">🔥🔥🔥</td>
       <td align="center">⭐⭐⭐⭐</td>
     </tr>
     <tr>
       <td rowspan="1" align="left">🎯 PEFT</td>
-      <td align="center">25</td>
+      <td align="center">26</td>
       <td align="left"><a href="./docs/08-peft/lora.md">LoRA</a></td>
       <td align="center">🔥🔥🔥🔥</td>
       <td align="center">⭐⭐⭐</td>
     </tr>
     <tr>
       <td rowspan="3" align="left">💾 Efficient</td>
-      <td align="center">26</td>
+      <td align="center">27</td>
       <td align="left"><a href="./docs/09-efficient/mixed-precision.md">混合精度训练</a></td>
       <td align="center">🔥🔥</td>
       <td align="center">⭐⭐⭐</td>
     </tr>
     <tr>
-      <td align="center">27</td>
+      <td align="center">28</td>
       <td align="left"><a href="./docs/09-efficient/gradient-checkpointing.md">梯度检查点</a></td>
       <td align="center">🔥🔥</td>
       <td align="center">⭐⭐⭐</td>
     </tr>
     <tr>
-      <td align="center">28</td>
+      <td align="center">29</td>
       <td align="left"><a href="./docs/09-efficient/fp8-blockwise.md">FP8 分块量化训练</a></td>
       <td align="center">🔥🔥🔥</td>
       <td align="center">⭐⭐⭐</td>
     </tr>
     <tr>
       <td rowspan="3" align="left">⚡ Inference</td>
-      <td align="center">29</td>
+      <td align="center">30</td>
       <td align="left"><a href="./docs/01-attention/kv-cache.md">KV Cache</a></td>
       <td align="center">🔥🔥🔥</td>
       <td align="center">⭐⭐⭐</td>
     </tr>
     <tr>
-      <td align="center">30</td>
+      <td align="center">31</td>
       <td align="left"><a href="./docs/10-inference/paged-attention.md">分页注意力 PagedAttention</a></td>
       <td align="center">🔥🔥</td>
       <td align="center">⭐⭐⭐⭐</td>
     </tr>
     <tr>
-      <td align="center">31</td>
+      <td align="center">32</td>
       <td align="left"><a href="./docs/10-inference/speculative-decoding.md">投机解码</a></td>
       <td align="center">🔥🔥🔥</td>
       <td align="center">⭐⭐⭐⭐</td>
     </tr>
     <tr>
       <td rowspan="1" align="left">🎲 Sampling</td>
-      <td align="center">32</td>
+      <td align="center">33</td>
       <td align="left"><a href="./docs/11-sampling/sampling.md">采样策略</a></td>
       <td align="center">🔥🔥🔥</td>
       <td align="center">⭐⭐</td>
     </tr>
     <tr>
       <td rowspan="2" align="left">🏗️ Architecture</td>
-      <td align="center">33</td>
+      <td align="center">34</td>
       <td align="left"><a href="./docs/12-architecture/decoder-only.md">Decoder-Only 架构</a></td>
       <td align="center">🔥🔥🔥🔥</td>
       <td align="center">⭐⭐⭐</td>
     </tr>
     <tr>
-      <td align="center">34</td>
+      <td align="center">35</td>
       <td align="left"><a href="./docs/12-architecture/mtp.md">多 Token 预测 MTP</a></td>
       <td align="center">🔥🔥</td>
       <td align="center">⭐⭐⭐⭐</td>
     </tr>
     <tr>
       <td rowspan="2" align="left">📖 Basics</td>
-      <td align="center">35</td>
+      <td align="center">36</td>
       <td align="left"><a href="./docs/13-basics/backprop.md">梯度与反向传播</a></td>
       <td align="center">🔥🔥</td>
       <td align="center">⭐⭐</td>
     </tr>
     <tr>
-      <td align="center">36</td>
+      <td align="center">37</td>
       <td align="left"><a href="./docs/13-basics/activation.md">激活函数</a></td>
       <td align="center">🔥🔥</td>
       <td align="center">⭐</td>
@@ -271,12 +277,12 @@
 
 ```
 awesome-llm-interview-code/
-├── docs/                  # 📚 题目文档（36 题）
+├── docs/                  # 📚 题目文档（37 题）
 │   ├── 01-attention/      # 👁️ 注意力机制（7 题）
 │   ├── 02-normalization/  # 📏 归一化层（2 题）
 │   ├── 03-position/       # 📍 位置编码（1 题）
 │   ├── 04-ffn/            # 🔗 前馈网络（3 题）
-│   ├── 05-loss/           # 📉 损失函数（8 题）
+│   ├── 05-loss/           # 📉 损失函数（9 题）
 │   ├── 06-optimizer/      # ⚙️ 优化器（2 题）
 │   ├── 07-rl/             # 🎮 强化学习（1 题）
 │   ├── 08-peft/           # 🎯 参数高效微调（1 题）

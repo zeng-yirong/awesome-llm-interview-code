@@ -1,5 +1,5 @@
 /**
- * 把 docs/ 下的 36 篇题解排版成一本可打印的 PDF。
+ * 把 docs/ 下的 37 篇题解排版成一本可打印的 PDF。
  *
  *   node scripts/build-pdf.mjs [--out <dir>] [--keep] [--no-pdf]
  *
